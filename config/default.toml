@@ -1,0 +1,75 @@
+# Default configuration for day trading platform
+# DO NOT store API keys here - use environment variables or OS keychain
+
+[app]
+name = "DayTrader"
+version = "0.1.0"
+environment = "development"  # development, paper, production
+
+[broker]
+provider = "alpaca"
+is_paper = true
+base_url = "https://paper-api.alpaca.markets"
+ws_url = "wss://stream.data.alpaca.markets/v2/iex"
+
+[database]
+path = "data/db/daytrader.db"
+max_connections = 10
+enable_wal = true
+
+[logging]
+level = "info"  # trace, debug, info, warn, error
+file_path = "data/logs/daytrader.log"
+max_file_size_mb = 100
+max_files = 10
+
+[risk]
+# Daily loss limits
+max_daily_loss_dollars = 500.00
+max_daily_loss_percent = 2.00
+halt_trading_on_limit = true
+
+# Position sizing
+max_position_size_dollars = 5000.00
+max_position_size_percent = 10.00
+max_concurrent_positions = 5
+
+# PDT protection
+enforce_pdt_rule = true
+pdt_min_equity = 25000.00
+max_day_trades_under_pdt = 3
+
+# Pattern-specific rules
+max_trades_per_pattern_per_day = 5
+stop_pattern_after_consecutive_losses = 3
+required_win_rate_for_auto = 60.00
+min_pattern_sample_size = 20
+
+# Account safeguards
+min_account_balance = 1000.00
+emergency_liquidate_threshold = 500.00
+
+[patterns]
+enabled = [
+    "hammer",
+    "shooting_star",
+    "doji",
+    "bullish_engulfing",
+    "bearish_engulfing"
+]
+
+[indicators]
+sma_periods = [20, 50]
+ema_periods = [12, 26]
+rsi_period = 14
+macd_fast = 12
+macd_slow = 26
+macd_signal = 9
+
+[performance]
+max_symbols_tracked = 50
+candle_cache_size = 100  # Per symbol
+pattern_detection_workers = 4
+websocket_reconnect_max_attempts = 10
+websocket_reconnect_delay_ms = 1000
+order_timeout_seconds = 30

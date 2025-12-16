@@ -1,0 +1,60 @@
+# Rust
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+data/logs/
+
+# Configuration (contains API keys)
+config/local.toml
+config/production.toml
+.env
+.env.local
+
+# Data directory (except default config)
+data/
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Test artifacts
+/coverage/
+*.profraw
+*.profdata
+
+# Benchmarks
+/target/criterion/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Node (for future Tauri frontend)
+node_modules/
+dist/
+dist-ssr/
+*.local
