@@ -1,9 +1,9 @@
-//! Pattern detection engine
-//! 
-//! This module implements pattern detection algorithms including:
-//! - Opening Range Breakout (ORB)
-//! - VWAP Bounce
-//! - Bull Flag
-//! - Moving Average Crossover
+//! Pattern recognition and signal generation
+//!
+//! This module will implement (Phase 3):
+//! - Candlestick pattern detection
+//! - Technical indicator calculations
+//! - Signal generation
+//! - Pattern performance tracking
 
-// TODO: Implement pattern detection traits and algorithms in Phase 1
+// Placeholder for Phase 3 implementation

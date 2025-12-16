@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  daytrader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: daytrader
+    environment:
+      - RUST_LOG=info
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    networks:
+      - trading_network
+
+networks:
+  trading_network:
+    driver: bridge

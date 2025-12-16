@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 use rust_decimal::Decimal;
+use crate::brokers::types::{PatternName, Reason};
 
 /// Application result type
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -61,7 +62,7 @@ pub enum BrokerError {
     #[error("Order rejected: {reason}")]
     OrderRejected {
         /// Rejection reason
-        reason: String
+        reason: Reason
     },
     
     /// Insufficient funds
@@ -125,7 +126,7 @@ pub enum RiskError {
     #[error("Pattern disabled: {pattern}")]
     PatternDisabled {
         /// Pattern name
-        pattern: String
+        pattern: PatternName
     },
     
     /// Account below minimum balance

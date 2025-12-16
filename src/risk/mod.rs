@@ -1,9 +1,10 @@
 //! Risk management system
-//! 
-//! This module enforces risk controls including:
-//! - Daily loss limits
-//! - Position sizing
-//! - PDT rule compliance
-//! - Pattern-specific risk parameters
+//!
+//! This module will implement (Phase 2):
+//! - Daily loss tracking
+//! - Position size validation
+//! - PDT rule enforcement
+//! - Pattern-specific limits
+//! - Account safeguards
 
-// TODO: Implement risk management engine in Phase 1
+// Placeholder for Phase 2 implementation

@@ -1,5 +1,5 @@
-//! Utility modules
-//! 
-//! Common utilities used across the application.
+//! Utility functions and helpers
 
 pub mod errors;
+
+pub use errors::{AppError, Result};

@@ -1,5 +1,9 @@
 //! Order execution engine
-//! 
-//! This module handles order creation, submission, tracking, and position management.
+//!
+//! This module will implement (Phase 4):
+//! - Order placement workflow
+//! - Position tracking
+//! - Trade recording
+//! - Fill notifications
 
-// TODO: Implement execution engine in Phase 1
+// Placeholder for Phase 4 implementation

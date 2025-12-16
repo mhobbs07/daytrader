@@ -1,6 +1,10 @@
-//! Database layer
-//! 
-//! This module provides database access for trade history, pattern occurrences,
-//! and performance metrics using SQLite.
+//! Database operations and schema management
+//!
+//! This module will contain:
+//! - Database connection management
+//! - Schema migrations
+//! - Query builders
+//! - Repository patterns for data access
 
-// TODO: Implement database schema and access layer in Phase 1
+// Placeholder for future database implementation
+// Currently using storage in src/data/storage.rs

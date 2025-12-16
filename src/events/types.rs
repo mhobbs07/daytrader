@@ -1,0 +1,479 @@
+//! Event types for the event bus system
+//!
+//! This module defines all event types used for real-time communication between
+//! components. Events are immutable and use Arc for zero-copy distribution of
+//! large data structures.
+//!
+//! # Design Principles
+//!
+//! - **Immutable**: Events cannot be modified after creation
+//! - **Zero-copy**: Use `Arc<T>` for large data to avoid cloning overhead
+//! - **Type-safe**: Strongly-typed enums prevent invalid events
+//! - **Cloneable**: All events must implement `Clone` for broadcast channels
+//!
+//! # Examples
+//!
+//! ```
+//! use daytrader::events::types::{MarketEvent, SignalType, PatternSignal};
+//! use daytrader::brokers::types::{Symbol, Price, Confidence};
+//! use rust_decimal::Decimal;
+//! use chrono::Utc;
+//!
+//! let symbol = Symbol::new("AAPL").unwrap();
+//! let price = Price::new(Decimal::new(15000, 2)).unwrap();
+//! let confidence = Confidence::new(0.85).unwrap();
+//!
+//! let signal = PatternSignal {
+//!     symbol: symbol.clone(),
+//!     pattern_name: PatternName::new("Hammer"),
+//!     signal_type: SignalType::Buy,
+//!     confidence,
+//!     detected_at: Utc::now(),
+//!     price,
+//! };
+//!
+//! let event = MarketEvent::PatternDetected { signal };
+//! ```
+
+use crate::brokers::types::{
+    BrokerProvider, Confidence, Message, OrderId, PatternName, Price, Quantity, Reason, Symbol,
+};
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+/// Market event enum containing all possible events in the system
+///
+/// This is the primary event type distributed through the event bus.
+/// Events are grouped by category for clarity and maintainability.
+///
+/// # Performance Notes
+///
+/// - Large structures (Candle, Order) use `Arc<T>` for zero-copy cloning
+/// - Small structures (Symbol, OrderId) are owned for simplicity
+/// - All variants must be `Clone` for broadcast channel distribution
+#[derive(Clone, Debug)]
+pub enum MarketEvent {
+    // ========================================
+    // Market Data Events
+    // ========================================
+    /// New candlestick data received
+    ///
+    /// Published when a new candle is received from the market data feed.
+    /// Uses Arc to avoid cloning large candle data.
+    NewCandle {
+        symbol: Symbol,
+        candle: Arc<Candle>,
+    },
+
+    /// Quote (bid/ask) update received
+    ///
+    /// Published for real-time quote updates. Quote data is small enough
+    /// to be owned rather than wrapped in Arc.
+    QuoteUpdate { symbol: Symbol, quote: Quote },
+
+    // ========================================
+    // Pattern Detection Events
+    // ========================================
+    /// Pattern detected in market data
+    ///
+    /// Published when a candlestick pattern or technical indicator signal
+    /// is detected. Contains all information needed for trading decisions.
+    PatternDetected { signal: PatternSignal },
+
+    // ========================================
+    // Order Events
+    // ========================================
+    /// Order successfully placed with broker
+    ///
+    /// Published after order submission is confirmed by the broker.
+    /// Uses Arc to avoid cloning order data.
+    OrderPlaced { order: Arc<Order> },
+
+    /// Order filled (partially or completely)
+    ///
+    /// Published when an order execution is reported by the broker.
+    OrderFilled { order_id: OrderId, fill: Fill },
+
+    /// Order cancelled
+    ///
+    /// Published when an order is successfully cancelled.
+    OrderCancelled { order_id: OrderId, reason: Reason },
+
+    /// Order rejected by broker
+    ///
+    /// Published when the broker rejects an order submission.
+    OrderRejected { order_id: OrderId, reason: Reason },
+
+    // ========================================
+    // Position Events
+    // ========================================
+    /// New position opened
+    ///
+    /// Published when a new position is established.
+    PositionOpened { position: Position },
+
+    /// Existing position updated
+    ///
+    /// Published when a position is modified (e.g., partial fill, P&L update).
+    PositionUpdated { position: Position },
+
+    /// Position closed
+    ///
+    /// Published when a position is fully closed.
+    PositionClosed {
+        symbol: Symbol,
+        realized_pl: Decimal,
+    },
+
+    // ========================================
+    // Risk Management Events
+    // ========================================
+    /// Risk rule violated
+    ///
+    /// Published when a risk management rule is violated (e.g., daily loss limit).
+    RiskViolation { violation: RiskViolation },
+
+    /// Risk warning (not a violation)
+    ///
+    /// Published for risk warnings that don't block trading but require attention.
+    RiskWarning { warning: Message },
+
+    // ========================================
+    // System Events
+    // ========================================
+    /// Connection to broker/data provider established
+    ///
+    /// Published when a connection is successfully established.
+    ConnectionEstablished { provider: BrokerProvider },
+
+    /// Connection to broker/data provider lost
+    ///
+    /// Published when a connection is lost or disconnected.
+    ConnectionLost {
+        provider: BrokerProvider,
+        reason: Reason,
+    },
+
+    /// Trading halted by system or user
+    ///
+    /// Published when trading is halted (e.g., emergency stop, risk violation).
+    TradingHalted { reason: Reason },
+
+    /// Trading resumed after halt
+    ///
+    /// Published when trading is resumed after a halt.
+    TradingResumed,
+}
+
+// ============================================================================
+// Helper Types
+// ============================================================================
+
+/// Candlestick data structure
+///
+/// Represents OHLCV data for a specific time period.
+///
+/// # Examples
+///
+/// ```
+/// use daytrader::events::types::Candle;
+/// use daytrader::brokers::types::Price;
+/// use rust_decimal::Decimal;
+/// use chrono::Utc;
+///
+/// let candle = Candle {
+///     timestamp: Utc::now(),
+///     open: Price::new(Decimal::new(15000, 2)).unwrap(),
+///     high: Price::new(Decimal::new(15100, 2)).unwrap(),
+///     low: Price::new(Decimal::new(14900, 2)).unwrap(),
+///     close: Price::new(Decimal::new(15050, 2)).unwrap(),
+///     volume: 1_000_000,
+/// };
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Candle {
+    pub symbol: Symbol,
+    pub timestamp: DateTime<Utc>,
+    pub open: Price,
+    pub high: Price,
+    pub low: Price,
+    pub close: Price,
+    pub volume: u64,
+}
+
+impl Candle {
+    /// Returns true if this is a bullish candle (close > open)
+    #[inline]
+    pub fn is_bullish(&self) -> bool {
+        self.close > self.open
+    }
+
+    /// Returns true if this is a bearish candle (close < open)
+    #[inline]
+    pub fn is_bearish(&self) -> bool {
+        self.close < self.open
+    }
+
+    /// Returns the body size (absolute difference between open and close)
+    #[inline]
+    pub fn body_size(&self) -> Decimal {
+        (self.close.value() - self.open.value()).abs()
+    }
+
+    /// Returns the total range (high - low)
+    #[inline]
+    pub fn range(&self) -> Decimal {
+        self.high.value() - self.low.value()
+    }
+}
+
+/// Quote data (bid/ask prices)
+///
+/// Represents real-time bid/ask quotes from the market.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Quote {
+    pub timestamp: DateTime<Utc>,
+    pub bid: Price,
+    pub ask: Price,
+    pub bid_size: Quantity,
+    pub ask_size: Quantity,
+}
+
+impl Quote {
+    /// Returns the spread (ask - bid)
+    #[inline]
+    pub fn spread(&self) -> Decimal {
+        self.ask.value() - self.bid.value()
+    }
+
+    /// Returns the mid price ((bid + ask) / 2)
+    #[inline]
+    pub fn mid_price(&self) -> Decimal {
+        (self.bid.value() + self.ask.value()) / Decimal::TWO
+    }
+}
+
+/// Pattern signal generated by pattern detection
+///
+/// Contains all information about a detected pattern including
+/// confidence score and timing information.
+///
+/// # Examples
+///
+/// ```
+/// use daytrader::events::types::{PatternSignal, SignalType};
+/// use daytrader::brokers::types::{Symbol, Price, Confidence};
+/// use rust_decimal::Decimal;
+/// use chrono::Utc;
+///
+/// let signal = PatternSignal {
+///     symbol: Symbol::new("AAPL").unwrap(),
+///     pattern_name: PatternName::new("Hammer"),
+///     signal_type: SignalType::Buy,
+///     confidence: Confidence::new(0.85).unwrap(),
+///     detected_at: Utc::now(),
+///     price: Price::new(Decimal::new(15000, 2)).unwrap(),
+/// };
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PatternSignal {
+    pub symbol: Symbol,
+    pub pattern_name: PatternName,
+    pub signal_type: SignalType,
+    pub confidence: Confidence,
+    pub detected_at: DateTime<Utc>,
+    pub price: Price,
+}
+
+/// Signal type (buy or sell)
+///
+/// Indicates the trading direction suggested by a pattern.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignalType {
+    /// Bullish signal suggesting a buy
+    Buy,
+    /// Bearish signal suggesting a sell
+    Sell,
+}
+
+/// Order structure
+///
+/// Represents a trading order with all necessary information.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Order {
+    pub id: OrderId,
+    pub symbol: Symbol,
+    pub side: OrderSide,
+    pub order_type: OrderType,
+    pub quantity: Quantity,
+    pub price: Option<Price>,
+    pub status: OrderStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Order side (buy or sell)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+/// Order type
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderType {
+    Market,
+    Limit,
+}
+
+/// Order status
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderStatus {
+    Pending,
+    Submitted,
+    PartiallyFilled,
+    Filled,
+    Cancelled,
+    Rejected,
+}
+
+/// Order fill information
+///
+/// Contains details about an order execution.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Fill {
+    pub order_id: OrderId,
+    pub filled_quantity: Quantity,
+    pub filled_price: Price,
+    pub filled_at: DateTime<Utc>,
+    pub commission: Decimal,
+}
+
+/// Position information
+///
+/// Represents an open position in a security.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Position {
+    pub symbol: Symbol,
+    pub quantity: Quantity,
+    pub average_entry_price: Price,
+    pub current_price: Price,
+    pub unrealized_pl: Decimal,
+    pub realized_pl: Decimal,
+    pub opened_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Position {
+    /// Returns the total position value at current price
+    #[inline]
+    pub fn market_value(&self) -> Decimal {
+        self.current_price.value() * Decimal::from(self.quantity.value())
+    }
+
+    /// Returns the total cost basis
+    #[inline]
+    pub fn cost_basis(&self) -> Decimal {
+        self.average_entry_price.value() * Decimal::from(self.quantity.value())
+    }
+}
+
+/// Risk violation information
+///
+/// Contains details about a risk management rule violation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RiskViolation {
+    pub violation_type: RiskViolationType,
+    pub message: Message,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Types of risk violations
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RiskViolationType {
+    DailyLossLimit,
+    PositionSizeLimit,
+    PdtLimit,
+    PatternDisabled,
+    InsufficientFunds,
+    Other,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn test_candle_bullish_bearish() {
+        let bullish_candle = Candle {
+            symbol: Symbol::new("AAPL").unwrap(),
+            timestamp: Utc::now(),
+            open: Price::new(Decimal::new(100, 0)).unwrap(),
+            high: Price::new(Decimal::new(110, 0)).unwrap(),
+            low: Price::new(Decimal::new(95, 0)).unwrap(),
+            close: Price::new(Decimal::new(105, 0)).unwrap(),
+            volume: 1000,
+        };
+
+        assert!(bullish_candle.is_bullish());
+        assert!(!bullish_candle.is_bearish());
+        assert_eq!(bullish_candle.body_size(), Decimal::new(5, 0));
+        assert_eq!(bullish_candle.range(), Decimal::new(15, 0));
+    }
+
+    #[test]
+    fn test_quote_calculations() {
+        let quote = Quote {
+            timestamp: Utc::now(),
+            bid: Price::new(Decimal::new(10000, 2)).unwrap(),
+            ask: Price::new(Decimal::new(10010, 2)).unwrap(),
+            bid_size: Quantity::new(100).unwrap(),
+            ask_size: Quantity::new(200).unwrap(),
+        };
+
+        assert_eq!(quote.spread(), Decimal::new(10, 2));
+        assert_eq!(quote.mid_price(), Decimal::new(10005, 2));
+    }
+
+    #[test]
+    fn test_position_calculations() {
+        let position = Position {
+            symbol: Symbol::new("AAPL").unwrap(),
+            quantity: Quantity::new(100).unwrap(),
+            average_entry_price: Price::new(Decimal::new(15000, 2)).unwrap(),
+            current_price: Price::new(Decimal::new(15500, 2)).unwrap(),
+            unrealized_pl: Decimal::new(500, 0),
+            realized_pl: Decimal::ZERO,
+            opened_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        assert_eq!(position.market_value(), Decimal::new(15500, 0));
+        assert_eq!(position.cost_basis(), Decimal::new(15000, 0));
+    }
+
+    #[test]
+    fn test_market_event_clone() {
+        let symbol = Symbol::new("AAPL").unwrap();
+        let candle = Arc::new(Candle {
+            symbol: symbol.clone(),
+            timestamp: Utc::now(),
+            open: Price::new(Decimal::new(100, 0)).unwrap(),
+            high: Price::new(Decimal::new(110, 0)).unwrap(),
+            low: Price::new(Decimal::new(95, 0)).unwrap(),
+            close: Price::new(Decimal::new(105, 0)).unwrap(),
+            volume: 1000,
+        });
+
+        let event = MarketEvent::NewCandle {
+            symbol: symbol.clone(),
+            candle: candle.clone(),
+        };
+
+        // Should be cloneable (required for broadcast channel)
+        let _cloned = event.clone();
+    }
+}

@@ -1,0 +1,10 @@
+target/
+.git/
+.gitignore
+*.md
+docs/
+examples/
+scripts/
+.env
+data/
+*.log

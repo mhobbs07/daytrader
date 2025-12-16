@@ -21,5 +21,5 @@ pub mod patterns;
 pub mod risk;
 pub mod utils;
 
-pub use config::Settings;
-pub use utils::errors::Result;
+pub use config::AppConfig;
+pub use utils::{AppError, Result};
