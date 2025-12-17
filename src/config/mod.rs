@@ -48,8 +48,30 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskConfig {
+    // Daily loss limits
     pub max_daily_loss_dollars: f64,
+    pub max_daily_loss_percent: f64,
+    pub halt_trading_on_limit: bool,
+
+    // Position sizing
     pub max_position_size_dollars: f64,
+    pub max_position_size_percent: f64,
+    pub max_concurrent_positions: u32,
+
+    // PDT protection
+    pub enforce_pdt_rule: bool,
+    pub pdt_min_equity: f64,
+    pub max_day_trades_under_pdt: u32,
+
+    // Pattern-specific rules
+    pub max_trades_per_pattern_per_day: u32,
+    pub stop_pattern_after_consecutive_losses: u32,
+    pub required_win_rate_for_auto: f64,
+    pub min_pattern_sample_size: u32,
+
+    // Account safeguards
+    pub min_account_balance: f64,
+    pub emergency_liquidate_threshold: f64,
 }
 
 impl AppConfig {

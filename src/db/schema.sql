@@ -128,6 +128,10 @@ CREATE TABLE IF NOT EXISTS pattern_stats (
     avg_profit_per_trade REAL DEFAULT 0.0,
     consecutive_losses INTEGER DEFAULT 0,
     is_enabled BOOLEAN DEFAULT TRUE,
+    max_trades_per_day INTEGER DEFAULT 5,
+    stop_after_consecutive_losses INTEGER DEFAULT 3,
+    required_win_rate REAL DEFAULT 60.0,
+    min_sample_size INTEGER DEFAULT 20,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -146,11 +150,58 @@ CREATE TABLE IF NOT EXISTS daily_risk_metrics (
     largest_loss REAL DEFAULT 0.0,
     is_trading_halted BOOLEAN DEFAULT FALSE,
     halt_reason TEXT,
+    max_loss_limit_dollars REAL,
+    max_loss_limit_percent REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     UNIQUE(account_id, trading_date)
 );
 
 CREATE INDEX IF NOT EXISTS idx_risk_metrics_date ON daily_risk_metrics(trading_date DESC);
+
+-- Position Risk Tracking
+CREATE TABLE IF NOT EXISTS position_risk_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    position_size REAL NOT NULL,
+    market_value REAL NOT NULL,
+    portfolio_allocation_percent REAL NOT NULL,
+    max_position_limit_dollars REAL,
+    max_portfolio_limit_percent REAL,
+    is_violation BOOLEAN DEFAULT FALSE,
+    violation_type TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    UNIQUE(account_id, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_risk_account_symbol ON position_risk_tracking(account_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_position_risk_updated ON position_risk_tracking(updated_at DESC);
+
+-- PDT Tracking
+CREATE TABLE IF NOT EXISTS pdt_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    trading_date DATE NOT NULL,
+    day_trades_count INTEGER DEFAULT 0,
+    rolling_window_start DATE NOT NULL,
+    rolling_window_end DATE NOT NULL,
+    total_day_trades_window INTEGER DEFAULT 0,
+    equity_value REAL NOT NULL,
+    min_equity_threshold REAL,
+    max_day_trades_allowed INTEGER,
+    is_restricted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    UNIQUE(account_id, trading_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pdt_tracking_date ON pdt_tracking(trading_date DESC);
+CREATE INDEX IF NOT EXISTS idx_pdt_tracking_account ON pdt_tracking(account_id);
 
 -- Watchlists
 CREATE TABLE IF NOT EXISTS watchlists (

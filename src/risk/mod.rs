@@ -1,10 +1,24 @@
-//! Risk management system
-//!
-//! This module will implement (Phase 2):
-//! - Daily loss tracking
-//! - Position size validation
-//! - PDT rule enforcement
-//! - Pattern-specific limits
-//! - Account safeguards
+pub mod engine;
+pub mod limits;
+pub mod pdt;
+pub mod position_sizing;
+pub mod rules;
+pub mod types;
 
-// Placeholder for Phase 2 implementation
+// Re-export main types for convenience
+pub use engine::RiskEngine;
+pub use types::*;
+
+// Re-export config types that are defined elsewhere
+pub use crate::config::RiskConfig;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_module_compilation() {
+        // Basic compilation test - will be expanded as implementation progresses
+        assert!(true);
+    }
+}
