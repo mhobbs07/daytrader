@@ -170,7 +170,8 @@ mod integration_tests {
 
         // Subscriber 1: Filter for candles
         let handle1 = tokio::spawn(async move {
-            let mut stream = filters::filter_candles(rx1);
+            let mut stream = filters::filter_candles(filters::to_stream(rx1));
+            tokio::pin!(stream);
             let mut count = 0;
             while let Some(_) = stream.next().await {
                 count += 1;
@@ -183,7 +184,8 @@ mod integration_tests {
 
         // Subscriber 2: Filter for patterns
         let handle2 = tokio::spawn(async move {
-            let mut stream = filters::filter_patterns(rx2);
+            let mut stream = filters::filter_patterns(filters::to_stream(rx2));
+            tokio::pin!(stream);
             let mut count = 0;
             while let Some(_) = stream.next().await {
                 count += 1;
@@ -199,6 +201,7 @@ mod integration_tests {
 
         // Publish candle
         let candle = Arc::new(types::Candle {
+            symbol: symbol.clone(),
             timestamp: Utc::now(),
             open: Price::new(Decimal::new(100, 0)).unwrap(),
             high: Price::new(Decimal::new(110, 0)).unwrap(),
@@ -249,7 +252,8 @@ mod integration_tests {
         let watchlist = vec![aapl.clone(), googl.clone()];
 
         let handle = tokio::spawn(async move {
-            let mut stream = filters::filter_symbols(rx, watchlist);
+            let mut stream = filters::filter_symbols(filters::to_stream(rx), watchlist);
+            tokio::pin!(stream);
             let mut symbols = Vec::new();
             for _ in 0..2 {
                 if let Some(event) = stream.next().await {
@@ -263,6 +267,7 @@ mod integration_tests {
 
         // Publish candles for different symbols
         let candle = Arc::new(types::Candle {
+            symbol: aapl.clone(),
             timestamp: Utc::now(),
             open: Price::new(Decimal::new(100, 0)).unwrap(),
             high: Price::new(Decimal::new(110, 0)).unwrap(),

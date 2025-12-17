@@ -53,8 +53,8 @@ impl DailyLossLimits {
     /// Creates limits from RiskConfig
     pub fn from_config(config: &RiskConfig, starting_balance: Decimal) -> Self {
         Self {
-            max_loss_dollars: DollarAmount::new(Decimal::from(config.max_daily_loss_dollars)).unwrap(),
-            max_loss_percent: Percentage::new(Decimal::from(config.max_daily_loss_percent)).unwrap(),
+            max_loss_dollars: DollarAmount::new(Decimal::try_from(config.max_daily_loss_dollars).unwrap()).unwrap(),
+            max_loss_percent: Percentage::new(Decimal::try_from(config.max_daily_loss_percent).unwrap()).unwrap(),
         }
     }
 
@@ -131,6 +131,7 @@ impl DailyPnlState {
 ///
 /// Provides async methods for P&L tracking and limit enforcement.
 /// Uses RwLock for concurrent read access and exclusive write access.
+#[derive(Clone)]
 pub struct DailyLossTracker {
     limits: DailyLossLimits,
     state: Arc<RwLock<DailyPnlState>>,

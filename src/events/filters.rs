@@ -77,6 +77,7 @@
 use crate::brokers::types::{OrderId, Symbol};
 use crate::events::types::{Candle, MarketEvent, Order, PatternSignal};
 use futures::stream::{Stream, StreamExt};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
@@ -93,8 +94,8 @@ use tokio_stream::wrappers::BroadcastStream;
 /// # Returns
 ///
 /// A stream of `MarketEvent` items
-fn to_stream(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = MarketEvent> {
-    BroadcastStream::new(rx).filter_map(|result| async move {
+pub fn to_stream(rx: broadcast::Receiver<MarketEvent>) -> Pin<Box<dyn Stream<Item = MarketEvent> + Send>> {
+    Box::pin(BroadcastStream::new(rx).filter_map(|result| async move {
         match result {
             Ok(event) => Some(event),
             Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
@@ -102,7 +103,7 @@ fn to_stream(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = MarketE
                 None
             }
         }
-    })
+    }))
 }
 
 /// Filters events to extract only new candle events
@@ -138,15 +139,15 @@ fn to_stream(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = MarketE
 /// }
 /// ```
 pub fn filter_candles(
-    rx: broadcast::Receiver<MarketEvent>,
-) -> impl Stream<Item = (Symbol, Arc<Candle>)> {
-    to_stream(rx).filter_map(|event| async move {
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
+) -> Pin<Box<dyn Stream<Item = (Symbol, Arc<Candle>)> + Send>> {
+    Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::NewCandle { symbol, candle } = event {
             Some((symbol, candle))
         } else {
             None
         }
-    })
+    }))
 }
 
 /// Filters events to extract only pattern detection events
@@ -183,15 +184,15 @@ pub fn filter_candles(
 /// }
 /// ```
 pub fn filter_patterns(
-    rx: broadcast::Receiver<MarketEvent>,
-) -> impl Stream<Item = PatternSignal> {
-    to_stream(rx).filter_map(|event| async move {
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
+) -> Pin<Box<dyn Stream<Item = PatternSignal> + Send>> {
+    Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::PatternDetected { signal } = event {
             Some(signal)
         } else {
             None
         }
-    })
+    }))
 }
 
 /// Filters events to extract only order placement events
@@ -227,14 +228,14 @@ pub fn filter_patterns(
 ///     }
 /// }
 /// ```
-pub fn filter_orders(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = Arc<Order>> {
-    to_stream(rx).filter_map(|event| async move {
+pub fn filter_orders(stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>) -> Pin<Box<dyn Stream<Item = Arc<Order>> + Send>> {
+    Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::OrderPlaced { order } = event {
             Some(order)
         } else {
             None
         }
-    })
+    }))
 }
 
 /// Filters events to extract only order filled events
@@ -268,14 +269,14 @@ pub fn filter_orders(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item =
 ///     }
 /// }
 /// ```
-pub fn filter_fills(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = OrderId> {
-    to_stream(rx).filter_map(|event| async move {
+pub fn filter_fills(stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>) -> Pin<Box<dyn Stream<Item = OrderId> + Send>> {
+    Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::OrderFilled { order_id, .. } = event {
             Some(order_id)
         } else {
             None
         }
-    })
+    }))
 }
 
 /// Filters events to include only those for a specific symbol
@@ -314,24 +315,24 @@ pub fn filter_fills(rx: broadcast::Receiver<MarketEvent>) -> impl Stream<Item = 
 /// }
 /// ```
 pub fn filter_symbol(
-    rx: broadcast::Receiver<MarketEvent>,
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
     target_symbol: Symbol,
-) -> impl Stream<Item = MarketEvent> {
-    to_stream(rx).filter(move |event| {
-        let target = target_symbol.clone();
+) -> Pin<Box<dyn Stream<Item = MarketEvent> + Send>> {
+    let target = target_symbol.clone();
+    Box::pin(stream.filter(move |event| {
         let matches = match event {
             MarketEvent::NewCandle { symbol, .. } => symbol == &target,
             MarketEvent::QuoteUpdate { symbol, .. } => symbol == &target,
-            MarketEvent::PatternDetected { signal } => signal.symbol == target,
-            MarketEvent::OrderPlaced { order } => order.symbol == target,
-            MarketEvent::PositionOpened { position } => position.symbol == target,
-            MarketEvent::PositionUpdated { position } => position.symbol == target,
+            MarketEvent::PatternDetected { signal } => signal.symbol == target.clone(),
+            MarketEvent::OrderPlaced { order } => order.symbol == target.clone(),
+            MarketEvent::PositionOpened { position } => position.symbol == target.clone(),
+            MarketEvent::PositionUpdated { position } => position.symbol == target.clone(),
             MarketEvent::PositionClosed { symbol, .. } => symbol == &target,
             // System events and other events don't have symbols
             _ => false,
         };
         async move { matches }
-    })
+    }))
 }
 
 /// Filters events to include only those matching a list of symbols
@@ -374,12 +375,12 @@ pub fn filter_symbol(
 /// }
 /// ```
 pub fn filter_symbols(
-    rx: broadcast::Receiver<MarketEvent>,
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
     symbols: Vec<Symbol>,
-) -> impl Stream<Item = MarketEvent> {
-    to_stream(rx).filter(move |event| {
-        let symbols = symbols.clone();
-        let event_symbol = match event {
+) -> Pin<Box<dyn Stream<Item = MarketEvent> + Send>> {
+    let symbols = symbols.clone();
+    Box::pin(stream.filter(move |event| {
+        let event_symbol = match &event {
             MarketEvent::NewCandle { symbol, .. } => Some(symbol),
             MarketEvent::QuoteUpdate { symbol, .. } => Some(symbol),
             MarketEvent::PatternDetected { signal } => Some(&signal.symbol),
@@ -391,7 +392,7 @@ pub fn filter_symbols(
         };
         let matches = event_symbol.map_or(false, |sym| symbols.contains(sym));
         async move { matches }
-    })
+    }))
 }
 
 /// Filters pattern signals by minimum confidence threshold
@@ -430,13 +431,13 @@ pub fn filter_symbols(
 /// }
 /// ```
 pub fn filter_high_confidence_patterns(
-    rx: broadcast::Receiver<MarketEvent>,
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
     min_confidence: f64,
-) -> impl Stream<Item = PatternSignal> {
-    filter_patterns(rx).filter(move |signal| {
+) -> Pin<Box<dyn Stream<Item = PatternSignal> + Send>> {
+    Box::pin(filter_patterns(stream).filter(move |signal| {
         let matches = signal.confidence.value() >= min_confidence;
         async move { matches }
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -456,6 +457,7 @@ mod tests {
 
         let symbol = Symbol::new("AAPL").unwrap();
         let candle = Arc::new(Candle {
+            symbol: symbol.clone(),
             timestamp: Utc::now(),
             open: Price::new(Decimal::new(100, 0)).unwrap(),
             high: Price::new(Decimal::new(110, 0)).unwrap(),
@@ -474,7 +476,7 @@ mod tests {
             reason: Reason::new("test"),
         });
 
-        let mut stream = filter_candles(rx);
+        let mut stream = filter_candles(to_stream(rx));
 
         // Should only receive the candle event
         if let Some((recv_symbol, recv_candle)) = stream.next().await {
@@ -504,7 +506,7 @@ mod tests {
             signal: signal.clone(),
         });
 
-        let mut stream = filter_patterns(rx);
+        let mut stream = filter_patterns(to_stream(rx));
 
         if let Some(recv_signal) = stream.next().await {
             assert_eq!(recv_signal.pattern_name.as_str(), "Hammer");
@@ -523,6 +525,7 @@ mod tests {
         let googl = Symbol::new("GOOGL").unwrap();
 
         let candle = Arc::new(Candle {
+            symbol: aapl.clone(),
             timestamp: Utc::now(),
             open: Price::new(Decimal::new(100, 0)).unwrap(),
             high: Price::new(Decimal::new(110, 0)).unwrap(),
@@ -541,7 +544,7 @@ mod tests {
             candle: candle.clone(),
         });
 
-        let mut stream = filter_symbol(rx, aapl.clone());
+        let mut stream = filter_symbol(to_stream(rx), aapl.clone());
 
         // Should only receive AAPL events
         if let Some(MarketEvent::NewCandle { symbol, .. }) = stream.next().await {
@@ -581,7 +584,7 @@ mod tests {
             signal: high_conf.clone(),
         });
 
-        let mut stream = filter_high_confidence_patterns(rx, 0.8);
+        let mut stream = filter_high_confidence_patterns(to_stream(rx), 0.8);
 
         // Should only receive high-confidence pattern
         if let Some(signal) = stream.next().await {
@@ -599,6 +602,7 @@ mod tests {
 
         let aapl = Symbol::new("AAPL").unwrap();
         let candle = Arc::new(Candle {
+            symbol: aapl.clone(),
             timestamp: Utc::now(),
             open: Price::new(Decimal::new(100, 0)).unwrap(),
             high: Price::new(Decimal::new(110, 0)).unwrap(),
@@ -614,7 +618,8 @@ mod tests {
         bus.publish(MarketEvent::TradingResumed);
 
         // Chain filters: symbol filter -> candle filter
-        let mut stream = filter_candles(filter_symbol(rx, aapl.clone()));
+        let mut stream = filter_candles(filter_symbol(to_stream(rx), aapl.clone()));
+        tokio::pin!(stream);
 
         if let Some((symbol, _)) = stream.next().await {
             assert_eq!(symbol.as_str(), "AAPL");

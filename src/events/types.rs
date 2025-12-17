@@ -321,6 +321,15 @@ pub enum OrderSide {
     Sell,
 }
 
+impl std::fmt::Display for OrderSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrderSide::Buy => write!(f, "buy"),
+            OrderSide::Sell => write!(f, "sell"),
+        }
+    }
+}
+
 /// Order type
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderType {
@@ -391,7 +400,7 @@ pub struct RiskViolation {
 }
 
 /// Types of risk violations
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RiskViolationType {
     DailyLossLimit,
     PositionSizeLimit,

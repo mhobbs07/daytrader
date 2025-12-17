@@ -56,7 +56,7 @@ impl PdtConfig {
     /// Creates config from RiskConfig
     pub fn from_config(config: &RiskConfig) -> Self {
         Self {
-            min_equity_threshold: Decimal::from(config.pdt_min_equity),
+            min_equity_threshold: Decimal::try_from(config.pdt_min_equity).unwrap(),
             max_day_trades_under_threshold: config.max_day_trades_under_pdt,
             rolling_window_days: 5, // Standard PDT rule: 5 business days
         }
@@ -120,7 +120,7 @@ impl PdtState {
     }
 
     /// Calculates the cutoff date for the rolling window (business days back)
-    fn calculate_cutoff_date(&self, from_date: chrono::NaiveDate, business_days_back: u32) -> chrono::NaiveDate {
+    pub fn calculate_cutoff_date(&self, from_date: chrono::NaiveDate, business_days_back: u32) -> chrono::NaiveDate {
         let mut date = from_date;
         let mut days_counted = 0;
 
@@ -184,6 +184,7 @@ impl PdtState {
 ///
 /// Provides compliance checking and enforcement for Pattern Day Trading rules.
 /// Uses RwLock for concurrent access to PDT state.
+#[derive(Clone)]
 pub struct PdtEnforcer {
     config: PdtConfig,
     state: Arc<RwLock<PdtState>>,

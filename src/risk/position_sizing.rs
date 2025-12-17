@@ -56,8 +56,8 @@ impl PositionSizeLimits {
     /// Creates limits from RiskConfig
     pub fn from_config(config: &RiskConfig) -> Self {
         Self {
-            max_position_dollars: DollarAmount::new(Decimal::from(config.max_position_size_dollars)).unwrap(),
-            max_portfolio_percent: Percentage::new(Decimal::from(config.max_position_size_percent)).unwrap(),
+            max_position_dollars: DollarAmount::new(Decimal::try_from(config.max_position_size_dollars).unwrap()).unwrap(),
+            max_portfolio_percent: Percentage::new(Decimal::try_from(config.max_position_size_percent).unwrap()).unwrap(),
             max_concurrent_positions: config.max_concurrent_positions,
         }
     }

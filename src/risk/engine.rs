@@ -29,7 +29,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Central risk management engine
-#[derive(Clone)]
 pub struct RiskEngine {
     config: RiskConfig,
     event_bus: Arc<EventBus>,
@@ -43,13 +42,13 @@ pub struct RiskEngine {
 
 /// Internal risk state tracking
 #[derive(Debug, Clone)]
-struct RiskState {
-    account_id: AccountId,
-    trading_date: chrono::NaiveDate,
-    daily_pl: Decimal,
-    day_trade_count: u32,
-    is_trading_halted: bool,
-    last_updated: DateTime<Utc>,
+pub struct RiskState {
+    pub account_id: AccountId,
+    pub trading_date: chrono::NaiveDate,
+    pub daily_pl: Decimal,
+    pub day_trade_count: u32,
+    pub is_trading_halted: bool,
+    pub last_updated: DateTime<Utc>,
 }
 
 impl RiskEngine {
@@ -93,7 +92,24 @@ impl RiskEngine {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Subscribe to relevant events
         let event_bus = Arc::clone(&self.event_bus);
-        let engine = Arc::new(self.clone()); // Clone self for the async task
+        let config = self.config.clone();
+        let state = Arc::clone(&self.state);
+        let daily_loss_tracker = Arc::clone(&self.daily_loss_tracker);
+        let position_sizer = Arc::clone(&self.position_sizer);
+        let pdt_enforcer = Arc::clone(&self.pdt_enforcer);
+
+        // Create a new rule engine for the async task (can't clone the existing one)
+        let rule_engine = crate::risk::rules::RiskRuleEngine::new(config.clone());
+
+        let engine = Arc::new(RiskEngine {
+            config,
+            event_bus: Arc::clone(&self.event_bus),
+            state,
+            rule_engine,
+            daily_loss_tracker,
+            position_sizer,
+            pdt_enforcer,
+        });
 
         // Spawn event processing task
         tokio::spawn(async move {
@@ -154,8 +170,8 @@ impl RiskEngine {
         // Create trade context for risk evaluation
         let context = TradeContext::new(
             order.symbol.to_string(),
-            order.quantity.value(),
-            order.price.unwrap_or(Decimal::ZERO), // Use limit price or assume market order
+            Decimal::from(order.quantity.value()),
+            order.price.map(|p| p.value()).unwrap_or(Decimal::ZERO), // Use limit price or assume market order
             current_state.daily_pl, // Use current equity approximation
             false, // TODO: Implement day trade detection
         );
@@ -224,7 +240,7 @@ impl RiskEngine {
         // Update position in position sizer for portfolio allocation tracking
         self.position_sizer.update_position(
             position.symbol.to_string(),
-            position.quantity.value(),
+            Decimal::from(position.quantity.value()),
             position.average_entry_price.value(),
             position.current_price.value(),
         ).await;
@@ -296,7 +312,7 @@ impl RiskEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::brokers::types::AccountId as BrokerAccountId;
+    use crate::risk::types::AccountId as BrokerAccountId;
 
     #[tokio::test]
     async fn test_risk_engine_creation() {

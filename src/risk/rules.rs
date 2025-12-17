@@ -152,13 +152,14 @@ impl RuleEvaluation {
 
     /// Creates a violated evaluation
     pub fn violated(severity: ViolationSeverity, action: ViolationAction, message: impl Into<String>) -> Self {
+        let message_str = message.into();
         Self {
             evaluation: RiskEvaluation::Violated {
                 severity,
-                suggested_action: Some(message.into()),
+                suggested_action: Some(message_str.clone()),
             },
             suggested_action: Some(action),
-            message: Some(message.into()),
+            message: Some(message_str),
             metadata: HashMap::new(),
         }
     }

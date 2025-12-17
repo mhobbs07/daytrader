@@ -46,7 +46,7 @@ pub struct LoggingConfig {
     pub file_path: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RiskConfig {
     // Daily loss limits
     pub max_daily_loss_dollars: f64,
