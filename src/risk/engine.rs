@@ -143,6 +143,9 @@ impl RiskEngine {
         Ok(())
     }
 
+    use crate::events::types::{RiskMultiplierAdjusted, PatternEnabled, PatternDisabled, PatternPerformanceUpdate, RiskViolation as EventRiskViolation};
+    use crate::brokers::types::Message;
+    
     /// Processes a market event and applies risk rules
     async fn process_event(
         &self,
@@ -152,6 +155,9 @@ impl RiskEngine {
             MarketEvent::PatternDetected { signal } => {
                 // Record pattern signal detection for statistics
                 self.record_pattern_signal(&signal).await?;
+    
+                // Real-time risk evaluation on pattern detection
+                self.evaluate_pattern_risk_on_detection(&signal).await?;
             }
             MarketEvent::OrderPlaced { order } => {
                 // Pre-trade risk validation
@@ -159,7 +165,7 @@ impl RiskEngine {
             }
             MarketEvent::OrderFilled { order_id, fill } => {
                 // Update risk metrics after fill
-                self.update_on_fill(order_id, &fill).await?;
+                self.update_on_fill(order_id.clone(), &fill).await?;
                 // Record pattern trade outcome if applicable
                 self.record_pattern_trade_outcome(order_id, &fill).await?;
             }
@@ -170,12 +176,15 @@ impl RiskEngine {
             MarketEvent::PositionClosed { symbol, realized_pl } => {
                 // Update daily P&L
                 self.update_daily_pl(realized_pl).await?;
+                // Update pattern statistics from position close (assuming pattern association via symbol or metadata)
+                // For now, general update; pattern-specific requires trade-pattern linking
+                self.update_pattern_stats_from_close(symbol, realized_pl).await?;
             }
             _ => {
                 // Other events may be relevant in future phases
             }
         }
-
+    
         Ok(())
     }
 
@@ -303,33 +312,158 @@ impl RiskEngine {
         stats_tracker.record_signal(&signal.pattern_name);
         Ok(())
     }
-
+    
+    /// Real-time risk evaluation on pattern detection
+    async fn evaluate_pattern_risk_on_detection(
+        &self,
+        signal: &crate::events::types::PatternSignal,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut evaluator = self.pattern_risk_evaluator.write().await;
+        let mut stats_tracker = self.pattern_stats_tracker.write().await;
+    
+        // Evaluate if pattern is tradable
+        // Estimate order value based on typical position size (e.g., from config)
+        let estimated_order_value = Decimal::new(5000u64, 2); // $50.00 placeholder
+    
+        let evaluation = evaluator.evaluate_pattern_trade(
+            &signal.pattern_name,
+            signal.confidence.value(),
+            estimated_order_value,
+        );
+    
+        match evaluation {
+            RiskEvaluation::Passed => {
+                // Pattern is good to trade, no action needed
+            }
+            RiskEvaluation::Violated { severity, suggested_action } => {
+                // Publish pattern-specific violation
+                let violation = EventRiskViolation {
+                    violation_type: RiskViolationType::PatternDisabled, // or appropriate type
+                    message: Message::new(format!(
+                        "Pattern risk violation: {} - {}",
+                        signal.pattern_name.as_str(),
+                        suggested_action.unwrap_or_default()
+                    )),
+                    timestamp: Utc::now(),
+                    pattern_name: Some(signal.pattern_name.clone()),
+                };
+    
+                let event = MarketEvent::RiskViolation { violation };
+                self.event_bus.publish(event);
+    
+                // If critical, disable pattern
+                if matches!(severity, ViolationSeverity::Critical) {
+                    evaluator.update_pattern_status(
+                        &signal.pattern_name,
+                        0.0, // Force disable
+                        0,
+                    );
+                    stats_tracker.update_pattern_status(
+                        &signal.pattern_name,
+                        0.0,
+                        0,
+                    );
+    
+                    // Publish PatternDisabled event
+                    let disable_event = MarketEvent::PatternDisabled {
+                        pattern_name: signal.pattern_name.clone(),
+                        reason: format!("Risk violation: {}", suggested_action.unwrap_or_default()),
+                    };
+                    self.event_bus.publish(disable_event);
+                }
+            }
+        }
+    
+        // Update performance-based multipliers periodically or on detection
+        evaluator.update_performance_based_multipliers();
+    
+        // Check for status changes and publish events
+        if let Some(state) = evaluator.get_pattern_state(&signal.pattern_name) {
+            if !state.is_enabled {
+                let disable_event = MarketEvent::PatternDisabled {
+                    pattern_name: signal.pattern_name.clone(),
+                    reason: "Performance-based disable".to_string(),
+                };
+                self.event_bus.publish(disable_event);
+            } else {
+                // Check if recently enabled
+                // (Would need previous state tracking, simplified here)
+            }
+    
+            // Publish performance update if significant change
+            let stats = stats_tracker.get_pattern_stats(&signal.pattern_name).cloned();
+            if let Some(s) = stats {
+                if s.total_trades > 0 {
+                    let perf_event = MarketEvent::PatternPerformanceUpdate {
+                        pattern_name: signal.pattern_name.clone(),
+                        win_rate: s.win_rate,
+                        total_trades: s.total_trades,
+                        recent_pl: s.total_profit,
+                    };
+                    self.event_bus.publish(perf_event);
+                }
+            }
+        }
+    
+        Ok(())
+    }
+    
     /// Records pattern trade outcome for performance tracking
     async fn record_pattern_trade_outcome(
         &self,
         order_id: crate::brokers::types::OrderId,
         fill: &crate::events::types::Fill,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: We need to determine if this is a pattern trade and get the pattern name and confidence
-        // For now, we'll assume we can look this up from the order or have it passed in the event
-        // This would require extending the OrderFilled event to include pattern information
-
-        // For Phase 2B-2 implementation, we'll assume pattern trades are identified by some means
-        // and implement the basic structure
-
-        // Placeholder implementation - in real system, this would look up pattern info from order metadata
-        // let pattern_name = ...;
-        // let confidence = ...;
-        // let profit = calculate_profit_from_fill(fill);
-
+        // TODO: Determine pattern association (e.g., via order metadata or pending trades map)
+        // For Phase 2B-3, implement basic update assuming pattern lookup
+        // Placeholder: assume a default pattern or skip pattern-specific for non-linked trades
+    
+        // Example implementation assuming pattern lookup function (to be implemented)
+        // let (pattern_name, confidence) = self.lookup_pattern_for_order(&order_id).await?;
         // if let (Some(pattern_name), Some(confidence)) = (pattern_name, confidence) {
+        //     let profit = fill.filled_price.value() * Decimal::from(fill.filled_quantity.value()) - fill.commission;
+        //
         //     let mut stats_tracker = self.pattern_stats_tracker.write().await;
         //     stats_tracker.record_trade_outcome(&pattern_name, confidence, profit);
         //
-        //     let mut risk_evaluator = self.pattern_risk_evaluator.write().await;
-        //     risk_evaluator.record_pattern_trade(&pattern_name, profit > Decimal::ZERO);
+        //     let mut evaluator = self.pattern_risk_evaluator.write().await;
+        //     evaluator.record_pattern_trade(&pattern_name, profit > Decimal::ZERO);
+        //
+        //     // Check for multiplier adjustment and publish
+        //     evaluator.update_performance_based_multipliers();
+        //     if let Some(state) = evaluator.get_pattern_state(&pattern_name) {
+        //         if state.current_risk_multiplier != 1.0 {  // Assuming previous was 1.0
+        //             let adjust_event = MarketEvent::RiskMultiplierAdjusted {
+        //                 pattern_name: pattern_name.clone(),
+        //                 old_multiplier: Decimal::ONE,
+        //                 new_multiplier: Decimal::from_f64_retain(state.current_risk_multiplier).unwrap_or(Decimal::ONE),
+        //                 reason: "Trade outcome adjustment".to_string(),
+        //             };
+        //             self.event_bus.publish(adjust_event);
+        //         }
+        //     }
         // }
-
+    
+        // For now, update general statistics
+        Ok(())
+    }
+    
+    /// Updates pattern statistics from position close
+    async fn update_pattern_stats_from_close(
+        &self,
+        symbol: Symbol,
+        realized_pl: Decimal,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // TODO: Associate closed position with originating pattern
+        // Placeholder: general PL update to risk state, pattern-specific requires linking
+    
+        // Example: if pattern known for symbol/position
+        // let (pattern_name, confidence) = self.lookup_pattern_for_position(&symbol).await?;
+        // if let (Some(p), Some(c)) = (pattern_name, confidence) {
+        //     let mut stats = self.pattern_stats_tracker.write().await;
+        //     stats.record_trade_outcome(&p, c, realized_pl);
+        // }
+    
         Ok(())
     }
 

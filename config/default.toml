@@ -186,3 +186,31 @@ pattern_detection_workers = 4
 websocket_reconnect_max_attempts = 10
 websocket_reconnect_delay_ms = 1000
 order_timeout_seconds = 30
+
+[events]
+# Event subscription settings
+subscribe_to_patterns = true
+subscribe_to_order_fills = true
+subscribe_to_position_closes = true
+subscribe_to_risk_violations = true
+
+# Event publishing settings
+publish_risk_adjustments = true
+publish_pattern_status = true
+publish_violations = true
+publish_performance_updates = true
+event_throttling_enabled = false
+max_events_per_second = 1000
+
+# Event persistence settings
+persistence_enabled = true
+retention_days = 90
+batch_insert_size = 100
+important_events_only = true  # Only persist risk and pattern events
+
+# Event metrics collection
+metrics_collection = true
+track_latency = true
+track_volume_by_type = true
+metrics_interval_seconds = 60
+export_metrics_to = "prometheus"  # or "influxdb", "file"

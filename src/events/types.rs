@@ -43,6 +43,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::brokers::types::PatternName;
+
 /// Market event enum containing all possible events in the system
 ///
 /// This is the primary event type distributed through the event bus.
@@ -139,6 +141,44 @@ pub enum MarketEvent {
     ///
     /// Published for risk warnings that don't block trading but require attention.
     RiskWarning { warning: Message },
+
+    /// Risk multiplier adjusted for a specific pattern
+    ///
+    /// Published when the risk multiplier for a pattern is dynamically adjusted
+    /// based on performance or market conditions.
+    RiskMultiplierAdjusted {
+        pattern_name: PatternName,
+        old_multiplier: Decimal,
+        new_multiplier: Decimal,
+        reason: String,
+    },
+
+    /// Pattern enabled for trading
+    ///
+    /// Published when a pattern is enabled after meeting performance criteria
+    /// or manual intervention.
+    PatternEnabled {
+        pattern_name: PatternName,
+        reason: String,
+    },
+
+    /// Pattern disabled for trading
+    ///
+    /// Published when a pattern is disabled due to poor performance or risk limits.
+    PatternDisabled {
+        pattern_name: PatternName,
+        reason: String,
+    },
+
+    /// Pattern performance update
+    ///
+    /// Published periodically or on significant changes to track pattern effectiveness.
+    PatternPerformanceUpdate {
+        pattern_name: PatternName,
+        win_rate: f64,
+        total_trades: u32,
+        recent_pl: Decimal,
+    },
 
     // ========================================
     // System Events
@@ -392,11 +432,13 @@ impl Position {
 /// Risk violation information
 ///
 /// Contains details about a risk management rule violation.
+/// Enhanced to include pattern-specific information for Phase 2B-3.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RiskViolation {
     pub violation_type: RiskViolationType,
     pub message: Message,
     pub timestamp: DateTime<Utc>,
+    pub pattern_name: Option<PatternName>,
 }
 
 /// Types of risk violations
@@ -407,6 +449,8 @@ pub enum RiskViolationType {
     PdtLimit,
     PatternDisabled,
     InsufficientFunds,
+    PatternMultiplierExceeded,
+    PatternPerformanceThreshold,
     Other,
 }
 

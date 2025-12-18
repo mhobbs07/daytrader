@@ -312,6 +312,35 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_severity ON audit_log(severity);
 
+-- Risk Events Storage
+-- Stores all risk-related events for audit, compliance, and performance analysis
+CREATE TABLE IF NOT EXISTS risk_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL CHECK(event_type IN (
+        'RiskViolation', 'RiskWarning', 'RiskMultiplierAdjusted',
+        'PatternEnabled', 'PatternDisabled', 'PatternPerformanceUpdate'
+    )),
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    account_id INTEGER,
+    pattern_name TEXT,
+    violation_type TEXT,  -- For RiskViolation events
+    severity TEXT CHECK(severity IN ('low', 'moderate', 'high', 'critical')),
+    message TEXT NOT NULL,
+    details TEXT,  -- JSON or serialized data (e.g., old/new multipliers, win_rate, etc.)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- Indexes for efficient querying
+CREATE INDEX IF NOT EXISTS idx_risk_events_timestamp ON risk_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_events_pattern ON risk_events(pattern_name);
+CREATE INDEX IF NOT EXISTS idx_risk_events_type ON risk_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_risk_events_account ON risk_events(account_id);
+CREATE INDEX IF NOT EXISTS idx_risk_events_severity ON risk_events(severity);
+
+-- Retention policy: Keep events for 90 days (handled in application code via cron job or trigger)
+-- Example cleanup query: DELETE FROM risk_events WHERE created_at < datetime('now', '-90 days');
+
 -- Application Settings
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
@@ -334,4 +363,7 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES
     ('risk.required_win_rate_for_auto', '60.00'),
     ('risk.min_pattern_sample_size', '20'),
     ('risk.min_account_balance', '1000.00'),
-    ('risk.emergency_liquidate_threshold', '500.00');
+    ('risk.emergency_liquidate_threshold', '500.00'),
+    ('events.retention_days', '90'),  -- Default retention for risk events
+    ('events.persistence_enabled', 'true'),
+    ('events.metrics_collection', 'true');

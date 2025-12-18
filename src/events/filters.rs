@@ -74,8 +74,8 @@
 //! }
 //! ```
 
-use crate::brokers::types::{OrderId, Symbol};
-use crate::events::types::{Candle, MarketEvent, Order, PatternSignal};
+use crate::brokers::types::{OrderId, PatternName, Symbol};
+use crate::events::types::{Candle, MarketEvent, Order, PatternSignal, RiskViolation};
 use futures::stream::{Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::Arc;

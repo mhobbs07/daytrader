@@ -121,12 +121,24 @@ impl PatternStats {
             self.max_drawdown = self.total_profit;
         }
 
-        // Update confidence statistics
+        // Update confidence statistics incrementally
         let total_confidence_weight = self.avg_confidence * (self.total_trades as f64 - 1.0);
         self.avg_confidence = (total_confidence_weight + confidence) / self.total_trades as f64;
 
-        // Recalculate derived statistics
-        self.recalculate_stats();
+        // Update derived statistics incrementally instead of recalculating everything
+        if self.total_trades > 0 {
+            self.win_rate = (self.winning_trades as f64 / self.total_trades as f64) * 100.0;
+            self.avg_profit_per_trade = self.total_profit / Decimal::from(self.total_trades);
+
+            // Calculate confidence-weighted win rate
+            let confidence_weighted_wins = self.winning_trades as f64 * self.avg_confidence;
+            let total_confidence_weight = self.total_trades as f64 * self.avg_confidence;
+            self.confidence_weighted_win_rate = if total_confidence_weight > 0.0 {
+                (confidence_weighted_wins / total_confidence_weight) * 100.0
+            } else {
+                0.0
+            };
+        }
 
         self.last_updated = Utc::now();
     }
@@ -236,17 +248,27 @@ impl RollingStats {
     pub fn add_trade(&mut self, trade: TradeRecord) {
         self.trades.push(trade);
 
-        // Remove trades outside the window
+        // Remove trades outside the window efficiently
         let cutoff = Utc::now() - Duration::days(self.window_days as i64);
+        let old_len = self.trades.len();
         self.trades.retain(|t| t.timestamp > cutoff);
 
-        // Recalculate statistics
-        self.recalculate_stats();
+        // Only recalculate if trades were removed or this is the first trade
+        if self.trades.len() != old_len || old_len == 1 {
+            self.recalculate_stats();
+        } else {
+            // Incremental update: just add the new trade to existing stats
+            let new_trade = self.trades.last().unwrap();
+            self.stats.record_trade(new_trade.confidence, new_trade.profit);
+            self.performance_score = self.calculate_performance_score();
+            self.risk_multiplier = self.calculate_risk_multiplier();
+            self.last_recalculated = Utc::now();
+        }
     }
 
     /// Recalculates statistics from current window trades
     fn recalculate_stats(&mut self) {
-        // Reset stats
+        // Reset stats without reallocation
         let pattern_name = self.stats.pattern_name.clone();
         self.stats = PatternStats::new(pattern_name);
 
@@ -355,7 +377,8 @@ impl PatternStatsTracker {
                 RollingStats::new(90, pattern_name.as_str().to_string()),
             ]);
 
-        for window in windows {
+        // Add trade to each window (clone once per window, not per trade)
+        for window in windows.iter_mut() {
             window.add_trade(trade_record.clone());
         }
     }
@@ -563,8 +586,12 @@ impl PatternStatsTracker {
 
         for windows in self.rolling_windows.values_mut() {
             for window in windows {
+                let old_count = window.trades.len();
                 window.trades.retain(|trade| trade.timestamp > cutoff);
-                window.recalculate_stats();
+                // Only recalculate if trades were actually removed
+                if window.trades.len() != old_count {
+                    window.recalculate_stats();
+                }
             }
         }
     }
@@ -834,6 +861,15 @@ mod tests {
         let mut tracker = PatternStatsTracker::new();
         let pattern_name = PatternName::new("hammer");
 
+        // Add trades for multiple windows
+        for _ in 0..10 {
+            tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+        }
+
+        let overall_score = tracker.get_overall_performance_score(&pattern_name);
+        assert!(overall_score > 0.0 && overall_score <= 1.0);
+    }
+}
         // Add trades for multiple windows
         for _ in 0..10 {
             tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));

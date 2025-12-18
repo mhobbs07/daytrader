@@ -135,6 +135,9 @@ pub struct EventBus {
 struct EventBusMetrics {
     events_published: AtomicU64,
     events_dropped: AtomicU64,
+    event_volumes: Arc<DashMap<String, AtomicU64>>,  // Volume by event type
+    total_latency_ns: AtomicU64,  // Cumulative latency in nanoseconds
+    latency_count: AtomicU64,  // Number of latency measurements
 }
 
 impl EventBusMetrics {
@@ -142,6 +145,9 @@ impl EventBusMetrics {
         Self {
             events_published: AtomicU64::new(0),
             events_dropped: AtomicU64::new(0),
+            event_volumes: Arc::new(DashMap::new()),
+            total_latency_ns: AtomicU64::new(0),
+            latency_count: AtomicU64::new(0),
         }
     }
 
@@ -164,6 +170,43 @@ impl EventBusMetrics {
     fn get_dropped(&self) -> u64 {
         self.events_dropped.load(Ordering::Relaxed)
     }
+
+    /// Increments volume for a specific event type
+    #[inline]
+    fn increment_volume(&self, event_type: &str) {
+        self.event_volumes
+            .entry(event_type.to_string())
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Gets volume for a specific event type
+    #[inline]
+    fn get_volume(&self, event_type: &str) -> u64 {
+        self.event_volumes
+            .get(event_type)
+            .map(|v| v.load(Ordering::Relaxed))
+            .unwrap_or(0)
+    }
+
+    /// Records processing latency for an event
+    #[inline]
+    fn record_latency(&self, latency_ns: u64) {
+        self.total_latency_ns.fetch_add(latency_ns, Ordering::Relaxed);
+        self.latency_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Gets average latency in nanoseconds
+    #[inline]
+    fn get_average_latency_ns(&self) -> f64 {
+        let count = self.latency_count.load(Ordering::Relaxed);
+        if count == 0 {
+            0.0
+        } else {
+            self.total_latency_ns.load(Ordering::Relaxed) as f64 / count as f64
+        }
+    }
+}
 }
 
 impl EventBus {
@@ -217,11 +260,42 @@ impl EventBus {
     /// ```
     #[inline]
     pub fn publish(&self, event: MarketEvent) {
+        let start = std::time::Instant::now();
+        let event_type = match &event {
+            MarketEvent::NewCandle { .. } => "NewCandle",
+            MarketEvent::QuoteUpdate { .. } => "QuoteUpdate",
+            MarketEvent::PatternDetected { .. } => "PatternDetected",
+            MarketEvent::OrderPlaced { .. } => "OrderPlaced",
+            MarketEvent::OrderFilled { .. } => "OrderFilled",
+            MarketEvent::OrderCancelled { .. } => "OrderCancelled",
+            MarketEvent::OrderRejected { .. } => "OrderRejected",
+            MarketEvent::PositionOpened { .. } => "PositionOpened",
+            MarketEvent::PositionUpdated { .. } => "PositionUpdated",
+            MarketEvent::PositionClosed { .. } => "PositionClosed",
+            MarketEvent::RiskViolation { .. } => "RiskViolation",
+            MarketEvent::RiskWarning { .. } => "RiskWarning",
+            MarketEvent::RiskMultiplierAdjusted { .. } => "RiskMultiplierAdjusted",
+            MarketEvent::PatternEnabled { .. } => "PatternEnabled",
+            MarketEvent::PatternDisabled { .. } => "PatternDisabled",
+            MarketEvent::PatternPerformanceUpdate { .. } => "PatternPerformanceUpdate",
+            MarketEvent::ConnectionEstablished { .. } => "ConnectionEstablished",
+            MarketEvent::ConnectionLost { .. } => "ConnectionLost",
+            MarketEvent::TradingHalted { .. } => "TradingHalted",
+            MarketEvent::TradingResumed => "TradingResumed",
+        };
+    
         match self.sender.send(event) {
             Ok(subscriber_count) => {
                 self.metrics.increment_published();
+                self.metrics.increment_volume(event_type);
+    
+                let latency_ns = start.elapsed().as_nanos() as u64;
+                self.metrics.record_latency(latency_ns);
+    
                 debug!(
                     subscriber_count = subscriber_count,
+                    latency_ns = latency_ns,
+                    event_type = event_type,
                     "Event published to subscribers"
                 );
             }
@@ -333,6 +407,20 @@ impl EventBus {
     #[inline]
     pub fn events_dropped(&self) -> u64 {
         self.metrics.get_dropped()
+    }
+    
+    /// Returns the volume of events by type
+    pub fn get_event_volumes(&self) -> Vec<(&str, u64)> {
+        self.metrics
+            .event_volumes
+            .iter()
+            .map(|entry| (entry.key(), entry.value().load(Ordering::Relaxed)))
+            .collect()
+    }
+    
+    /// Returns the average processing latency in nanoseconds
+    pub fn get_average_latency_ns(&self) -> f64 {
+        self.metrics.get_average_latency_ns()
     }
 
 }

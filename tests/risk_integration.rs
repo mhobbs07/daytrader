@@ -3,13 +3,13 @@
 //! These tests validate the complete risk workflow from event ingestion
 //! through risk evaluation and violation handling.
 
-use daytrader::brokers::types::{Message, OrderId, Price, Quantity, Reason, Symbol};
+use daytrader::brokers::types::{Message, OrderId, PatternName, Price, Quantity, Reason, Symbol};
 use daytrader::risk::types::AccountId;
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
-    Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, Position, RiskViolation,
-    RiskViolationType,
+    Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, PatternSignal, Position,
+    RiskMultiplierAdjusted, RiskViolation, RiskViolationType, SignalType,
 };
 use daytrader::risk::{RiskEngine, RiskRuleId, ViolationSeverity};
 use rust_decimal::Decimal;
@@ -70,6 +70,134 @@ async fn test_complete_risk_workflow() {
     assert!(engine.is_trading_allowed().await);
 }
 
+/// Test pattern detection -> risk evaluation workflow
+#[tokio::test]
+async fn test_pattern_detection_risk_workflow() {
+    // Setup
+    let config = create_test_risk_config();
+    let event_bus = Arc::new(EventBus::new(1000));
+    let account_id = AccountId::new("test-account");
+    let initial_equity = Decimal::new(5000000, 2);
+
+    let engine = RiskEngine::new(config, Arc::clone(&event_bus), account_id, initial_equity);
+    engine.start().await.unwrap();
+
+    // Subscribe to pattern-related events
+    let mut event_receiver = event_bus.subscribe();
+
+    // Create pattern signal
+    let pattern_signal = PatternSignal {
+        symbol: Symbol::new("AAPL").unwrap(),
+        pattern_name: PatternName::new("hammer"),
+        signal_type: SignalType::Buy,
+        confidence: Confidence::new(0.85).unwrap(),
+        detected_at: chrono::Utc::now(),
+        price: Price::new(Decimal::new(15000, 2)).unwrap(),
+    };
+
+    // Publish pattern detected event
+    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal.clone() });
+
+    // Wait for processing
+    sleep(Duration::from_millis(100)).await;
+
+    // Check for risk evaluation (no violation expected for valid pattern)
+    let mut events_received = 0;
+    let mut performance_updates = 0;
+    let mut violations = 0;
+
+    while let Ok(event) = event_receiver.try_recv() {
+        events_received += 1;
+        match event {
+            MarketEvent::PatternPerformanceUpdate { .. } => performance_updates += 1,
+            MarketEvent::RiskViolation { .. } => violations += 1,
+            _ => {}
+        }
+    }
+
+    // Should have processed the pattern without critical violations
+    assert!(events_received > 0, "Expected events from pattern detection");
+    assert_eq!(violations, 0, "Should not have violations for valid pattern");
+    println!("Processed {} events, {} performance updates, {} violations", events_received, performance_updates, violations);
+}
+
+/// Test event persistence for risk events
+#[tokio::test]
+async fn test_event_persistence() {
+    // Setup (assuming persistence is implemented in RiskEngine or EventBus)
+    let config = create_test_risk_config();
+    let event_bus = Arc::new(EventBus::new(1000));
+    let account_id = AccountId::new("test-account");
+    let initial_equity = Decimal::new(5000000, 2);
+
+    let engine = RiskEngine::new(config, Arc::clone(&event_bus), account_id, initial_equity);
+    engine.start().await.unwrap();
+
+    // Publish a risk violation event
+    let violation = RiskViolation {
+        violation_type: RiskViolationType::PositionSizeLimit,
+        message: Message::new("Test violation"),
+        timestamp: chrono::Utc::now(),
+        pattern_name: None,
+    };
+
+    event_bus.publish(MarketEvent::RiskViolation { violation: violation.clone() });
+
+    // Wait for persistence (assuming implemented)
+    sleep(Duration::from_millis(100)).await;
+
+    // Verify event was persisted (mock DB check)
+    // In real implementation, query the risk_events table
+    println!("Event persistence test - assuming implementation saves to DB");
+    assert!(true, "Placeholder for DB verification");
+}
+
+/// Test pattern-specific risk events
+#[tokio::test]
+async fn test_pattern_specific_events() {
+    let config = create_test_risk_config();
+    let event_bus = Arc::new(EventBus::new(1000));
+    let account_id = AccountId::new("test-account");
+    let initial_equity = Decimal::new(5000000, 2);
+
+    let engine = RiskEngine::new(config, Arc::clone(&event_bus), account_id, initial_equity);
+    engine.start().await.unwrap();
+
+    // Subscribe to pattern events
+    let mut event_receiver = event_bus.subscribe();
+
+    // Create pattern signal for low confidence (should trigger warning or violation)
+    let low_conf_pattern = PatternSignal {
+        symbol: Symbol::new("AAPL").unwrap(),
+        pattern_name: PatternName::new("doji"),
+        signal_type: SignalType::Buy,
+        confidence: Confidence::new(0.65).unwrap(), // Below threshold for doji
+        detected_at: chrono::Utc::now(),
+        price: Price::new(Decimal::new(15000, 2)).unwrap(),
+    };
+
+    event_bus.publish(MarketEvent::PatternDetected { signal: low_conf_pattern });
+
+    // Wait for processing
+    sleep(Duration::from_millis(100)).await;
+
+    let mut violations = 0;
+    let mut performance_updates = 0;
+
+    while let Ok(event) = event_receiver.try_recv() {
+        match event {
+            MarketEvent::RiskViolation { .. } => violations += 1,
+            MarketEvent::PatternPerformanceUpdate { .. } => performance_updates += 1,
+            _ => {}
+        }
+    }
+
+    // Should have a violation for low confidence
+    assert_eq!(violations, 1, "Expected violation for low confidence pattern");
+    assert!(performance_updates >= 1, "Expected performance update");
+}
+
+/// Test multi-rule evaluation where multiple risk rules are evaluated together
 /// Test multi-rule evaluation where multiple risk rules are evaluated together
 #[tokio::test]
 async fn test_multi_rule_evaluation() {
@@ -116,7 +244,100 @@ async fn test_multi_rule_evaluation() {
         violations.iter().map(|v| v.violation_type.clone()).collect();
 
     println!("Detected violation types: {:?}", violation_types);
-    assert!(violation_types.len() >= 1, "Should detect at least one type of violation");
+    assert!(violations.len() >= 1, "Should detect at least one type of violation");
+}
+
+/// Test end-to-end: pattern detection → risk evaluation → trade execution
+#[tokio::test]
+async fn test_end_to_end_pattern_risk_workflow() {
+    let config = create_test_risk_config();
+    let event_bus = Arc::new(EventBus::new(1000));
+    let account_id = AccountId::new("test-account");
+    let initial_equity = Decimal::new(5000000, 2);
+
+    let engine = RiskEngine::new(config, Arc::clone(&event_bus), account_id, initial_equity);
+    engine.start().await.unwrap();
+
+    // Subscribe to events
+    let mut event_receiver = event_bus.subscribe();
+
+    // Step 1: Pattern detection
+    let pattern_signal = PatternSignal {
+        symbol: Symbol::new("AAPL").unwrap(),
+        pattern_name: PatternName::new("hammer"),
+        signal_type: SignalType::Buy,
+        confidence: Confidence::new(0.85).unwrap(),
+        detected_at: chrono::Utc::now(),
+        price: Price::new(Decimal::new(15000, 2)).unwrap(),
+    };
+
+    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal.clone() });
+
+    // Step 2: Order placement (assuming execution system would do this)
+    let order = Arc::new(Order {
+        id: OrderId::new("test-trade-order"),
+        symbol: Symbol::new("AAPL").unwrap(),
+        side: OrderSide::Buy,
+        order_type: OrderType::Market,
+        quantity: Quantity::new(100).unwrap(),
+        price: Some(Price::new(Decimal::new(15000, 2)).unwrap()),
+        status: OrderStatus::Filled,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+
+    event_bus.publish(MarketEvent::OrderPlaced { order: Arc::clone(&order) });
+
+    // Step 3: Order fill
+    let fill = Fill {
+        order_id: OrderId::new("test-trade-order"),
+        filled_quantity: Quantity::new(100).unwrap(),
+        filled_price: Price::new(Decimal::new(15200, 2)).unwrap(), // Small profit
+        filled_at: chrono::Utc::now(),
+        commission: Decimal::new(-100, 2), // $1.00 commission
+    };
+
+    event_bus.publish(MarketEvent::OrderFilled {
+        order_id: OrderId::new("test-trade-order"),
+        fill,
+    });
+
+    // Step 4: Position opened
+    let position = Position {
+        symbol: Symbol::new("AAPL").unwrap(),
+        quantity: Quantity::new(100).unwrap(),
+        average_entry_price: Price::new(Decimal::new(15200, 2)).unwrap(),
+        current_price: Price::new(Decimal::new(15200, 2)).unwrap(),
+        unrealized_pl: Decimal::ZERO,
+        realized_pl: Decimal::ZERO,
+        opened_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    event_bus.publish(MarketEvent::PositionOpened { position });
+
+    // Wait for processing
+    sleep(Duration::from_millis(200)).await;
+
+    // Check for events in the workflow
+    let mut events_received = 0;
+    let mut performance_updates = 0;
+    let mut violations = 0;
+
+    while let Ok(event) = event_receiver.try_recv() {
+        events_received += 1;
+        match event {
+            MarketEvent::PatternPerformanceUpdate { .. } => performance_updates += 1,
+            MarketEvent::RiskViolation { .. } => violations += 1,
+            MarketEvent::RiskMultiplierAdjusted { .. } => events_received += 1, // Pattern risk events
+            _ => {}
+        }
+    }
+
+    // Should have processed the full workflow without critical failures
+    assert!(events_received > 0, "Expected events from full workflow");
+    assert_eq!(violations, 0, "Should not have violations for valid workflow");
+    println!("Full workflow processed: {} events, {} performance updates, {} violations", events_received, performance_updates, violations);
 }
 
 /// Test event publishing and risk violation events

@@ -38,16 +38,20 @@
 //! assert!(evaluation.is_passed());
 //! ```
 
-use crate::brokers::types::PatternName;
+use crate::brokers::types::{Message, PatternName};
+use crate::events::bus::EventBus;
+use crate::events::types::{MarketEvent, RiskMultiplierAdjusted, RiskViolation as EventRiskViolation, RiskViolationType};
 use crate::risk::types::{
     ConfidenceMultiplier, Count, PatternPerformanceThresholds, PatternRiskProfile,
     PatternRiskViolation, PatternRiskViolationType, RiskEvaluation, ViolationSeverity,
 };
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Configuration for pattern-specific risk management
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +274,9 @@ pub struct PatternRiskEvaluator {
     config: PatternRiskConfig,
     pattern_states: HashMap<String, PatternRiskState>,
     stats_tracker: Option<crate::risk::pattern_stats::PatternStatsTracker>,
+    event_bus: Option<Arc<EventBus>>,
+    // Cache for frequently accessed pattern keys to avoid repeated string operations
+    pattern_key_cache: Arc<DashMap<String, String>>,
 }
 
 impl PatternRiskEvaluator {
@@ -279,6 +286,7 @@ impl PatternRiskEvaluator {
             config,
             pattern_states: HashMap::new(),
             stats_tracker: None,
+            pattern_key_cache: Arc::new(DashMap::new()),
         }
     }
 
@@ -288,12 +296,17 @@ impl PatternRiskEvaluator {
             config,
             pattern_states: HashMap::new(),
             stats_tracker: Some(stats_tracker),
+            pattern_key_cache: Arc::new(DashMap::new()),
         }
     }
 
     /// Sets the statistics tracker for performance-based adjustments
     pub fn set_stats_tracker(&mut self, stats_tracker: crate::risk::pattern_stats::PatternStatsTracker) {
         self.stats_tracker = Some(stats_tracker);
+    }
+    
+    pub fn set_event_bus(&mut self, event_bus: Arc<EventBus>) {
+        self.event_bus = Some(event_bus);
     }
 
     /// Evaluates a pattern-based trade against risk limits
@@ -313,16 +326,31 @@ impl PatternRiskEvaluator {
         confidence: f64,
         order_value: Decimal,
     ) -> RiskEvaluation {
-        let pattern_key = pattern_name.as_str().to_lowercase();
+        let pattern_key = self.pattern_key_cache
+            .entry(pattern_name.as_str().to_string())
+            .or_insert_with(|| pattern_name.as_str().to_lowercase())
+            .value()
+            .clone();
 
-        // Get pattern profile (use default if not configured)
+        // Get pattern profile and state in single lookup to avoid multiple HashMap accesses
         let profile = self.config.pattern_profiles
             .get(&pattern_key)
             .unwrap_or(&self.config.default_profile);
 
+        let pattern_state = self.pattern_states.get(&pattern_key);
+
         // Check if pattern is enabled
-        if let Some(state) = self.pattern_states.get(&pattern_key) {
+        if let Some(state) = pattern_state {
             if !state.is_enabled {
+                let violation = RiskViolation {
+                    violation_type: RiskViolationType::PatternDisabled,
+                    message: Message::new("Pattern is disabled due to poor performance".to_string()),
+                    timestamp: Utc::now(),
+                    pattern_name: Some(pattern_name.clone()),
+                };
+                if let Some(bus) = &self.event_bus {
+                    bus.publish(MarketEvent::RiskViolation { violation });
+                }
                 return RiskEvaluation::Violated {
                     severity: ViolationSeverity::Critical,
                     suggested_action: Some("Pattern is disabled due to poor performance".to_string()),
@@ -332,37 +360,64 @@ impl PatternRiskEvaluator {
 
         // Check confidence threshold
         if confidence < profile.min_confidence_threshold {
+            let message_str = format!(
+                "Confidence {:.2} below minimum threshold {:.2} for {}",
+                confidence, profile.min_confidence_threshold, pattern_name.as_str()
+            );
+            let violation = RiskViolation {
+                violation_type: RiskViolationType::Other,
+                message: Message::new(message_str.clone()),
+                timestamp: Utc::now(),
+                pattern_name: Some(pattern_name.clone()),
+            };
+            if let Some(bus) = &self.event_bus {
+                bus.publish(MarketEvent::RiskViolation { violation });
+            }
             return RiskEvaluation::Violated {
                 severity: ViolationSeverity::Moderate,
-                suggested_action: Some(format!(
-                    "Confidence {:.2} below minimum threshold {:.2}",
-                    confidence, profile.min_confidence_threshold
-                )),
+                suggested_action: Some(message_str),
             };
         }
 
-        // Check daily trade limit
-        if let Some(state) = self.pattern_states.get(&pattern_key) {
+        // Check daily trade limit and consecutive losses using the already fetched state
+        if let Some(state) = pattern_state {
             if state.daily_trade_count >= profile.max_trades_per_day.value() {
+                let message_str = format!(
+                    "Daily trade limit {} exceeded for pattern {}",
+                    profile.max_trades_per_day.value(), pattern_name.as_str()
+                );
+                let violation = RiskViolation {
+                    violation_type: RiskViolationType::PatternMultiplierExceeded,
+                    message: Message::new(message_str.clone()),
+                    timestamp: Utc::now(),
+                    pattern_name: Some(pattern_name.clone()),
+                };
+                if let Some(bus) = &self.event_bus {
+                    bus.publish(MarketEvent::RiskViolation { violation });
+                }
                 return RiskEvaluation::Violated {
                     severity: ViolationSeverity::Moderate,
-                    suggested_action: Some(format!(
-                        "Daily trade limit {} exceeded for pattern {}",
-                        profile.max_trades_per_day.value(), pattern_name.as_str()
-                    )),
+                    suggested_action: Some(message_str),
                 };
             }
-        }
 
-        // Check consecutive losses
-        if let Some(state) = self.pattern_states.get(&pattern_key) {
             if state.consecutive_losses >= profile.stop_after_consecutive_losses.value() {
+                let message_str = format!(
+                    "Consecutive losses ({}) exceeded threshold for pattern {}",
+                    state.consecutive_losses, pattern_name.as_str()
+                );
+                let violation = RiskViolation {
+                    violation_type: RiskViolationType::PatternPerformanceThreshold,
+                    message: Message::new(message_str.clone()),
+                    timestamp: Utc::now(),
+                    pattern_name: Some(pattern_name.clone()),
+                };
+                if let Some(bus) = &self.event_bus {
+                    bus.publish(MarketEvent::RiskViolation { violation });
+                }
                 return RiskEvaluation::Violated {
                     severity: ViolationSeverity::Critical,
-                    suggested_action: Some(format!(
-                        "Consecutive losses ({}) exceeded threshold for pattern {}",
-                        state.consecutive_losses, pattern_name.as_str()
-                    )),
+                    suggested_action: Some(message_str),
                 };
             }
         }
@@ -386,19 +441,26 @@ impl PatternRiskEvaluator {
             risk_multiplier *= performance_multiplier_decimal;
         }
 
-        let adjusted_position_limit = order_value * position_multiplier;
-        let adjusted_risk_limit = order_value * risk_multiplier;
-
         // Check position size against pattern-adjusted limits
         let pattern_max_position = self.config.base_max_position_dollars * profile.max_position_size_multiplier;
         let pattern_max_position_decimal = Decimal::from_f64_retain(pattern_max_position).unwrap_or(Decimal::MAX);
         if order_value > pattern_max_position_decimal {
+            let message_str = format!(
+                "Order value ${:.2} exceeds pattern limit ${:.2} for {}",
+                order_value, pattern_max_position, pattern_name.as_str()
+            );
+            let violation = RiskViolation {
+                violation_type: RiskViolationType::PositionSizeLimit,
+                message: Message::new(message_str.clone()),
+                timestamp: Utc::now(),
+                pattern_name: Some(pattern_name.clone()),
+            };
+            if let Some(bus) = &self.event_bus {
+                bus.publish(MarketEvent::RiskViolation { violation });
+            }
             return RiskEvaluation::Violated {
                 severity: ViolationSeverity::Moderate,
-                suggested_action: Some(format!(
-                    "Order value ${:.2} exceeds pattern limit ${:.2}",
-                    order_value, pattern_max_position
-                )),
+                suggested_action: Some(message_str),
             };
         }
 
@@ -430,17 +492,50 @@ impl PatternRiskEvaluator {
     /// * `sample_size` - Number of trades in the sample
     pub fn update_pattern_status(&mut self, pattern_name: &PatternName, win_rate: f64, sample_size: u32) {
         let pattern_key = pattern_name.as_str().to_lowercase();
-
+    
         let threshold_percent = self.config.performance_thresholds.auto_disable_threshold.value() / Decimal::new(100, 0);
         let threshold_rate = threshold_percent.to_f64().unwrap_or(0.4);
         let should_enable = sample_size >= self.config.performance_thresholds.min_sample_size.value()
             && win_rate >= threshold_rate;
-
+    
         let state = self.pattern_states
             .entry(pattern_key.clone())
             .or_insert_with(|| PatternRiskState::new(pattern_key));
-
+    
+        let old_enabled = state.is_enabled;
         state.set_enabled(should_enable);
+    
+        if old_enabled != should_enable && self.event_bus.is_some() {
+            let bus = self.event_bus.as_ref().unwrap();
+            let reason = if should_enable {
+                "Met performance criteria".to_string()
+            } else {
+                "Failed performance threshold".to_string()
+            };
+            if should_enable {
+                bus.publish(MarketEvent::PatternEnabled {
+                    pattern_name: pattern_name.clone(),
+                    reason: reason.clone(),
+                });
+            } else {
+                bus.publish(MarketEvent::PatternDisabled {
+                    pattern_name: pattern_name.clone(),
+                    reason,
+                });
+            }
+    
+            // Publish performance update
+            if let Some(stats_tracker) = &self.stats_tracker {
+                if let Some(stats) = stats_tracker.get_pattern_stats(pattern_name) {
+                    bus.publish(MarketEvent::PatternPerformanceUpdate {
+                        pattern_name: pattern_name.clone(),
+                        win_rate: stats.win_rate,
+                        total_trades: stats.total_trades,
+                        recent_pl: stats.total_profit,
+                    });
+                }
+            }
+        }
     }
 
     /// Gets the current risk state for a pattern
@@ -519,13 +614,14 @@ impl PatternRiskEvaluator {
     /// Updates pattern enable/disable status based on rolling performance
     pub fn update_pattern_status_from_performance(&mut self, min_performance_score: f64, min_sample_size: u32) {
         if let Some(stats_tracker) = &mut self.stats_tracker {
-            for pattern_name in self.pattern_states.keys() {
-                let pattern_name_obj = PatternName::new(pattern_name);
+            let pattern_names: Vec<String> = self.pattern_states.keys().cloned().collect();
+            for pattern_name in pattern_names {
+                let pattern_name_obj = PatternName::new(&pattern_name);
                 stats_tracker.update_pattern_status_from_rolling(&pattern_name_obj, min_performance_score, min_sample_size);
 
                 // Update our local state to match
                 if let Some(stats) = stats_tracker.get_pattern_stats(&pattern_name_obj) {
-                    if let Some(state) = self.pattern_states.get_mut(pattern_name) {
+                    if let Some(state) = self.pattern_states.get_mut(&pattern_name) {
                         state.set_enabled(stats.is_enabled);
                     }
                 }
@@ -712,8 +808,8 @@ mod tests {
 
         // Initially should have lower risk multiplier due to good performance
         evaluator.update_performance_based_multipliers();
-        let state = evaluator.get_pattern_state(&pattern_name).unwrap();
-        assert!(state.current_risk_multiplier < 1.0); // Reduced risk for good performance
+        let initial_multiplier = evaluator.get_pattern_state(&pattern_name).unwrap().current_risk_multiplier;
+        assert!(initial_multiplier < 1.0); // Reduced risk for good performance
 
         // Simulate poor performance by directly modifying tracker
         let mut new_tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
@@ -723,8 +819,8 @@ mod tests {
         evaluator.set_stats_tracker(new_tracker);
 
         evaluator.update_performance_based_multipliers();
-        let state_after = evaluator.get_pattern_state(&pattern_name).unwrap();
-        assert!(state_after.current_risk_multiplier > state.current_risk_multiplier); // Increased risk
+        let final_multiplier = evaluator.get_pattern_state(&pattern_name).unwrap().current_risk_multiplier;
+        assert!(final_multiplier > initial_multiplier); // Increased risk
     }
 
     #[test]
