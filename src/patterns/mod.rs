@@ -68,7 +68,14 @@ pub use types::{
     VolumeConfirmation, TrendContext,
 };
 
-// Pattern detection modules (to be implemented in subsequent phases)
-// pub mod candlestick;  // Phase 3A-2 & 3A-3
+// Pattern detection modules
+pub mod candlestick;  // Phase 3A-2: Basic candlestick patterns (Hammer, Shooting Star, Doji)
+pub mod engulfing;    // Phase 3A-2: Engulfing patterns (Bullish/Bearish Engulfing)
+pub mod multi_candle; // Phase 3A-3: Multi-candle patterns (Morning/Evening Star, Three White Soldiers/Black Crows)
 // pub mod indicators;   // Phase 3B
 // pub mod signals;      // Phase 3C
+
+// Re-export pattern detectors for easy access
+pub use candlestick::{HammerDetector, ShootingStarDetector, DojiDetector};
+pub use engulfing::{BullishEngulfingDetector, BearishEngulfingDetector};
+pub use multi_candle::{MorningStarDetector, EveningStarDetector, ThreeWhiteSoldiersDetector, ThreeBlackCrowsDetector};

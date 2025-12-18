@@ -325,6 +325,16 @@ fn test_config_serialization() {
             min_pattern_sample_size: 20,
             min_account_balance: 1000.0,
             emergency_liquidate_threshold: 500.0,
+            pattern_profiles: std::collections::HashMap::new(),
+            confidence_multipliers: vec![],
+            pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds {
+                min_win_rate_short: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+                min_win_rate_medium: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+                min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+                max_consecutive_losses: daytrader::risk::types::Count::new(3).unwrap(),
+                min_sample_size: daytrader::risk::types::Count::new(20).unwrap(),
+                auto_disable_threshold: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(400, 1)).unwrap(),
+            },
         },
     };
 

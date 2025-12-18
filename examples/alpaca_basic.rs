@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         for order in open_orders {
             println!(
-                "  {} - {} {} {} @ ${:?} | Status: {:?}",
+                "  {} - {:?} {} {} @ ${:?} | Status: {:?}",
                 order.id,
                 order.side,
                 order.quantity,

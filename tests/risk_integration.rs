@@ -3,15 +3,15 @@
 //! These tests validate the complete risk workflow from event ingestion
 //! through risk evaluation and violation handling.
 
-use daytrader::brokers::types::{Message, OrderId, PatternName, Price, Quantity, Reason, Symbol};
-use daytrader::risk::types::AccountId;
+use daytrader::brokers::types::{Message, OrderId, Price, Quantity, Symbol, PatternName, Confidence};
+use daytrader::risk::types::{AccountId, PatternPerformanceThresholds, Percentage, Count};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
     Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, PatternSignal, Position,
-    RiskMultiplierAdjusted, RiskViolation, RiskViolationType, SignalType,
+    RiskViolation, RiskViolationType, SignalType,
 };
-use daytrader::risk::{RiskEngine, RiskRuleId, ViolationSeverity};
+use daytrader::risk::RiskEngine;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -537,6 +537,16 @@ fn create_test_risk_config() -> RiskConfig {
         min_pattern_sample_size: 20,
         min_account_balance: 1000.0,
         emergency_liquidate_threshold: 500.0,
+        pattern_profiles: std::collections::HashMap::new(),
+        confidence_multipliers: vec![],
+        pattern_performance_thresholds: PatternPerformanceThresholds {
+            min_win_rate_short: Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+            min_win_rate_medium: Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+            min_win_rate_long: Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+            max_consecutive_losses: Count::new(3).unwrap(),
+            min_sample_size: Count::new(20).unwrap(),
+            auto_disable_threshold: Percentage::new(rust_decimal::Decimal::new(400, 1)).unwrap(),
+        },
     }
 }
 

@@ -356,6 +356,8 @@ async fn test_rapid_pnl_changes() {
 
 /// Helper function to create PDT-focused risk configuration
 fn create_strict_pdt_config() -> RiskConfig {
+    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
+    
     RiskConfig {
         max_daily_loss_dollars: 1000.0,
         max_daily_loss_percent: 5.0,
@@ -372,11 +374,23 @@ fn create_strict_pdt_config() -> RiskConfig {
         min_pattern_sample_size: 10,
         min_account_balance: 1000.0,
         emergency_liquidate_threshold: 1000.0,
+        pattern_profiles: std::collections::HashMap::new(),
+        confidence_multipliers: vec![],
+        pattern_performance_thresholds: PatternPerformanceThresholds {
+            min_win_rate_short: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_medium: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_long: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            max_consecutive_losses: Count::new(5).unwrap(),
+            min_sample_size: Count::new(10).unwrap(),
+            auto_disable_threshold: Percentage::new(rust_decimal::Decimal::new(300, 1)).unwrap(),
+        },
     }
 }
 
 /// Helper function to create loss limit focused configuration
 fn create_loss_limit_config() -> RiskConfig {
+    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
+    
     RiskConfig {
         max_daily_loss_dollars: 500.0, // Very low limit for testing
         max_daily_loss_percent: 1.0,
@@ -393,11 +407,23 @@ fn create_loss_limit_config() -> RiskConfig {
         min_pattern_sample_size: 10,
         min_account_balance: 1000.0,
         emergency_liquidate_threshold: 1000.0,
+        pattern_profiles: std::collections::HashMap::new(),
+        confidence_multipliers: vec![],
+        pattern_performance_thresholds: PatternPerformanceThresholds {
+            min_win_rate_short: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_medium: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_long: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            max_consecutive_losses: Count::new(5).unwrap(),
+            min_sample_size: Count::new(10).unwrap(),
+            auto_disable_threshold: Percentage::new(rust_decimal::Decimal::new(300, 1)).unwrap(),
+        },
     }
 }
 
 /// Helper function to create position sizing focused configuration
 fn create_position_sizing_config() -> RiskConfig {
+    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
+    
     RiskConfig {
         max_daily_loss_dollars: 5000.0,
         max_daily_loss_percent: 10.0,
@@ -414,6 +440,16 @@ fn create_position_sizing_config() -> RiskConfig {
         min_pattern_sample_size: 10,
         min_account_balance: 1000.0,
         emergency_liquidate_threshold: 1000.0,
+        pattern_profiles: std::collections::HashMap::new(),
+        confidence_multipliers: vec![],
+        pattern_performance_thresholds: PatternPerformanceThresholds {
+            min_win_rate_short: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_medium: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_long: Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            max_consecutive_losses: Count::new(5).unwrap(),
+            min_sample_size: Count::new(10).unwrap(),
+            auto_disable_threshold: Percentage::new(rust_decimal::Decimal::new(300, 1)).unwrap(),
+        },
     }
 }
 
@@ -435,6 +471,16 @@ fn create_test_risk_config() -> RiskConfig {
         min_pattern_sample_size: 10,
         min_account_balance: 1000.0,
         emergency_liquidate_threshold: 1000.0,
+        pattern_profiles: std::collections::HashMap::new(),
+        confidence_multipliers: vec![],
+        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds {
+            min_win_rate_short: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_medium: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            max_consecutive_losses: daytrader::risk::types::Count::new(5).unwrap(),
+            min_sample_size: daytrader::risk::types::Count::new(10).unwrap(),
+            auto_disable_threshold: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(300, 1)).unwrap(),
+        },
     }
 }
 
