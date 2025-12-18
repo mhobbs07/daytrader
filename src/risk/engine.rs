@@ -38,6 +38,9 @@ pub struct RiskEngine {
     daily_loss_tracker: Arc<DailyLossTracker>,
     position_sizer: Arc<PositionSizer>,
     pdt_enforcer: Arc<PdtEnforcer>,
+    // Pattern-specific risk management
+    pattern_stats_tracker: Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>,
+    pattern_risk_evaluator: Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>>,
 }
 
 /// Internal risk state tracking
@@ -75,6 +78,15 @@ impl RiskEngine {
         let pdt_config = PdtConfig::from_config(&config);
         let pdt_enforcer = Arc::new(PdtEnforcer::new(pdt_config, initial_equity));
 
+        // Initialize pattern statistics tracker
+        let pattern_stats_tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
+
+        // Initialize pattern risk evaluator with stats tracker
+        let pattern_config = crate::risk::pattern_limits::PatternRiskConfig::from_config(&config);
+        let mut pattern_risk_evaluator = crate::risk::pattern_limits::PatternRiskEvaluator::new(pattern_config);
+        pattern_risk_evaluator.set_stats_tracker(crate::risk::pattern_stats::PatternStatsTracker::new());
+        let pattern_risk_evaluator = Arc::new(RwLock::new(pattern_risk_evaluator));
+
         Self {
             config,
             event_bus,
@@ -83,6 +95,8 @@ impl RiskEngine {
             daily_loss_tracker,
             position_sizer,
             pdt_enforcer,
+            pattern_stats_tracker,
+            pattern_risk_evaluator,
         }
     }
 
@@ -97,6 +111,8 @@ impl RiskEngine {
         let daily_loss_tracker = Arc::clone(&self.daily_loss_tracker);
         let position_sizer = Arc::clone(&self.position_sizer);
         let pdt_enforcer = Arc::clone(&self.pdt_enforcer);
+        let pattern_stats_tracker = Arc::clone(&self.pattern_stats_tracker);
+        let pattern_risk_evaluator = Arc::clone(&self.pattern_risk_evaluator);
 
         // Create a new rule engine for the async task (can't clone the existing one)
         let rule_engine = crate::risk::rules::RiskRuleEngine::new(config.clone());
@@ -109,6 +125,8 @@ impl RiskEngine {
             daily_loss_tracker,
             position_sizer,
             pdt_enforcer,
+            pattern_stats_tracker,
+            pattern_risk_evaluator,
         });
 
         // Spawn event processing task
@@ -131,6 +149,10 @@ impl RiskEngine {
         event: MarketEvent,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match event {
+            MarketEvent::PatternDetected { signal } => {
+                // Record pattern signal detection for statistics
+                self.record_pattern_signal(&signal).await?;
+            }
             MarketEvent::OrderPlaced { order } => {
                 // Pre-trade risk validation
                 self.validate_order_placement(&order).await?;
@@ -138,6 +160,8 @@ impl RiskEngine {
             MarketEvent::OrderFilled { order_id, fill } => {
                 // Update risk metrics after fill
                 self.update_on_fill(order_id, &fill).await?;
+                // Record pattern trade outcome if applicable
+                self.record_pattern_trade_outcome(order_id, &fill).await?;
             }
             MarketEvent::PositionUpdated { position } => {
                 // Update P&L tracking
@@ -270,6 +294,45 @@ impl RiskEngine {
         Ok(())
     }
 
+    /// Records pattern signal detection for statistics tracking
+    async fn record_pattern_signal(
+        &self,
+        signal: &crate::events::types::PatternSignal,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut stats_tracker = self.pattern_stats_tracker.write().await;
+        stats_tracker.record_signal(&signal.pattern_name);
+        Ok(())
+    }
+
+    /// Records pattern trade outcome for performance tracking
+    async fn record_pattern_trade_outcome(
+        &self,
+        order_id: crate::brokers::types::OrderId,
+        fill: &crate::events::types::Fill,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // TODO: We need to determine if this is a pattern trade and get the pattern name and confidence
+        // For now, we'll assume we can look this up from the order or have it passed in the event
+        // This would require extending the OrderFilled event to include pattern information
+
+        // For Phase 2B-2 implementation, we'll assume pattern trades are identified by some means
+        // and implement the basic structure
+
+        // Placeholder implementation - in real system, this would look up pattern info from order metadata
+        // let pattern_name = ...;
+        // let confidence = ...;
+        // let profit = calculate_profit_from_fill(fill);
+
+        // if let (Some(pattern_name), Some(confidence)) = (pattern_name, confidence) {
+        //     let mut stats_tracker = self.pattern_stats_tracker.write().await;
+        //     stats_tracker.record_trade_outcome(&pattern_name, confidence, profit);
+        //
+        //     let mut risk_evaluator = self.pattern_risk_evaluator.write().await;
+        //     risk_evaluator.record_pattern_trade(&pattern_name, profit > Decimal::ZERO);
+        // }
+
+        Ok(())
+    }
+
     /// Gets current risk state (read-only)
     pub async fn get_risk_state(&self) -> RiskState {
         self.state.read().await.clone()
@@ -368,6 +431,9 @@ mod tests {
             min_pattern_sample_size: 20,
             min_account_balance: 1000.0,
             emergency_liquidate_threshold: 500.0,
+            pattern_profiles: std::collections::HashMap::new(),
+            confidence_multipliers: vec![],
+            pattern_performance_thresholds: crate::risk::types::PatternPerformanceThresholds::default(),
         }
     }
 }

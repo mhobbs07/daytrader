@@ -40,8 +40,10 @@
 //! }
 //! ```
 
+use crate::brokers::types::PatternName;
 use crate::config::RiskConfig;
 use crate::risk::limits::{DailyLossLimits, DailyLossTracker};
+use crate::risk::pattern_limits::{PatternRiskConfig, PatternRiskEvaluator};
 use crate::risk::pdt::{PdtConfig, PdtEnforcer};
 use crate::risk::position_sizing::{PositionSizeLimits, PositionSizer};
 use crate::risk::types::{RiskEvaluation, RiskRuleId, ViolationSeverity};
@@ -67,6 +69,10 @@ pub struct TradeContext {
     pub current_equity: Decimal,
     /// Whether this is considered a day trade
     pub is_day_trade: bool,
+    /// Pattern name if this is a pattern-based trade
+    pub pattern_name: Option<PatternName>,
+    /// Pattern confidence score (0.0 to 1.0)
+    pub pattern_confidence: Option<f64>,
     /// Current timestamp
     pub timestamp: DateTime<Utc>,
 }
@@ -88,6 +94,32 @@ impl TradeContext {
             order_value,
             current_equity,
             is_day_trade,
+            pattern_name: None,
+            pattern_confidence: None,
+            timestamp: Utc::now(),
+        }
+    }
+
+    /// Creates a new trade context for pattern-based trades
+    pub fn new_with_pattern(
+        symbol: String,
+        quantity: Decimal,
+        price: Decimal,
+        current_equity: Decimal,
+        is_day_trade: bool,
+        pattern_name: PatternName,
+        pattern_confidence: f64,
+    ) -> Self {
+        let order_value = quantity * price;
+        Self {
+            symbol,
+            quantity,
+            price,
+            order_value,
+            current_equity,
+            is_day_trade,
+            pattern_name: Some(pattern_name),
+            pattern_confidence: Some(pattern_confidence),
             timestamp: Utc::now(),
         }
     }
@@ -354,6 +386,58 @@ impl RiskRule for PdtLimitRule {
     }
 }
 
+/// Pattern-specific limit rule implementation
+pub struct PatternSpecificLimitRule {
+    evaluator: Arc<PatternRiskEvaluator>,
+}
+
+impl PatternSpecificLimitRule {
+    /// Creates a new pattern-specific limit rule
+    pub fn new(evaluator: Arc<PatternRiskEvaluator>) -> Self {
+        Self { evaluator }
+    }
+}
+
+#[async_trait::async_trait]
+impl RiskRule for PatternSpecificLimitRule {
+    fn id(&self) -> RiskRuleId {
+        RiskRuleId::PatternSpecificLimit
+    }
+
+    async fn evaluate(&self, context: &TradeContext) -> RuleEvaluation {
+        // Only evaluate if this is a pattern-based trade
+        let (pattern_name, confidence) = match (&context.pattern_name, context.pattern_confidence) {
+            (Some(name), Some(conf)) => (name, conf),
+            _ => return RuleEvaluation::passed(), // Not a pattern trade, skip evaluation
+        };
+
+        match self.evaluator.evaluate_pattern_trade(pattern_name, confidence, context.order_value) {
+            RiskEvaluation::Passed => RuleEvaluation::passed(),
+            RiskEvaluation::Violated { severity, suggested_action } => {
+                let action = match severity {
+                    ViolationSeverity::Critical => ViolationAction::Block,
+                    ViolationSeverity::Moderate => ViolationAction::ReduceSize,
+                    ViolationSeverity::Warning => ViolationAction::Allow,
+                };
+
+                RuleEvaluation::violated(
+                    severity,
+                    action,
+                    suggested_action.unwrap_or_else(|| "Pattern-specific limit violation".to_string()),
+                )
+            }
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "Pattern-Specific Limit"
+    }
+
+    fn description(&self) -> &'static str {
+        "Enforces pattern-specific risk limits based on pattern type and confidence"
+    }
+}
+
 /// Integrated risk rule engine
 ///
 /// Manages all risk rules and provides unified evaluation interface.
@@ -382,6 +466,11 @@ impl RiskRuleEngine {
         let pdt_config = PdtConfig::from_config(&config);
         let pdt_enforcer = Arc::new(PdtEnforcer::new(pdt_config, Decimal::ZERO));
         rules.push(Box::new(PdtLimitRule::new(Arc::clone(&pdt_enforcer))));
+
+        // Initialize pattern-specific limits
+        let pattern_config = PatternRiskConfig::from_config(&config);
+        let pattern_evaluator = Arc::new(PatternRiskEvaluator::new(pattern_config));
+        rules.push(Box::new(PatternSpecificLimitRule::new(Arc::clone(&pattern_evaluator))));
 
         Self { rules, config }
     }
@@ -513,6 +602,7 @@ mod tests {
         assert!(results.contains_key(&RiskRuleId::DailyLossLimit));
         assert!(results.contains_key(&RiskRuleId::PositionSizeLimit));
         assert!(results.contains_key(&RiskRuleId::PdtLimit));
+        assert!(results.contains_key(&RiskRuleId::PatternSpecificLimit));
 
         // All should pass for a basic trade
         for (rule_id, evaluation) in results {

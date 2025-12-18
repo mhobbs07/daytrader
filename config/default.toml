@@ -49,6 +49,119 @@ min_pattern_sample_size = 20
 min_account_balance = 1000.00
 emergency_liquidate_threshold = 500.00
 
+# Pattern-specific risk profiles
+[pattern_profiles.hammer]
+max_trades_per_day = 3
+max_position_size_multiplier = 0.7
+min_confidence_threshold = 0.75
+risk_multiplier = 0.6
+stop_after_consecutive_losses = 3
+
+[pattern_profiles.doji]
+max_trades_per_day = 2
+max_position_size_multiplier = 0.5
+min_confidence_threshold = 0.80
+risk_multiplier = 0.4
+stop_after_consecutive_losses = 2
+
+[pattern_profiles.bullish_engulfing]
+max_trades_per_day = 4
+max_position_size_multiplier = 0.85
+min_confidence_threshold = 0.70
+risk_multiplier = 0.8
+stop_after_consecutive_losses = 3
+
+[pattern_profiles.bearish_engulfing]
+max_trades_per_day = 4
+max_position_size_multiplier = 0.85
+min_confidence_threshold = 0.70
+risk_multiplier = 0.8
+stop_after_consecutive_losses = 3
+
+[pattern_profiles.morning_star]
+max_trades_per_day = 5
+max_position_size_multiplier = 0.95
+min_confidence_threshold = 0.65
+risk_multiplier = 0.9
+stop_after_consecutive_losses = 3
+
+[pattern_profiles.evening_star]
+max_trades_per_day = 5
+max_position_size_multiplier = 0.95
+min_confidence_threshold = 0.65
+risk_multiplier = 0.9
+stop_after_consecutive_losses = 3
+
+# Confidence-based risk multipliers
+[[confidence_multipliers]]
+min_confidence = 0.0
+max_confidence = 0.3
+position_size_multiplier = 0.3
+trade_limit_multiplier = 0.5
+risk_limit_multiplier = 0.3
+
+[[confidence_multipliers]]
+min_confidence = 0.3
+max_confidence = 0.5
+position_size_multiplier = 0.5
+trade_limit_multiplier = 0.7
+risk_limit_multiplier = 0.5
+
+[[confidence_multipliers]]
+min_confidence = 0.5
+max_confidence = 0.7
+position_size_multiplier = 0.8
+trade_limit_multiplier = 0.9
+risk_limit_multiplier = 0.8
+
+[[confidence_multipliers]]
+min_confidence = 0.7
+max_confidence = 0.9
+position_size_multiplier = 1.0
+trade_limit_multiplier = 1.0
+risk_limit_multiplier = 1.0
+
+[[confidence_multipliers]]
+min_confidence = 0.9
+max_confidence = 1.0
+position_size_multiplier = 1.2
+trade_limit_multiplier = 1.1
+risk_limit_multiplier = 1.1
+
+# Pattern performance thresholds
+[pattern_performance_thresholds]
+min_win_rate_short = 50.0
+min_win_rate_medium = 55.0
+min_win_rate_long = 60.0
+max_consecutive_losses = 3
+min_sample_size = 20
+auto_disable_threshold = 40.0
+
+# Rolling window performance configuration
+[rolling_windows]
+enabled = true
+windows_days = [7, 30, 90]
+performance_update_interval_seconds = 300  # 5 minutes
+cleanup_old_records_days = 365
+
+# Performance-based risk escalation/de-escalation rules
+[risk_escalation]
+enabled = true
+escalation_threshold = 0.4  # Performance score below this triggers escalation
+deescalation_threshold = 0.7  # Performance score above this triggers de-escalation
+escalation_rate = 1.1  # Multiply risk by this factor when escalating
+deescalation_rate = 0.9  # Multiply risk by this factor when de-escalating
+max_risk_multiplier = 2.0  # Maximum risk multiplier allowed
+min_risk_multiplier = 0.5  # Minimum risk multiplier allowed
+cooldown_period_minutes = 60  # Minimum time between adjustments
+require_min_sample_size = 10  # Minimum trades before applying escalation
+
+# Risk adjustment smoothing
+[risk_adjustment_smoothing]
+enabled = true
+smoothing_factor = 0.3  # How much weight to give to new vs old multiplier (0.0 = no smoothing, 1.0 = full smoothing)
+adjustment_step_limit = 0.2  # Maximum change in multiplier per adjustment
+
 [patterns]
 enabled = [
     "hammer",

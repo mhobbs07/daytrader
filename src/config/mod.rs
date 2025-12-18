@@ -7,7 +7,9 @@
 //! - Database configuration
 //! - Logging configuration
 
+use crate::risk::types::{ConfidenceMultiplier, PatternPerformanceThresholds, PatternRiskProfile};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Application configuration
@@ -72,6 +74,14 @@ pub struct RiskConfig {
     // Account safeguards
     pub min_account_balance: f64,
     pub emergency_liquidate_threshold: f64,
+
+    // Pattern-specific risk management
+    #[serde(default)]
+    pub pattern_profiles: HashMap<String, PatternRiskProfile>,
+    #[serde(default)]
+    pub confidence_multipliers: Vec<ConfidenceMultiplier>,
+    #[serde(default)]
+    pub pattern_performance_thresholds: PatternPerformanceThresholds,
 }
 
 impl AppConfig {

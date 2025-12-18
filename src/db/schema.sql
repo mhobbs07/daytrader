@@ -135,6 +135,70 @@ CREATE TABLE IF NOT EXISTS pattern_stats (
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Rolling Window Pattern Performance
+CREATE TABLE IF NOT EXISTS pattern_rolling_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_name TEXT NOT NULL,
+    window_days INTEGER NOT NULL,
+    total_trades INTEGER DEFAULT 0,
+    winning_trades INTEGER DEFAULT 0,
+    losing_trades INTEGER DEFAULT 0,
+    total_profit REAL DEFAULT 0.0,
+    win_rate REAL DEFAULT 0.0,
+    avg_profit_per_trade REAL DEFAULT 0.0,
+    consecutive_losses INTEGER DEFAULT 0,
+    performance_score REAL DEFAULT 0.0,
+    risk_multiplier REAL DEFAULT 1.0,
+    window_start TIMESTAMP NOT NULL,
+    window_end TIMESTAMP NOT NULL,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pattern_name) REFERENCES pattern_stats(pattern_name) ON DELETE CASCADE,
+    UNIQUE(pattern_name, window_days, window_end)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rolling_stats_pattern_window ON pattern_rolling_stats(pattern_name, window_days);
+CREATE INDEX IF NOT EXISTS idx_rolling_stats_updated ON pattern_rolling_stats(last_updated DESC);
+
+-- Pattern Trade History for Rolling Windows
+CREATE TABLE IF NOT EXISTS pattern_trade_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_name TEXT NOT NULL,
+    trade_timestamp TIMESTAMP NOT NULL,
+    confidence REAL NOT NULL,
+    profit REAL NOT NULL,
+    was_profitable BOOLEAN NOT NULL,
+    order_id TEXT,
+    symbol TEXT,
+    quantity INTEGER,
+    price REAL,
+    commission REAL DEFAULT 0.0,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pattern_name) REFERENCES pattern_stats(pattern_name) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_history_pattern_time ON pattern_trade_history(pattern_name, trade_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_trade_history_timestamp ON pattern_trade_history(trade_timestamp DESC);
+
+-- Risk Adjustment Audit Log
+CREATE TABLE IF NOT EXISTS risk_adjustment_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_name TEXT NOT NULL,
+    adjustment_type TEXT NOT NULL CHECK(adjustment_type IN ('escalation', 'deescalation', 'enable', 'disable')),
+    old_risk_multiplier REAL,
+    new_risk_multiplier REAL NOT NULL,
+    performance_score REAL,
+    trigger_reason TEXT NOT NULL,
+    window_days INTEGER,
+    trade_count INTEGER,
+    win_rate REAL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pattern_name) REFERENCES pattern_stats(pattern_name) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_audit_pattern_time ON risk_adjustment_audit(pattern_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_audit_type ON risk_adjustment_audit(adjustment_type);
+
 -- Daily Risk Tracking
 CREATE TABLE IF NOT EXISTS daily_risk_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

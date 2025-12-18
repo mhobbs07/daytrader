@@ -3,8 +3,11 @@
 //! This module provides strongly-typed wrappers for risk-related values
 //! to prevent errors like passing a dollar limit where a percentage is expected.
 
+use crate::brokers::types::PatternName;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 
 /// Newtype for dollar amounts (risk limits, balances)
@@ -328,6 +331,171 @@ impl RiskEvaluation {
             Self::Violated { severity, .. } => Some(severity),
         }
     }
+}
+
+/// Pattern risk profile configuration
+///
+/// Defines risk parameters specific to each candlestick pattern type.
+/// Used to customize risk limits based on pattern characteristics and performance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternRiskProfile {
+    /// Maximum trades allowed per day for this pattern
+    pub max_trades_per_day: Count,
+    /// Multiplier for position size limits (0.5 = 50% of base limit)
+    pub max_position_size_multiplier: f64,
+    /// Minimum confidence score required for automated trading
+    pub min_confidence_threshold: f64,
+    /// Overall risk multiplier for this pattern (0.6 = 60% of base risk limits)
+    pub risk_multiplier: f64,
+    /// Stop pattern after this many consecutive losses
+    pub stop_after_consecutive_losses: Count,
+}
+
+impl PatternRiskProfile {
+    /// Creates a conservative pattern risk profile
+    pub fn conservative() -> Self {
+        Self {
+            max_trades_per_day: Count::new(2).unwrap(),
+            max_position_size_multiplier: 0.5,
+            min_confidence_threshold: 0.80,
+            risk_multiplier: 0.4,
+            stop_after_consecutive_losses: Count::new(2).unwrap(),
+        }
+    }
+
+    /// Creates a moderate pattern risk profile
+    pub fn moderate() -> Self {
+        Self {
+            max_trades_per_day: Count::new(4).unwrap(),
+            max_position_size_multiplier: 0.8,
+            min_confidence_threshold: 0.70,
+            risk_multiplier: 0.8,
+            stop_after_consecutive_losses: Count::new(3).unwrap(),
+        }
+    }
+
+    /// Creates an aggressive pattern risk profile
+    pub fn aggressive() -> Self {
+        Self {
+            max_trades_per_day: Count::new(5).unwrap(),
+            max_position_size_multiplier: 1.0,
+            min_confidence_threshold: 0.65,
+            risk_multiplier: 1.0,
+            stop_after_consecutive_losses: Count::new(3).unwrap(),
+        }
+    }
+}
+
+/// Confidence multiplier for risk adjustments
+///
+/// Maps confidence score ranges to risk multipliers for dynamic risk adjustment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfidenceMultiplier {
+    /// Minimum confidence score for this range (inclusive)
+    pub min_confidence: f64,
+    /// Maximum confidence score for this range (exclusive)
+    pub max_confidence: f64,
+    /// Position size multiplier (1.0 = no change)
+    pub position_size_multiplier: f64,
+    /// Trade limit multiplier (1.0 = no change)
+    pub trade_limit_multiplier: f64,
+    /// Risk limit multiplier (1.0 = no change)
+    pub risk_limit_multiplier: f64,
+}
+
+impl ConfidenceMultiplier {
+    /// Returns the appropriate multiplier for a given confidence score
+    pub fn for_confidence(confidence: f64, multipliers: &[Self]) -> Option<&Self> {
+        multipliers.iter().find(|m| {
+            confidence >= m.min_confidence && confidence < m.max_confidence
+        })
+    }
+}
+
+/// Pattern performance thresholds
+///
+/// Defines thresholds for pattern performance monitoring and enable/disable decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternPerformanceThresholds {
+    /// Minimum win rate for short-term performance (7-day)
+    pub min_win_rate_short: Percentage,
+    /// Minimum win rate for medium-term performance (30-day)
+    pub min_win_rate_medium: Percentage,
+    /// Minimum win rate for long-term performance (90-day)
+    pub min_win_rate_long: Percentage,
+    /// Maximum consecutive losses before disabling pattern
+    pub max_consecutive_losses: Count,
+    /// Minimum sample size required for performance evaluation
+    pub min_sample_size: Count,
+    /// Auto-disable threshold (win rate below this disables pattern)
+    pub auto_disable_threshold: Percentage,
+}
+
+impl Default for PatternPerformanceThresholds {
+    fn default() -> Self {
+        Self {
+            min_win_rate_short: Percentage::new(Decimal::new(500, 1)).unwrap(), // 50%
+            min_win_rate_medium: Percentage::new(Decimal::new(550, 1)).unwrap(), // 55%
+            min_win_rate_long: Percentage::new(Decimal::new(600, 1)).unwrap(), // 60%
+            max_consecutive_losses: Count::new(3).unwrap(),
+            min_sample_size: Count::new(20).unwrap(),
+            auto_disable_threshold: Percentage::new(Decimal::new(400, 1)).unwrap(), // 40%
+        }
+    }
+}
+
+/// Pattern-specific risk violation types
+///
+/// Extends the general risk violation types with pattern-specific violations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PatternRiskViolationType {
+    /// Pattern is disabled due to poor performance
+    PatternDisabled,
+    /// Pattern confidence score is below minimum threshold
+    ConfidenceTooLow,
+    /// Daily trade limit for this pattern exceeded
+    DailyTradeLimitExceeded,
+    /// Position size exceeds pattern-specific limits
+    PositionSizeExceeded,
+    /// Consecutive losses exceeded threshold
+    ConsecutiveLossesExceeded,
+    /// Pattern performance below required thresholds
+    PerformanceThresholdBreached,
+}
+
+impl fmt::Display for PatternRiskViolationType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::PatternDisabled => "Pattern Disabled",
+            Self::ConfidenceTooLow => "Confidence Too Low",
+            Self::DailyTradeLimitExceeded => "Daily Trade Limit Exceeded",
+            Self::PositionSizeExceeded => "Position Size Exceeded",
+            Self::ConsecutiveLossesExceeded => "Consecutive Losses Exceeded",
+            Self::PerformanceThresholdBreached => "Performance Threshold Breached",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// Pattern risk violation information
+///
+/// Contains details about pattern-specific risk rule violations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PatternRiskViolation {
+    /// Type of pattern risk violation
+    pub violation_type: PatternRiskViolationType,
+    /// Name of the pattern that caused the violation
+    pub pattern_name: PatternName,
+    /// Confidence score if applicable
+    pub confidence: Option<f64>,
+    /// Human-readable message describing the violation
+    pub message: String,
+    /// Timestamp when the violation occurred
+    pub timestamp: DateTime<Utc>,
+    /// Severity of the violation
+    pub severity: ViolationSeverity,
+    /// Suggested action to resolve the violation
+    pub suggested_action: Option<String>,
 }
 
 #[cfg(test)]
