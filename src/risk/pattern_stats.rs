@@ -870,12 +870,3 @@ mod tests {
         assert!(overall_score > 0.0 && overall_score <= 1.0);
     }
 }
-        // Add trades for multiple windows
-        for _ in 0..10 {
-            tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
-        }
-
-        let overall_score = tracker.get_overall_performance_score(&pattern_name);
-        assert!(overall_score > 0.0 && overall_score <= 1.0);
-    }
-}

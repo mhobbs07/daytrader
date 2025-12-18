@@ -43,7 +43,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::brokers::types::PatternName;
 
 /// Market event enum containing all possible events in the system
 ///

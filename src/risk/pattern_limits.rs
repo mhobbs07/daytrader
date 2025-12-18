@@ -40,7 +40,7 @@
 
 use crate::brokers::types::{Message, PatternName};
 use crate::events::bus::EventBus;
-use crate::events::types::{MarketEvent, RiskMultiplierAdjusted, RiskViolation as EventRiskViolation, RiskViolationType};
+use crate::events::types::{MarketEvent, RiskViolation, RiskViolationType};
 use crate::risk::types::{
     ConfidenceMultiplier, Count, PatternPerformanceThresholds, PatternRiskProfile,
     PatternRiskViolation, PatternRiskViolationType, RiskEvaluation, ViolationSeverity,
@@ -286,6 +286,7 @@ impl PatternRiskEvaluator {
             config,
             pattern_states: HashMap::new(),
             stats_tracker: None,
+            event_bus: None,
             pattern_key_cache: Arc::new(DashMap::new()),
         }
     }
@@ -296,6 +297,7 @@ impl PatternRiskEvaluator {
             config,
             pattern_states: HashMap::new(),
             stats_tracker: Some(stats_tracker),
+            event_bus: None,
             pattern_key_cache: Arc::new(DashMap::new()),
         }
     }

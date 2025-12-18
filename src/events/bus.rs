@@ -100,6 +100,7 @@
 //! ```
 
 use crate::events::types::MarketEvent;
+use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -206,7 +207,6 @@ impl EventBusMetrics {
             self.total_latency_ns.load(Ordering::Relaxed) as f64 / count as f64
         }
     }
-}
 }
 
 impl EventBus {
@@ -410,11 +410,11 @@ impl EventBus {
     }
     
     /// Returns the volume of events by type
-    pub fn get_event_volumes(&self) -> Vec<(&str, u64)> {
+    pub fn get_event_volumes(&self) -> Vec<(String, u64)> {
         self.metrics
             .event_volumes
             .iter()
-            .map(|entry| (entry.key(), entry.value().load(Ordering::Relaxed)))
+            .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
             .collect()
     }
     

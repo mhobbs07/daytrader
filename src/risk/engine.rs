@@ -15,6 +15,7 @@
 //! - Type-safe rule evaluation
 //! - Composable risk rules with real-time monitoring
 
+use crate::brokers::types::{Message, Symbol};
 use crate::config::RiskConfig;
 use crate::events::bus::EventBus;
 use crate::events::types::{MarketEvent, RiskViolation, RiskViolationType};
@@ -143,9 +144,6 @@ impl RiskEngine {
         Ok(())
     }
 
-    use crate::events::types::{RiskMultiplierAdjusted, PatternEnabled, PatternDisabled, PatternPerformanceUpdate, RiskViolation as EventRiskViolation};
-    use crate::brokers::types::Message;
-    
     /// Processes a market event and applies risk rules
     async fn process_event(
         &self,
@@ -227,6 +225,7 @@ impl RiskEngine {
                             evaluation.message.unwrap_or_else(|| format!("{:?} violation", rule_id))
                         ),
                         timestamp: Utc::now(),
+                        pattern_name: None,
                     };
 
                     // Publish risk violation event
@@ -323,7 +322,7 @@ impl RiskEngine {
     
         // Evaluate if pattern is tradable
         // Estimate order value based on typical position size (e.g., from config)
-        let estimated_order_value = Decimal::new(5000u64, 2); // $50.00 placeholder
+        let estimated_order_value = Decimal::new(5000i64, 2); // $50.00 placeholder
     
         let evaluation = evaluator.evaluate_pattern_trade(
             &signal.pattern_name,
@@ -337,12 +336,12 @@ impl RiskEngine {
             }
             RiskEvaluation::Violated { severity, suggested_action } => {
                 // Publish pattern-specific violation
-                let violation = EventRiskViolation {
+                let violation = RiskViolation {
                     violation_type: RiskViolationType::PatternDisabled, // or appropriate type
                     message: Message::new(format!(
                         "Pattern risk violation: {} - {}",
                         signal.pattern_name.as_str(),
-                        suggested_action.unwrap_or_default()
+                        suggested_action.as_ref().map(|s| s.as_str()).unwrap_or_default()
                     )),
                     timestamp: Utc::now(),
                     pattern_name: Some(signal.pattern_name.clone()),
