@@ -58,6 +58,7 @@
 
 pub mod types;
 pub mod traits;
+pub mod utils;
 pub mod registry;
 
 // Re-export commonly used types and traits
