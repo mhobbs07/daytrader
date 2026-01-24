@@ -1,0 +1,15 @@
+name: Branch Protection
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch protection
+        run: |
+          if [[ "$GITHUB_HEAD_REF" == "main" || "$GITHUB_HEAD_REF" == "develop" ]]; then
+            echo "Direct pushes to protected branches are not allowed"
+            exit 1
+          fi

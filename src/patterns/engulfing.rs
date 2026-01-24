@@ -1,12 +1,12 @@
-//! Engulfing candlestick pattern detection algorithms
-//!
-//! This module implements two-candle engulfing patterns:
-//! - Bullish Engulfing: Bearish candle followed by larger bullish candle that engulfs it
-//! - Bearish Engulfing: Bullish candle followed by larger bearish candle that engulfs it
-//!
-//! Engulfing patterns are powerful reversal signals that indicate a shift in market sentiment.
-//! The algorithms validate engulfing criteria with confidence scoring based on pattern metrics,
-//! volume confirmation, and market context.
+// Engulfing candlestick pattern detection algorithms
+//
+// This module implements two-candle engulfing patterns:
+// - Bullish Engulfing: Bearish candle followed by larger bullish candle that engulfs it
+// - Bearish Engulfing: Bullish candle followed by larger bearish candle that engulfs it
+//
+// Engulfing patterns are powerful reversal signals that indicate a shift in market sentiment.
+// The algorithms validate engulfing criteria with confidence scoring based on pattern metrics,
+// volume confirmation, and market context.
 
 use crate::brokers::types::{Confidence, PatternName, Price};
 use crate::events::types::{Candle, SignalType};
@@ -18,7 +18,7 @@ use crate::patterns::types::{
 use crate::patterns::utils::{
     calculate_engulfing_confidence, calculate_gap_ratio, calculate_volume_ratio,
     create_volume_confirmation, validate_bearish_engulfing, validate_bullish_engulfing,
-    validate_minimum_data
+    validate_minimum_data, ShadowRatios
 };
 use rust_decimal::Decimal;
 use std::fmt::Debug;
@@ -81,7 +81,8 @@ impl PatternDetector for BullishEngulfingDetector {
         // Calculate gap ratio for bullish engulfing (gap down)
         let gap_ratio = calculate_gap_ratio(first, second);
 
-        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &second, &context)?;
+        let shadow_ratios = ShadowRatios::from_candle(second).unwrap();
+        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
         
         if confidence.value() < params.min_confidence {
             return Ok(None);
@@ -157,7 +158,8 @@ impl PatternDetector for BearishEngulfingDetector {
         // Calculate gap ratio for bearish engulfing (gap up)
         let gap_ratio = calculate_gap_ratio(first, second);
 
-        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &second, &context)?;
+        let shadow_ratios = ShadowRatios::from_candle(second).unwrap();
+        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
         
         if confidence.value() < params.min_confidence {
             return Ok(None);

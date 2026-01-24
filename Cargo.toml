@@ -8,7 +8,7 @@ license = "MIT"
 rust-version = "1.75"
 
 [workspace]
-members = ["."]
+members = [".", "daytrader/src-tauri"]
 
 [dependencies]
 # Core async runtime
@@ -28,14 +28,14 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
 
 # Database
-rusqlite = { version = "0.30", features = ["bundled", "chrono", "uuid"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite", "chrono", "uuid"] }
 
 # Data structures and types
-rust_decimal = { version = "1.33", features = ["serde"] }
+rust_decimal = { version = "1.35", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-dashmap = "5.5"
-uuid = { version = "1.6", features = ["serde", "v4"] }
+dashmap = "6.0"
+uuid = { version = "1.10", features = ["serde", "v4"] }
 rand = "0.8"
 
 # Technical analysis
@@ -46,14 +46,25 @@ crossbeam = "0.8"
 once_cell = "1.19"
 parking_lot = "0.12"
 async-trait = "0.1"
+lazy_static = "1.4"
 
 # Error handling
 thiserror = "1.0"
 anyhow = "1.0"
 
+# Retry and circuit breaker
+tokio-retry = "0.3"
+
+# Metrics
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+
+# Statistics
+statistical = "1.0"
+
 # Logging and tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
 tracing-appender = "0.2"
 
 # Configuration

@@ -7,19 +7,20 @@ use crate::patterns::types::{
 };
 use crate::patterns::utils::{
     calculate_single_candle_confidence, calculate_volume_ratio, create_volume_confirmation,
-    validate_hammer, validate_minimum_data, SingleCandlePatternType
+    validate_hammer, validate_shooting_star, validate_doji, validate_minimum_data,
+    ShadowRatios, SingleCandlePatternType
 };
 use rust_decimal::Decimal;
 use std::fmt::Debug;
-//! Basic candlestick pattern detection algorithms
-//!
-//! This module implements fundamental single-candle candlestick patterns including:
-//! - Hammer: Bullish reversal pattern with long lower shadow
-//! - Shooting Star: Bearish reversal pattern with long upper shadow  
-//! - Doji: Indecision pattern with small body (Standard, Dragonfly, Gravestone)
-//!
-//! All patterns use mathematical validation of candlestick criteria with confidence scoring
-//! based on pattern metrics, market context, and volume confirmation.
+// Basic candlestick pattern detection algorithms
+//
+// This module implements fundamental single-candle candlestick patterns including:
+// - Hammer: Bullish reversal pattern with long lower shadow
+// - Shooting Star: Bearish reversal pattern with long upper shadow
+// - Doji: Indecision pattern with small body (Standard, Dragonfly, Gravestone)
+//
+// All patterns use mathematical validation of candlestick criteria with confidence scoring
+// based on pattern metrics, market context, and volume confirmation.
 
 
 /// Hammer pattern detector - bullish reversal pattern
@@ -69,7 +70,8 @@ impl PatternDetector for HammerDetector {
             context = context.with_volume_confirmation(create_volume_confirmation(volume_ratio));
         }
 
-        let confidence = calculate_single_candle_confidence(&candle, &context, SingleCandlePatternType::Hammer)?;
+        let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
+        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::Hammer)?;
         
         if confidence.value() < params.min_confidence {
             return Ok(None);
@@ -134,7 +136,8 @@ impl PatternDetector for ShootingStarDetector {
             context = context.with_volume_confirmation(create_volume_confirmation(volume_ratio));
         }
 
-        let confidence = calculate_single_candle_confidence(&candle, &context, SingleCandlePatternType::ShootingStar)?;
+        let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
+        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::ShootingStar)?;
         
         if confidence.value() < params.min_confidence {
             return Ok(None);
@@ -246,7 +249,8 @@ impl PatternDetector for DojiDetector {
             context = context.with_volume_confirmation(create_volume_confirmation(volume_ratio));
         }
 
-        let confidence = calculate_single_candle_confidence(&candle, &context, SingleCandlePatternType::Doji)?;
+        let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
+        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::Doji)?;
         
         if confidence.value() < params.min_confidence {
             return Ok(None);

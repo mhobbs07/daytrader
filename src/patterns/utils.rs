@@ -232,6 +232,7 @@ mod tests {
     #[test]
     fn test_shadow_ratios_from_candle() {
         let candle = Candle {
+            symbol: crate::brokers::types::Symbol::new("TEST").unwrap(),
             timestamp: chrono::Utc::now(),
             open: crate::brokers::types::Price::new(Decimal::new(100, 0)).unwrap(),
             high: crate::brokers::types::Price::new(Decimal::new(110, 0)).unwrap(),

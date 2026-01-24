@@ -14,7 +14,7 @@ A comprehensive day trading platform focused on candlestick pattern recognition 
 
 ## Prerequisites
 
-- Rust 1.85+ (Edition 2024)
+- Rust 1.75+ (Edition 2021)
 - SQLite 3
 - Python 3.11+ (for future analytics)
 
@@ -55,37 +55,57 @@ cargo fmt --check
 ```
 daytrader/
 ├── src/               # Rust source code
-│   ├── brokers/       # Broker abstraction layer
+│   ├── brokers/       # Broker abstraction layer (Alpaca, mock)
 │   ├── config/        # Configuration management
-│   ├── data/          # Market data pipeline
-│   ├── db/            # Database layer
-│   ├── events/        # Event bus (Phase 1)
-│   ├── execution/     # Order execution
-│   ├── patterns/      # Pattern detection
-│   ├── risk/          # Risk management
-│   └── utils/         # Utilities and errors
-├── config/            # Configuration files
-├── data/              # Local data (gitignored)
-├── scripts/           # Utility scripts
-└── docs/              # Documentation
+│   ├── db/            # Database layer (SQLite)
+│   ├── events/        # Event bus system
+│   ├── execution/     # Order execution engine
+│   ├── patterns/      # Candlestick pattern detection
+│   ├── risk/          # Risk management & PDT compliance
+│   └── utils/         # Utilities, logging, metrics, errors
+├── config/            # Configuration files (TOML)
+├── scripts/           # Setup and utility scripts
+├── docs/              # Documentation
+├── examples/          # Usage examples
+├── benches/           # Performance benchmarks
+└── tests/             # Integration tests
 ```
 
 ## Development Roadmap
 
 - [x] Phase 0: Setup (Week 0) ✅
-- [ ] Phase 1: Core Infrastructure (Weeks 1-4)
-- [ ] Phase 2: Risk Management (Weeks 5-8)
-- [ ] Phase 3: Pattern Recognition (Weeks 9-12)
-- [ ] Phase 4: Order Execution (Weeks 13-16)
-- [ ] Phase 5: User Interface (Weeks 17-20)
-- [ ] Phase 6: Testing & Validation (Weeks 21-24)
+- [x] Phase 1: Core Infrastructure (Weeks 1-4) ✅
+- [x] Phase 2: Risk Management (Weeks 5-8) ✅
+- [x] Phase 3A: Pattern Recognition - Basic Patterns (Weeks 9-10) ✅
+- [ ] Phase 3B: Pattern Recognition - Technical Indicators (Weeks 11-12)
+- [ ] Phase 3C: Pattern Recognition - Signal Generation (Week 13)
+- [ ] Phase 3D: Pattern Recognition - Integration & Optimization (Week 14)
+- [ ] Phase 4: Order Execution (Weeks 15-18)
+- [ ] Phase 5: User Interface (Weeks 19-22)
+- [ ] Phase 6: Testing & Validation (Weeks 23-26)
 
 ## Documentation
 
-- [Project Knowledge Base](project-knowledge-base.md)
-- [Technical Architecture](technical-architecture.md)
-- [Architecture Analysis](architecture-analysis.md)
-- [Phase 0 Setup Plan](phase-0-setup-plan.md)
+### Core Documentation
+- [Project Knowledge Base](project-knowledge-base.md) - Comprehensive project overview
+- [Technical Architecture](technical-architecture.md) - System design and patterns
+- [Architecture Analysis](architecture-analysis.md) - Current architecture review
+- [Security Guidelines](SECURITY.md) - Security policies and procedures
+
+### Development Guides
+- [Phase 0 Setup Plan](phase-0-setup-plan.md) - Initial project setup
+- [Phase 3 Pattern Recognition Plan](phase-3-pattern-recognition-plan.md) - Current development phase
+- [Phase 3A-2 Completion Report](phase-3a-2-completion-report.md) - Latest implementation status
+- [Performance Analysis Report](performance-analysis-report.md) - Performance benchmarks
+
+### API & Examples
+- [API Usage Examples](api-usage-examples.md) - Code examples and patterns
+- [Alpaca Broker Examples](examples/alpaca_basic.rs) - Broker integration examples
+- [Mobile API Documentation](mobile-kilocode-api.md) - Mobile client API
+
+### Development Workflow
+- [Git Workflow Rules](git-workflow-rules.md) - Development workflow guidelines
+- [CI/CD Setup Guide](ci-cd-setup-guide.md) - Build and deployment automation
 
 ## License
 

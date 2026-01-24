@@ -7,9 +7,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-
-use super::types::{Symbol, Price, Quantity, OrderId};
 use crate::utils::errors::BrokerError;
+use super::types::{Symbol, Price, Quantity, OrderId};
 
 // ============================================================================
 // Data Structures
@@ -326,21 +325,21 @@ pub trait MarketDataProvider: Send + Sync {
     ///
     /// Returns an error if subscription fails or symbols are invalid
     async fn subscribe_quotes(&self, symbols: Vec<Symbol>) -> Result<(), BrokerError>;
-    
+
     /// Unsubscribe from quotes for given symbols
     ///
     /// # Errors
     ///
     /// Returns an error if unsubscription fails
     async fn unsubscribe_quotes(&self, symbols: Vec<Symbol>) -> Result<(), BrokerError>;
-    
+
     /// Get latest quote for a symbol
     ///
     /// # Errors
     ///
     /// Returns an error if symbol is not found or API call fails
     async fn get_quote(&self, symbol: &Symbol) -> Result<Quote, BrokerError>;
-    
+
     /// Get historical candles for a symbol
     ///
     /// # Errors
@@ -353,14 +352,14 @@ pub trait MarketDataProvider: Send + Sync {
         end: DateTime<Utc>,
         timeframe: Timeframe,
     ) -> Result<Vec<Candle>, BrokerError>;
-    
+
     /// Start real-time data stream
     ///
     /// # Errors
     ///
     /// Returns an error if stream cannot be started
     async fn start_stream(&self) -> Result<(), BrokerError>;
-    
+
     /// Stop real-time data stream
     ///
     /// # Errors
@@ -392,42 +391,42 @@ pub trait OrderExecutionProvider: Send + Sync {
     ///
     /// Returns an error if order is rejected or placement fails
     async fn place_order(&self, order: Order) -> Result<OrderId, BrokerError>;
-    
+
     /// Cancel an existing order
     ///
     /// # Errors
     ///
     /// Returns an error if order cannot be cancelled
     async fn cancel_order(&self, order_id: &OrderId) -> Result<(), BrokerError>;
-    
+
     /// Get order status and details
     ///
     /// # Errors
     ///
     /// Returns an error if order is not found
     async fn get_order(&self, order_id: &OrderId) -> Result<Order, BrokerError>;
-    
+
     /// Get all open orders
     ///
     /// # Errors
     ///
     /// Returns an error if retrieval fails
     async fn get_open_orders(&self) -> Result<Vec<Order>, BrokerError>;
-    
+
     /// Get account information
     ///
     /// # Errors
     ///
     /// Returns an error if account info cannot be retrieved
     async fn get_account(&self) -> Result<Account, BrokerError>;
-    
+
     /// Get all current positions
     ///
     /// # Errors
     ///
     /// Returns an error if positions cannot be retrieved
     async fn get_positions(&self) -> Result<Vec<Position>, BrokerError>;
-    
+
     /// Get position for a specific symbol
     ///
     /// # Errors

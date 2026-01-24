@@ -1,5 +1,5 @@
 # Multi-stage build for optimal image size
-FROM rust:1.75-slim as builder
+FROM rust:latest as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -15,7 +15,6 @@ COPY Cargo.toml Cargo.lock ./
 
 # Copy source code
 COPY src ./src
-COPY examples ./examples
 
 # Build release binary
 RUN cargo build --release --bin daytrader
