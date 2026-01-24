@@ -17,6 +17,7 @@
 
 use crate::brokers::types::{Message, Symbol};
 use crate::config::RiskConfig;
+use crate::db::{Database, PatternRepository, PerformanceRepository, SignalRepository};
 use crate::events::bus::EventBus;
 use crate::events::types::{MarketEvent, RiskViolation, RiskViolationType};
 use crate::risk::limits::{DailyLossTracker, DailyLossLimits};
@@ -42,6 +43,11 @@ pub struct RiskEngine {
     // Pattern-specific risk management
     pattern_stats_tracker: Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>,
     pattern_risk_evaluator: Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>>,
+    // Database integration
+    database: Option<Arc<Database>>,
+    pattern_repo: Option<PatternRepository>,
+    signal_repo: Option<SignalRepository>,
+    performance_repo: Option<PerformanceRepository>,
 }
 
 /// Internal risk state tracking
@@ -58,6 +64,17 @@ pub struct RiskState {
 impl RiskEngine {
     /// Creates a new risk engine with the given configuration
     pub fn new(config: RiskConfig, event_bus: Arc<EventBus>, account_id: AccountId, initial_equity: Decimal) -> Self {
+        Self::with_database(config, event_bus, account_id, initial_equity, None)
+    }
+
+    /// Creates a new risk engine with database integration
+    pub fn with_database(
+        config: RiskConfig,
+        event_bus: Arc<EventBus>,
+        account_id: AccountId,
+        initial_equity: Decimal,
+        database: Option<Arc<Database>>,
+    ) -> Self {
         let state = RiskState {
             account_id,
             trading_date: Utc::now().date_naive(),
@@ -88,6 +105,17 @@ impl RiskEngine {
         pattern_risk_evaluator.set_stats_tracker(crate::risk::pattern_stats::PatternStatsTracker::new());
         let pattern_risk_evaluator = Arc::new(RwLock::new(pattern_risk_evaluator));
 
+        // Initialize database repositories if database is provided
+        let (pattern_repo, signal_repo, performance_repo) = if let Some(ref db) = database {
+            (
+                Some(PatternRepository::new(db.pool.clone())),
+                Some(SignalRepository::new(db.pool.clone())),
+                Some(PerformanceRepository::new(db.pool.clone())),
+            )
+        } else {
+            (None, None, None)
+        };
+
         Self {
             config,
             event_bus,
@@ -98,6 +126,10 @@ impl RiskEngine {
             pdt_enforcer,
             pattern_stats_tracker,
             pattern_risk_evaluator,
+            database,
+            pattern_repo,
+            signal_repo,
+            performance_repo,
         }
     }
 
@@ -128,6 +160,10 @@ impl RiskEngine {
             pdt_enforcer,
             pattern_stats_tracker,
             pattern_risk_evaluator,
+            database: None,
+            pattern_repo: None,
+            signal_repo: None,
+            performance_repo: None,
         });
 
         // Spawn event processing task
@@ -229,8 +265,15 @@ impl RiskEngine {
                     };
 
                     // Publish risk violation event
-                    let event = MarketEvent::RiskViolation { violation };
+                    let event = MarketEvent::RiskViolation { violation: violation.clone() };
                     self.event_bus.publish(event);
+
+                    // Store risk violation in database if available
+                    if let Some(ref performance_repo) = self.performance_repo {
+                        if let Err(e) = performance_repo.store_risk_event(&violation).await {
+                            tracing::warn!("Failed to persist risk violation to database: {}", e);
+                        }
+                    }
 
                     return Err(format!("Critical risk violation: {:?}", rule_id).into());
                 }
@@ -299,6 +342,9 @@ impl RiskEngine {
         current_state.daily_pl += realized_pl;
         current_state.last_updated = Utc::now();
 
+        // Check for emergency liquidation
+        self.check_emergency_liquidation(current_state.daily_pl).await?;
+
         Ok(())
     }
 
@@ -309,6 +355,22 @@ impl RiskEngine {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut stats_tracker = self.pattern_stats_tracker.write().await;
         stats_tracker.record_signal(&signal.pattern_name);
+
+        // Persist signal to database if available
+        if let Some(ref signal_repo) = self.signal_repo {
+            let trading_signal = crate::patterns::signals::TradingSignal::new(
+                crate::brokers::types::Symbol::new(signal.symbol.as_str()).unwrap_or_else(|_| crate::brokers::types::Symbol::new("UNKNOWN").unwrap()),
+                crate::events::types::SignalType::Buy, // Default, should be determined from signal
+                crate::brokers::types::Confidence::new(signal.confidence.value()).unwrap_or_else(|_| crate::brokers::types::Confidence::new(0.5).unwrap()),
+                crate::brokers::types::Price::new(rust_decimal::Decimal::ZERO).unwrap(), // Placeholder
+                crate::patterns::signals::MarketContext::new(crate::patterns::types::TrendContext::Sideways { volatility: 0.5 }),
+            );
+
+            if let Err(e) = signal_repo.store_signal(&trading_signal).await {
+                tracing::warn!("Failed to persist signal to database: {}", e);
+            }
+        }
+
         Ok(())
     }
     
@@ -401,6 +463,13 @@ impl RiskEngine {
                     };
                     self.event_bus.publish(perf_event);
                 }
+
+                // Persist pattern statistics to database
+                if let Some(ref pattern_repo) = self.pattern_repo {
+                    if let Err(e) = pattern_repo.store_pattern_stats(&s).await {
+                        tracing::warn!("Failed to persist pattern stats to database: {}", e);
+                    }
+                }
             }
         }
     
@@ -455,14 +524,48 @@ impl RiskEngine {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // TODO: Associate closed position with originating pattern
         // Placeholder: general PL update to risk state, pattern-specific requires linking
-    
+
         // Example: if pattern known for symbol/position
         // let (pattern_name, confidence) = self.lookup_pattern_for_position(&symbol).await?;
         // if let (Some(p), Some(c)) = (pattern_name, confidence) {
         //     let mut stats = self.pattern_stats_tracker.write().await;
         //     stats.record_trade_outcome(&p, c, realized_pl);
         // }
-    
+
+        Ok(())
+    }
+
+    /// Checks for emergency liquidation conditions
+    async fn check_emergency_liquidation(
+        &self,
+        current_balance: Decimal,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let threshold = Decimal::from_f64_retain(self.config.emergency_liquidate_threshold).unwrap_or(Decimal::ZERO);
+
+        if current_balance <= threshold {
+            tracing::error!(
+                "Emergency liquidation triggered: balance {} below threshold {}",
+                current_balance, threshold
+            );
+
+            // Halt trading immediately
+            self.halt_trading("Emergency liquidation: account balance below threshold").await;
+
+            // TODO: Implement actual liquidation logic
+            // This would involve:
+            // 1. Getting all open positions
+            // 2. Submitting market sell orders for all positions
+            // 3. Monitoring order fills
+            // 4. Updating risk state
+
+            // For now, just log and halt
+            let event = MarketEvent::EmergencyLiquidation {
+                reason: format!("Account balance {} below emergency threshold {}", current_balance, threshold),
+                timestamp: Utc::now(),
+            };
+            self.event_bus.publish(event);
+        }
+
         Ok(())
     }
 
@@ -475,6 +578,16 @@ impl RiskEngine {
     pub async fn is_trading_allowed(&self) -> bool {
         let state = self.state.read().await;
         !state.is_trading_halted
+    }
+
+    /// Gets access to the pattern risk evaluator (for internal use)
+    pub fn get_pattern_risk_evaluator(&self) -> &Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>> {
+        &self.pattern_risk_evaluator
+    }
+
+    /// Gets access to the position sizer (for internal use)
+    pub fn get_position_sizer(&self) -> &Arc<PositionSizer> {
+        &self.position_sizer
     }
 
     /// Manually halts trading (emergency stop)

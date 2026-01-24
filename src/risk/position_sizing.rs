@@ -327,6 +327,46 @@ impl PositionSizer {
         percent_limit.min(self.limits.max_position_dollars.value())
     }
 
+    /// Calculates optimal position size based on risk parameters and signal confidence
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - The symbol for position sizing
+    /// * `price` - Current market price
+    /// * `confidence` - Signal confidence (0.0 to 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Recommended position size in dollars
+    pub async fn calculate_position_size(&self, symbol: &str, price: Decimal, confidence: f64) -> Decimal {
+        let max_size = self.calculate_max_position_size().await;
+
+        // Apply confidence-based adjustment
+        let confidence_multiplier = if confidence >= 0.8 {
+            1.0 // Full size for high confidence
+        } else if confidence >= 0.6 {
+            0.8 // 80% size for medium confidence
+        } else if confidence >= 0.4 {
+            0.6 // 60% size for low confidence
+        } else {
+            0.4 // 40% size for very low confidence
+        };
+
+        // Check if we already have a position in this symbol
+        let portfolio = self.portfolio.read().await;
+        let existing_position = portfolio.get_position(symbol);
+
+        let mut recommended_size = max_size * Decimal::from_f64_retain(confidence_multiplier).unwrap_or(Decimal::ONE);
+
+        // Reduce size if we already have a position (avoid over-concentration)
+        if existing_position.is_some() {
+            recommended_size = recommended_size * Decimal::new(5, 1); // 50% of normal size
+        }
+
+        // Ensure we don't exceed position limits
+        recommended_size.min(max_size)
+    }
+
     /// Monitors position sizes and returns any violations
     ///
     /// This is typically called periodically or after position updates

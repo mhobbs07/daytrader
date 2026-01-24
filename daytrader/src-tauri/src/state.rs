@@ -3,6 +3,7 @@ use daytrader::{
     events::bus::EventBus,
     patterns::PatternRegistry,
     events::types::PatternSignal,
+    risk::RiskEngine,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +81,7 @@ pub struct AppState {
     pub pattern_registry: Arc<PatternRegistry>,
     pub market_cache: Arc<std::sync::Mutex<MarketDataCache>>,
     pub pattern_cache: Arc<std::sync::Mutex<PatternCache>>,
+    pub risk_engine: Arc<RiskEngine>,
 }
 
 impl AppState {
@@ -87,6 +89,7 @@ impl AppState {
         event_bus: EventBus,
         broker: Arc<dyn MarketDataProvider>,
         pattern_registry: Arc<PatternRegistry>,
+        risk_engine: Arc<RiskEngine>,
     ) -> Self {
         Self {
             event_bus,
@@ -95,6 +98,7 @@ impl AppState {
             pattern_registry,
             market_cache: Arc::new(std::sync::Mutex::new(MarketDataCache::new())),
             pattern_cache: Arc::new(std::sync::Mutex::new(PatternCache::new())),
+            risk_engine,
         }
     }
 
@@ -104,6 +108,7 @@ impl AppState {
         pattern_registry: Arc<PatternRegistry>,
         market_cache: Arc<std::sync::Mutex<MarketDataCache>>,
         pattern_cache: Arc<std::sync::Mutex<PatternCache>>,
+        risk_engine: Arc<RiskEngine>,
     ) -> Self {
         Self {
             event_bus,
@@ -112,6 +117,7 @@ impl AppState {
             pattern_registry,
             market_cache,
             pattern_cache,
+            risk_engine,
         }
     }
 }

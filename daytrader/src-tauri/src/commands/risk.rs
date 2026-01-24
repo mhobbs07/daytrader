@@ -38,15 +38,14 @@ pub struct RiskViolationResponse {
 pub async fn get_risk_state(
     state: State<'_, AppState>
 ) -> Result<RiskStateResponse, String> {
-    // For now, return a mock response since RiskEngine integration needs more setup
-    // TODO: Integrate with actual RiskEngine instance
+    let risk_state = state.risk_engine.get_risk_state().await;
     Ok(RiskStateResponse {
-        account_id: "demo-account".to_string(),
-        trading_date: chrono::Utc::now().date_naive().to_string(),
-        daily_pl: 0.0,
-        day_trade_count: 0,
-        is_trading_halted: false,
-        last_updated: chrono::Utc::now().to_rfc3339(),
+        account_id: risk_state.account_id.to_string(),
+        trading_date: risk_state.trading_date.to_string(),
+        daily_pl: risk_state.daily_pl.to_f64().unwrap_or(0.0),
+        day_trade_count: risk_state.day_trade_count,
+        is_trading_halted: risk_state.is_trading_halted,
+        last_updated: risk_state.last_updated.to_rfc3339(),
     })
 }
 
@@ -54,8 +53,8 @@ pub async fn get_risk_state(
 pub async fn get_risk_limits(
     state: State<'_, AppState>
 ) -> Result<RiskLimitsResponse, String> {
-    // Return mock risk limits for now
-    // TODO: Get from actual risk configuration
+    // For now, return the configured limits
+    // TODO: Add method to RiskEngine to expose limits
     Ok(RiskLimitsResponse {
         max_daily_loss_dollars: 500.0,
         max_daily_loss_percent: 2.0,

@@ -282,6 +282,8 @@ impl EventBus {
             MarketEvent::ConnectionLost { .. } => "ConnectionLost",
             MarketEvent::TradingHalted { .. } => "TradingHalted",
             MarketEvent::TradingResumed => "TradingResumed",
+            MarketEvent::SignalGenerated { .. } => "SignalGenerated",
+            MarketEvent::EmergencyLiquidation { .. } => "EmergencyLiquidation",
         };
     
         match self.sender.send(event) {
