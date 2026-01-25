@@ -732,3 +732,759 @@ impl PerformanceRepository {
         Ok(())
     }
 }
+
+// ============================================================================
+// Order Repository (Phase 4A)
+// ============================================================================
+
+/// Repository for order-related database operations
+#[derive(Clone, Debug)]
+pub struct OrderRepository {
+    pool: SqlitePool,
+}
+
+impl OrderRepository {
+    /// Creates a new order repository
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    /// Saves a new order to the database
+    pub async fn save_order(&self, order: &crate::orders::types::ManagedOrder, account_id: i64) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO orders (
+                account_id, broker_order_id, symbol, side, order_type, quantity,
+                filled_quantity, limit_price, stop_price, trailing_percent, status,
+                time_in_force, submitted_at, filled_at, filled_avg_price, commission,
+                error_message, is_pattern_trade, pattern_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            account_id,
+            order.broker_order_id,
+            order.symbol.as_str(),
+            format!("{:?}", order.side).to_lowercase(),
+            format!("{:?}", order.order_type).to_lowercase(),
+            order.quantity.value(),
+            order.filled_quantity,
+            order.limit_price.map(|p| p.as_f64()),
+            order.stop_price.map(|p| p.as_f64()),
+            order.trailing_amount.and_then(|d| d.to_f64()),
+            order_status_to_db(&order.status),
+            time_in_force_to_db(&order.time_in_force),
+            order.submitted_at,
+            order.filled_at,
+            order.filled_avg_price.map(|p| p.as_f64()),
+            order.commission.and_then(|c| c.to_f64()),
+            order.error_message,
+            order.is_pattern_trade,
+            order.pattern_name.as_ref().map(|p| p.as_str()),
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Updates an existing order
+    pub async fn update_order(&self, order: &crate::orders::types::ManagedOrder) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE orders SET
+                broker_order_id = ?,
+                filled_quantity = ?,
+                status = ?,
+                submitted_at = ?,
+                filled_at = ?,
+                filled_avg_price = ?,
+                commission = ?,
+                error_message = ?
+            WHERE broker_order_id = ? OR id = (
+                SELECT id FROM orders WHERE broker_order_id IS NULL 
+                ORDER BY id DESC LIMIT 1
+            )
+            "#,
+            order.broker_order_id,
+            order.filled_quantity,
+            order_status_to_db(&order.status),
+            order.submitted_at,
+            order.filled_at,
+            order.filled_avg_price.map(|p| p.as_f64()),
+            order.commission.and_then(|c| c.to_f64()),
+            order.error_message,
+            order.broker_order_id,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Gets an order by broker order ID
+    pub async fn get_order_by_broker_id(&self, broker_order_id: &str) -> Result<Option<OrderRow>, sqlx::Error> {
+        let order = sqlx::query_as!(
+            OrderRow,
+            "SELECT * FROM orders WHERE broker_order_id = ?",
+            broker_order_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(order)
+    }
+
+    /// Gets orders for a specific symbol
+    pub async fn get_orders_for_symbol(&self, symbol: &str, account_id: i64, limit: i32) -> Result<Vec<OrderRow>, sqlx::Error> {
+        let orders = sqlx::query_as!(
+            OrderRow,
+            "SELECT * FROM orders WHERE account_id = ? AND symbol = ? ORDER BY submitted_at DESC LIMIT ?",
+            account_id,
+            symbol,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(orders)
+    }
+
+    /// Gets all open orders for an account
+    pub async fn get_open_orders(&self, account_id: i64) -> Result<Vec<OrderRow>, sqlx::Error> {
+        let orders = sqlx::query_as!(
+            OrderRow,
+            r#"
+            SELECT * FROM orders 
+            WHERE account_id = ? AND status IN ('pending', 'partial')
+            ORDER BY submitted_at DESC
+            "#,
+            account_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(orders)
+    }
+
+    /// Gets order history for an account within a time range
+    pub async fn get_order_history(
+        &self,
+        account_id: i64,
+        since: DateTime<Utc>,
+        limit: i32,
+    ) -> Result<Vec<OrderRow>, sqlx::Error> {
+        let orders = sqlx::query_as!(
+            OrderRow,
+            "SELECT * FROM orders WHERE account_id = ? AND submitted_at >= ? ORDER BY submitted_at DESC LIMIT ?",
+            account_id,
+            since,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(orders)
+    }
+
+    /// Gets orders for a specific pattern
+    pub async fn get_pattern_orders(&self, pattern_name: &str, account_id: i64, limit: i32) -> Result<Vec<OrderRow>, sqlx::Error> {
+        let orders = sqlx::query_as!(
+            OrderRow,
+            "SELECT * FROM orders WHERE account_id = ? AND pattern_name = ? ORDER BY submitted_at DESC LIMIT ?",
+            account_id,
+            pattern_name,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(orders)
+    }
+
+    /// Counts pattern trades for today
+    pub async fn count_pattern_trades_today(&self, pattern_name: &str, account_id: i64) -> Result<i32, sqlx::Error> {
+        let today_start = Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
+        
+        let result = sqlx::query!(
+            "SELECT COUNT(*) as count FROM orders WHERE account_id = ? AND pattern_name = ? AND submitted_at >= ?",
+            account_id,
+            pattern_name,
+            today_start
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.count.unwrap_or(0) as i32)
+    }
+}
+
+/// Database row for orders table
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct OrderRow {
+    pub id: i64,
+    pub account_id: i64,
+    pub broker_order_id: Option<String>,
+    pub symbol: String,
+    pub side: String,
+    pub order_type: String,
+    pub quantity: i64,
+    pub filled_quantity: Option<i64>,
+    pub limit_price: Option<f64>,
+    pub stop_price: Option<f64>,
+    pub trailing_percent: Option<f64>,
+    pub status: String,
+    pub time_in_force: Option<String>,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub filled_at: Option<DateTime<Utc>>,
+    pub filled_avg_price: Option<f64>,
+    pub commission: Option<f64>,
+    pub error_message: Option<String>,
+    pub is_pattern_trade: Option<bool>,
+    pub pattern_name: Option<String>,
+}
+
+// Helper functions for converting between domain types and database strings
+fn order_status_to_db(status: &crate::brokers::traits::OrderStatus) -> &'static str {
+    match status {
+        crate::brokers::traits::OrderStatus::Pending => "pending",
+        crate::brokers::traits::OrderStatus::Accepted => "pending",
+        crate::brokers::traits::OrderStatus::PartiallyFilled => "partial",
+        crate::brokers::traits::OrderStatus::Filled => "filled",
+        crate::brokers::traits::OrderStatus::Cancelled => "cancelled",
+        crate::brokers::traits::OrderStatus::Rejected => "rejected",
+        crate::brokers::traits::OrderStatus::Expired => "cancelled",
+    }
+}
+
+// ============================================================================
+// Position Repository (Phase 4B)
+// ============================================================================
+
+/// Repository for position-related database operations
+#[derive(Clone, Debug)]
+pub struct PositionRepository {
+    pool: SqlitePool,
+}
+
+impl PositionRepository {
+    /// Creates a new position repository
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    /// Saves or updates a position in the database
+    ///
+    /// This method performs an upsert operation - if a position exists for the
+    /// given account and symbol, it will be updated; otherwise, a new record is inserted.
+    ///
+    /// # Arguments
+    /// * `position` - The position to save
+    /// * `account_id` - The account ID associated with this position
+    ///
+    /// # Returns
+    /// The database row ID of the saved position
+    pub async fn save_position(
+        &self,
+        position: &crate::positions::tracker::Position,
+        account_id: i64,
+    ) -> Result<i64, sqlx::Error> {
+        let side = match position.side {
+            crate::positions::tracker::PositionSide::Long => "long",
+            crate::positions::tracker::PositionSide::Short => "short",
+        };
+
+        // Serialize order IDs as JSON
+        let entry_orders = serde_json::to_string(&position.entry_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+        let exit_orders = serde_json::to_string(&position.exit_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO positions (
+                account_id, symbol, quantity, side, avg_entry_price, current_price,
+                market_value, cost_basis, unrealized_pl, unrealized_pl_percent, realized_pl,
+                opened_at, updated_at, pattern_name, signal_confidence, entry_orders, exit_orders
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, symbol) DO UPDATE SET
+                quantity = excluded.quantity,
+                side = excluded.side,
+                avg_entry_price = excluded.avg_entry_price,
+                current_price = excluded.current_price,
+                market_value = excluded.market_value,
+                cost_basis = excluded.cost_basis,
+                unrealized_pl = excluded.unrealized_pl,
+                unrealized_pl_percent = excluded.unrealized_pl_percent,
+                realized_pl = excluded.realized_pl,
+                updated_at = excluded.updated_at,
+                pattern_name = excluded.pattern_name,
+                signal_confidence = excluded.signal_confidence,
+                entry_orders = excluded.entry_orders,
+                exit_orders = excluded.exit_orders
+            "#,
+            account_id,
+            position.symbol.as_str(),
+            position.quantity.value(),
+            side,
+            position.avg_entry_price.as_f64(),
+            position.current_price.as_f64(),
+            position.market_value.to_f64().unwrap_or(0.0),
+            position.cost_basis.to_f64().unwrap_or(0.0),
+            position.unrealized_pl.to_f64().unwrap_or(0.0),
+            position.unrealized_pl_percent.to_f64().unwrap_or(0.0),
+            position.realized_pl.to_f64().unwrap_or(0.0),
+            position.opened_at,
+            position.updated_at,
+            position.pattern_name.as_ref().map(|p| p.as_str()),
+            position.signal_confidence.and_then(|c| c.to_f64()),
+            entry_orders,
+            exit_orders,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Gets a position by symbol for a specific account
+    ///
+    /// # Arguments
+    /// * `symbol` - The symbol to look up
+    /// * `account_id` - The account ID
+    ///
+    /// # Returns
+    /// The position if found, or None
+    pub async fn get_position(
+        &self,
+        symbol: &str,
+        account_id: i64,
+    ) -> Result<Option<PositionRow>, sqlx::Error> {
+        let position = sqlx::query_as!(
+            PositionRow,
+            "SELECT * FROM positions WHERE account_id = ? AND symbol = ?",
+            account_id,
+            symbol
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(position)
+    }
+
+    /// Gets all positions for a specific symbol across all accounts
+    ///
+    /// Useful for system-wide analysis or multi-account management.
+    ///
+    /// # Arguments
+    /// * `symbol` - The symbol to look up
+    ///
+    /// # Returns
+    /// Vector of all positions for the symbol
+    pub async fn get_positions_by_symbol(&self, symbol: &str) -> Result<Vec<PositionRow>, sqlx::Error> {
+        let positions = sqlx::query_as!(
+            PositionRow,
+            "SELECT * FROM positions WHERE symbol = ? ORDER BY updated_at DESC",
+            symbol
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(positions)
+    }
+
+    /// Gets all active (open) positions for an account
+    ///
+    /// # Arguments
+    /// * `account_id` - The account ID
+    ///
+    /// # Returns
+    /// Vector of all active positions
+    pub async fn get_active_positions(&self, account_id: i64) -> Result<Vec<PositionRow>, sqlx::Error> {
+        let positions = sqlx::query_as!(
+            PositionRow,
+            "SELECT * FROM positions WHERE account_id = ? ORDER BY updated_at DESC",
+            account_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(positions)
+    }
+
+    /// Updates an existing position
+    ///
+    /// This is similar to [`save_position`](PositionRepository::save_position) but requires
+    /// the position to already exist.
+    ///
+    /// # Arguments
+    /// * `position` - The position with updated values
+    /// * `account_id` - The account ID
+    ///
+    /// # Returns
+    /// Number of rows affected (should be 1)
+    pub async fn update_position(
+        &self,
+        position: &crate::positions::tracker::Position,
+        account_id: i64,
+    ) -> Result<u64, sqlx::Error> {
+        let side = match position.side {
+            crate::positions::tracker::PositionSide::Long => "long",
+            crate::positions::tracker::PositionSide::Short => "short",
+        };
+
+        let entry_orders = serde_json::to_string(&position.entry_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+        let exit_orders = serde_json::to_string(&position.exit_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE positions SET
+                quantity = ?,
+                side = ?,
+                avg_entry_price = ?,
+                current_price = ?,
+                market_value = ?,
+                cost_basis = ?,
+                unrealized_pl = ?,
+                unrealized_pl_percent = ?,
+                realized_pl = ?,
+                updated_at = ?,
+                pattern_name = ?,
+                signal_confidence = ?,
+                entry_orders = ?,
+                exit_orders = ?
+            WHERE account_id = ? AND symbol = ?
+            "#,
+            position.quantity.value(),
+            side,
+            position.avg_entry_price.as_f64(),
+            position.current_price.as_f64(),
+            position.market_value.to_f64().unwrap_or(0.0),
+            position.cost_basis.to_f64().unwrap_or(0.0),
+            position.unrealized_pl.to_f64().unwrap_or(0.0),
+            position.unrealized_pl_percent.to_f64().unwrap_or(0.0),
+            position.realized_pl.to_f64().unwrap_or(0.0),
+            position.updated_at,
+            position.pattern_name.as_ref().map(|p| p.as_str()),
+            position.signal_confidence.and_then(|c| c.to_f64()),
+            entry_orders,
+            exit_orders,
+            account_id,
+            position.symbol.as_str(),
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Closes a position by moving it to position_history and removing from active positions
+    ///
+    /// This is a two-step operation:
+    /// 1. Archive the position to the `position_history` table
+    /// 2. Delete from the `positions` table
+    ///
+    /// # Arguments
+    /// * `position` - The position to close
+    /// * `account_id` - The account ID
+    /// * `close_reason` - Reason for closing the position
+    /// * `exit_price` - Final exit price
+    ///
+    /// # Returns
+    /// The history record ID
+    pub async fn close_position(
+        &self,
+        position: &crate::positions::tracker::Position,
+        account_id: i64,
+        close_reason: &crate::positions::tracker::CloseReason,
+        exit_price: crate::brokers::types::Price,
+    ) -> Result<i64, sqlx::Error> {
+        let side = match position.side {
+            crate::positions::tracker::PositionSide::Long => "long",
+            crate::positions::tracker::PositionSide::Short => "short",
+        };
+
+        let close_reason_str = match close_reason {
+            crate::positions::tracker::CloseReason::Manual => "manual",
+            crate::positions::tracker::CloseReason::StopLoss => "stop_loss",
+            crate::positions::tracker::CloseReason::TakeProfit => "take_profit",
+            crate::positions::tracker::CloseReason::RiskViolation => "risk_violation",
+            crate::positions::tracker::CloseReason::PatternExit => "pattern_exit",
+            crate::positions::tracker::CloseReason::EndOfDay => "end_of_day",
+        };
+
+        let entry_orders = serde_json::to_string(&position.entry_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+        let exit_orders = serde_json::to_string(&position.exit_orders)
+            .unwrap_or_else(|_| "[]".to_string());
+
+        let closed_at = chrono::Utc::now();
+        let holding_period_minutes = (closed_at - position.opened_at).num_minutes() as i64;
+        let total_pl = position.realized_pl;
+
+        // Start a transaction to ensure both operations succeed or fail together
+        let mut tx = self.pool.begin().await?;
+
+        // Insert into position_history
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO position_history (
+                account_id, symbol, quantity, side, avg_entry_price, exit_price,
+                cost_basis, unrealized_pl, realized_pl, total_pl, opened_at, closed_at,
+                holding_period_minutes, close_reason, pattern_name, signal_confidence,
+                entry_orders, exit_orders
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            account_id,
+            position.symbol.as_str(),
+            position.quantity.value(),
+            side,
+            position.avg_entry_price.as_f64(),
+            exit_price.as_f64(),
+            position.cost_basis.to_f64().unwrap_or(0.0),
+            position.unrealized_pl.to_f64().unwrap_or(0.0),
+            position.realized_pl.to_f64().unwrap_or(0.0),
+            total_pl.to_f64().unwrap_or(0.0),
+            position.opened_at,
+            closed_at,
+            holding_period_minutes,
+            close_reason_str,
+            position.pattern_name.as_ref().map(|p| p.as_str()),
+            position.signal_confidence.and_then(|c| c.to_f64()),
+            entry_orders,
+            exit_orders,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let history_id = result.last_insert_rowid();
+
+        // Delete from active positions
+        sqlx::query!(
+            "DELETE FROM positions WHERE account_id = ? AND symbol = ?",
+            account_id,
+            position.symbol.as_str()
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(history_id)
+    }
+
+    /// Gets position history for an account
+    ///
+    /// # Arguments
+    /// * `account_id` - The account ID
+    /// * `since` - Only return positions closed after this time
+    /// * `limit` - Maximum number of records to return
+    ///
+    /// # Returns
+    /// Vector of closed positions
+    pub async fn get_position_history(
+        &self,
+        account_id: i64,
+        since: DateTime<Utc>,
+        limit: i32,
+    ) -> Result<Vec<PositionHistoryRow>, sqlx::Error> {
+        let history = sqlx::query_as!(
+            PositionHistoryRow,
+            "SELECT * FROM position_history WHERE account_id = ? AND closed_at >= ? ORDER BY closed_at DESC LIMIT ?",
+            account_id,
+            since,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(history)
+    }
+
+    /// Gets position history for a specific symbol
+    ///
+    /// # Arguments
+    /// * `symbol` - The symbol to look up
+    /// * `account_id` - The account ID
+    /// * `limit` - Maximum number of records to return
+    ///
+    /// # Returns
+    /// Vector of closed positions for the symbol
+    pub async fn get_position_history_by_symbol(
+        &self,
+        symbol: &str,
+        account_id: i64,
+        limit: i32,
+    ) -> Result<Vec<PositionHistoryRow>, sqlx::Error> {
+        let history = sqlx::query_as!(
+            PositionHistoryRow,
+            "SELECT * FROM position_history WHERE account_id = ? AND symbol = ? ORDER BY closed_at DESC LIMIT ?",
+            account_id,
+            symbol,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(history)
+    }
+
+    /// Gets profitable closed positions count and total P&L
+    ///
+    /// Useful for performance analytics.
+    ///
+    /// # Arguments
+    /// * `account_id` - The account ID
+    /// * `since` - Only count positions closed after this time
+    ///
+    /// # Returns
+    /// Tuple of (winning_count, losing_count, total_pl, avg_pl)
+    pub async fn get_position_performance(
+        &self,
+        account_id: i64,
+        since: DateTime<Utc>,
+    ) -> Result<(i32, i32, f64, f64), sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(CASE WHEN realized_pl > 0 THEN 1 END) as winning_count,
+                COUNT(CASE WHEN realized_pl <= 0 THEN 1 END) as losing_count,
+                SUM(realized_pl) as total_pl,
+                AVG(realized_pl) as avg_pl
+            FROM position_history
+            WHERE account_id = ? AND closed_at >= ?
+            "#,
+            account_id,
+            since
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok((
+            row.winning_count.unwrap_or(0) as i32,
+            row.losing_count.unwrap_or(0) as i32,
+            row.total_pl.unwrap_or(0.0),
+            row.avg_pl.unwrap_or(0.0),
+        ))
+    }
+
+    /// Gets positions by pattern name
+    ///
+    /// Returns both active and historical positions for a specific pattern.
+    ///
+    /// # Arguments
+    /// * `pattern_name` - The pattern name to filter by
+    /// * `account_id` - The account ID
+    ///
+    /// # Returns
+    /// Tuple of (active_positions, historical_positions)
+    pub async fn get_positions_by_pattern(
+        &self,
+        pattern_name: &str,
+        account_id: i64,
+    ) -> Result<(Vec<PositionRow>, Vec<PositionHistoryRow>), sqlx::Error> {
+        let active = sqlx::query_as!(
+            PositionRow,
+            "SELECT * FROM positions WHERE account_id = ? AND pattern_name = ? ORDER BY updated_at DESC",
+            account_id,
+            pattern_name
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let historical = sqlx::query_as!(
+            PositionHistoryRow,
+            "SELECT * FROM position_history WHERE account_id = ? AND pattern_name = ? ORDER BY closed_at DESC LIMIT 100",
+            account_id,
+            pattern_name
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok((active, historical))
+    }
+
+    /// Deletes a position without archiving
+    ///
+    /// **Warning**: This permanently deletes the position without creating a history record.
+    /// Use [`close_position`](PositionRepository::close_position) instead for normal position closure.
+    ///
+    /// # Arguments
+    /// * `symbol` - The symbol to delete
+    /// * `account_id` - The account ID
+    ///
+    /// # Returns
+    /// Number of rows affected
+    pub async fn delete_position(
+        &self,
+        symbol: &str,
+        account_id: i64,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query!(
+            "DELETE FROM positions WHERE account_id = ? AND symbol = ?",
+            account_id,
+            symbol
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+}
+
+/// Database row for positions table
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PositionRow {
+    pub id: i64,
+    pub account_id: i64,
+    pub symbol: String,
+    pub quantity: i64,
+    pub side: String,
+    pub avg_entry_price: f64,
+    pub current_price: f64,
+    pub market_value: f64,
+    pub cost_basis: f64,
+    pub unrealized_pl: f64,
+    pub unrealized_pl_percent: f64,
+    pub realized_pl: f64,
+    pub opened_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub pattern_name: Option<String>,
+    pub signal_confidence: Option<f64>,
+    pub entry_orders: Option<String>,  // JSON
+    pub exit_orders: Option<String>,   // JSON
+}
+
+/// Database row for position_history table
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PositionHistoryRow {
+    pub id: i64,
+    pub account_id: i64,
+    pub symbol: String,
+    pub quantity: i64,
+    pub side: String,
+    pub avg_entry_price: f64,
+    pub exit_price: f64,
+    pub cost_basis: f64,
+    pub unrealized_pl: Option<f64>,
+    pub realized_pl: f64,
+    pub total_pl: f64,
+    pub opened_at: DateTime<Utc>,
+    pub closed_at: DateTime<Utc>,
+    pub holding_period_minutes: Option<i64>,
+    pub close_reason: Option<String>,
+    pub pattern_name: Option<String>,
+    pub signal_confidence: Option<f64>,
+    pub entry_orders: Option<String>,  // JSON
+    pub exit_orders: Option<String>,   // JSON
+    pub notes: Option<String>,
+}
+
+fn time_in_force_to_db(tif: &crate::brokers::traits::TimeInForce) -> &'static str {
+    match tif {
+        crate::brokers::traits::TimeInForce::Day => "day",
+        crate::brokers::traits::TimeInForce::GTC => "gtc",
+        crate::brokers::traits::TimeInForce::IOC => "ioc",
+        crate::brokers::traits::TimeInForce::FOK => "fok",
+    }
+}

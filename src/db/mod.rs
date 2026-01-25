@@ -54,7 +54,10 @@ pub mod mock;
 
 // Re-export commonly used types
 pub use connection::{Database, DatabaseConfig};
-pub use repositories::{PatternRepository, SignalRepository, PerformanceRepository};
+pub use repositories::{
+    PatternRepository, SignalRepository, PerformanceRepository,
+    OrderRepository, PositionRepository,
+};
 
 // Re-export models for convenience
 pub use models::{

@@ -17,7 +17,9 @@ pub mod data;
 pub mod db;
 pub mod events;
 pub mod execution;
+pub mod orders;
 pub mod patterns;
+pub mod positions;
 pub mod risk;
 pub mod utils;
 
