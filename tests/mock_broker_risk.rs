@@ -254,6 +254,8 @@ async fn test_concurrent_mock_broker_operations() {
                 } else {
                     let fill = Fill {
                         order_id: OrderId::new(&format!("concurrent-fill-{}-{}", i, j)),
+                        symbol: Symbol::new("AAPL").unwrap(),
+                        side: OrderSide::Buy,
                         filled_quantity: Quantity::new(50).unwrap(),
                         filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
                         filled_at: chrono::Utc::now(),

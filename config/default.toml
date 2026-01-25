@@ -49,6 +49,34 @@ min_pattern_sample_size = 20
 min_account_balance = 1000.00
 emergency_liquidate_threshold = 500.00
 
+# Market holiday calendar configuration
+[holidays]
+# Enable holiday calendar for business day calculations
+enabled = true
+
+# Enable specific US market holidays (NYSE/NASDAQ schedule)
+enabled_holidays = [
+    "new_years_day",
+    "martin_luther_king_day",
+    "presidents_day",
+    "good_friday",
+    "memorial_day",
+    "independence_day",
+    "labor_day",
+    "thanksgiving_day",
+    "christmas_day"
+]
+
+# Custom additional holidays (optional)
+# Format: [name, month, day]
+custom_holidays = [
+    # Example: ["Company Holiday", 3, 15]
+]
+
+# Performance settings
+enable_cache = true
+cache_years_ahead = 5
+
 # Pattern-specific risk profiles
 [pattern_profiles.hammer]
 max_trades_per_day = 3

@@ -3,7 +3,7 @@ name = "daytrader-app"
 version = "0.1.0"
 description = "DayTrader Tauri Desktop Application"
 authors = ["Day Trading Platform Team"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,5 +26,5 @@ tokio = { version = "1.0", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Reference existing workspace crate
-daytrader = { path = "../../" }
+daytrader = { path = "../../", features = ["database"] }
 

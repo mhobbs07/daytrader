@@ -372,6 +372,7 @@ impl Default for SignalConfig {
 }
 
 /// Market context analyzer for trend and structure analysis
+#[derive(Clone)]
 pub struct MarketContextAnalyzer {
     /// Configuration for analysis
     config: SignalConfig,
@@ -574,6 +575,7 @@ impl MarketContextAnalyzer {
 }
 
 /// Signal composition engine that combines multiple signal components
+#[derive(Clone)]
 pub struct SignalComposer {
     /// Configuration for composition
     config: SignalConfig,
@@ -789,6 +791,8 @@ pub struct SignalEngine {
     signal_cache: Arc<RwLock<SignalCache>>,
     /// Risk engine for position sizing and filtering
     risk_engine: Option<Arc<crate::risk::engine::RiskEngine>>,
+    /// Signal repository for database persistence
+    signal_repository: Option<Arc<crate::db::repositories::SignalRepository>>,
 }
 
 impl SignalEngine {
@@ -808,7 +812,17 @@ impl SignalEngine {
             signal_cache: Arc::new(RwLock::new(SignalCache::new(config.max_cache_size))),
             config,
             risk_engine,
+            signal_repository: None,
         }
+    }
+
+    /// Sets the signal repository for database persistence
+    pub fn with_signal_repository(
+        mut self,
+        repository: Arc<crate::db::repositories::SignalRepository>,
+    ) -> Self {
+        self.signal_repository = Some(repository);
+        self
     }
 
     /// Generates trading signals from pattern results and candle data
@@ -848,7 +862,7 @@ impl SignalEngine {
 
         for (symbol_str, patterns) in patterns_by_symbol {
             let symbol = Symbol::new(&symbol_str).unwrap_or_else(|_| Symbol::new("UNKNOWN").unwrap());
-            let patterns_clone = patterns.iter().map(|&p| *p).collect::<Vec<_>>();
+            let patterns_clone = patterns.iter().map(|&p| p.clone()).collect::<Vec<_>>();
             let candles_clone = candles.to_vec();
 
             let config = self.config.clone();
@@ -893,6 +907,15 @@ impl SignalEngine {
             cache.add_signal(signal.clone());
         }
 
+        // Persist signals to database if repository is available
+        if let Some(ref repo) = self.signal_repository {
+            for signal in &signals {
+                if let Err(e) = repo.save_trading_signal(signal).await {
+                    tracing::error!("Failed to persist signal to database: {}", e);
+                }
+            }
+        }
+
         Ok(signals)
     }
 
@@ -922,7 +945,7 @@ impl SignalEngine {
         )?;
 
         // Apply risk-adjusted filtering and position sizing if risk engine is available
-        if let Some(ref risk_engine) = risk_engine {
+        if let Some(risk_engine) = risk_engine {
             // Apply risk-adjusted filtering
             signal = Self::apply_risk_filtering_static(signal, risk_engine).await?;
 
@@ -950,7 +973,7 @@ impl SignalEngine {
         // Compose initial signal from patterns and context
         let mut signal = self.composer.compose_signal(
             symbol.clone(),
-            patterns.iter().map(|&p| *p).collect::<Vec<_>>().as_slice(),
+            patterns.iter().map(|&p| p.clone()).collect::<Vec<_>>().as_slice(),
             &market_context,
             candles,
         )?;
@@ -1136,11 +1159,10 @@ impl SignalEngine {
         let final_position_size = base_position_size * rust_decimal::Decimal::from_f64_retain(signal_multiplier).unwrap_or(rust_decimal::Decimal::ONE);
 
         // Add position sizing metadata to signal
-        signal.add_metadata("position_size", &final_position_size.to_string());
-        signal.add_metadata("base_position_size", &base_position_size.to_string());
-        signal.add_metadata("signal_multiplier", &signal_multiplier.to_string());
-
         signal
+            .add_metadata("position_size", &final_position_size.to_string())
+            .add_metadata("base_position_size", &base_position_size.to_string())
+            .add_metadata("signal_multiplier", &signal_multiplier.to_string())
     }
 
     /// Calculates position size multiplier based on signal characteristics (static version)

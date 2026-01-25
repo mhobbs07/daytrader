@@ -95,6 +95,8 @@ async fn test_loss_limit_scenarios() {
     for i in 1..=10 {
         let fill = Fill {
             order_id: OrderId::new(&format!("loss-trade-{}", i)),
+            symbol: Symbol::new("AAPL").unwrap(),
+            side: OrderSide::Buy,
             filled_quantity: Quantity::new(100).unwrap(),
             filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
             filled_at: chrono::Utc::now(),
@@ -116,6 +118,8 @@ async fn test_loss_limit_scenarios() {
     // Scenario 2: Single large loss that exceeds limit
     let large_loss_fill = Fill {
         order_id: OrderId::new("large-loss-trade"),
+        symbol: Symbol::new("AAPL").unwrap(),
+        side: OrderSide::Buy,
         filled_quantity: Quantity::new(100).unwrap(),
         filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
         filled_at: chrono::Utc::now(),
@@ -261,6 +265,8 @@ async fn test_concurrent_operations() {
         for i in 0..25 {
             let fill = Fill {
                 order_id: OrderId::new(&format!("concurrent-fill-{}", i)),
+                symbol: Symbol::new("AAPL").unwrap(),
+                side: OrderSide::Buy,
                 filled_quantity: Quantity::new(50).unwrap(),
                 filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
                 filled_at: chrono::Utc::now(),
@@ -325,6 +331,8 @@ async fn test_rapid_pnl_changes() {
     for (i, pnl_change) in pnl_changes.iter().enumerate() {
         let fill = Fill {
             order_id: OrderId::new(&format!("pnl-change-{}", i)),
+            symbol: Symbol::new("AAPL").unwrap(),
+            side: OrderSide::Buy,
             filled_quantity: Quantity::new(100).unwrap(),
             filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
             filled_at: chrono::Utc::now(),
@@ -503,6 +511,8 @@ fn create_day_trade_order(id: &str, symbol: &str) -> Arc<Order> {
 fn create_fill_for_order(order_id: &str, quantity: u64) -> Fill {
     Fill {
         order_id: OrderId::new(order_id),
+        symbol: Symbol::new("AAPL").unwrap(),
+        side: OrderSide::Buy,
         filled_quantity: Quantity::new(quantity as u32).unwrap(),
         filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
         filled_at: chrono::Utc::now(),

@@ -291,6 +291,8 @@ async fn test_end_to_end_pattern_risk_workflow() {
     // Step 3: Order fill
     let fill = Fill {
         order_id: OrderId::new("test-trade-order"),
+        symbol: Symbol::new("AAPL").unwrap(),
+        side: OrderSide::Buy,
         filled_quantity: Quantity::new(100).unwrap(),
         filled_price: Price::new(Decimal::new(15200, 2)).unwrap(), // Small profit
         filled_at: chrono::Utc::now(),
@@ -400,6 +402,8 @@ async fn test_risk_state_persistence() {
     // Simulate some activity
     let fill = Fill {
         order_id: OrderId::new("fill-1"),
+        symbol: Symbol::new("AAPL").unwrap(),
+        side: OrderSide::Buy,
         filled_quantity: Quantity::new(100).unwrap(),
         filled_price: Price::new(Decimal::new(15000, 2)).unwrap(),
         filled_at: chrono::Utc::now(),

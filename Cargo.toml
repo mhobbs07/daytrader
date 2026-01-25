@@ -1,11 +1,11 @@
 [package]
 name = "daytrader"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Day Trading Platform Team"]
 description = "High-performance day trading platform with real-time market data processing"
 license = "MIT"
-rust-version = "1.75"
+rust-version = "1.92"
 
 [workspace]
 members = [".", "daytrader/src-tauri"]
@@ -44,6 +44,7 @@ ta = "0.5"
 
 # Concurrency utilities
 crossbeam = "0.8"
+num_cpus = "1.16"
 once_cell = "1.19"
 parking_lot = "0.12"
 async-trait = "0.1"
@@ -78,6 +79,11 @@ tower = { version = "0.4", features = ["limit", "buffer", "timeout"] }
 # Security
 keyring = "2.1"
 sha2 = "0.10"
+
+[features]
+default = ["database"]
+database = []
+mock = ["database"]
 
 [dev-dependencies]
 # Testing

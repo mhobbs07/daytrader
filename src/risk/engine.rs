@@ -87,8 +87,7 @@ impl RiskEngine {
         // Initialize risk rule components
         let rule_engine = RiskRuleEngine::new(config.clone());
 
-        let daily_limits = DailyLossLimits::from_config(&config, initial_equity);
-        let daily_loss_tracker = Arc::new(DailyLossTracker::new(daily_limits));
+        let daily_loss_tracker = Arc::new(DailyLossTracker::from_config(&config, initial_equity));
 
         let position_limits = PositionSizeLimits::from_config(&config);
         let position_sizer = Arc::new(PositionSizer::new(position_limits, initial_equity));
@@ -102,7 +101,7 @@ impl RiskEngine {
         // Initialize pattern risk evaluator with stats tracker
         let pattern_config = crate::risk::pattern_limits::PatternRiskConfig::from_config(&config);
         let mut pattern_risk_evaluator = crate::risk::pattern_limits::PatternRiskEvaluator::new(pattern_config);
-        pattern_risk_evaluator.set_stats_tracker(crate::risk::pattern_stats::PatternStatsTracker::new());
+        pattern_risk_evaluator.set_stats_tracker(Arc::clone(&pattern_stats_tracker));
         let pattern_risk_evaluator = Arc::new(RwLock::new(pattern_risk_evaluator));
 
         // Initialize database repositories if database is provided
@@ -160,10 +159,10 @@ impl RiskEngine {
             pdt_enforcer,
             pattern_stats_tracker,
             pattern_risk_evaluator,
-            database: None,
-            pattern_repo: None,
-            signal_repo: None,
-            performance_repo: None,
+            database: self.database.clone(),
+            pattern_repo: self.pattern_repo.clone(),
+            signal_repo: self.signal_repo.clone(),
+            performance_repo: self.performance_repo.clone(),
         });
 
         // Spawn event processing task
@@ -436,7 +435,7 @@ impl RiskEngine {
         }
     
         // Update performance-based multipliers periodically or on detection
-        evaluator.update_performance_based_multipliers();
+        evaluator.update_performance_based_multipliers().await;
     
         // Check for status changes and publish events
         if let Some(state) = evaluator.get_pattern_state(&signal.pattern_name) {

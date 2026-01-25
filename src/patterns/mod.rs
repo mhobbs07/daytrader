@@ -92,11 +92,6 @@ pub use streaming::{SignalStreamingPipeline, StreamingConfig, PipelineStats, Str
 
 
 
-pub use streaming::{SignalStreamingPipeline, StreamingConfig, PipelineStats, StreamingError};
-
-
-
-
 
 
 

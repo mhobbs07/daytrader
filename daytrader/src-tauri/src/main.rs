@@ -94,7 +94,7 @@ fn main() {
     // Create RiskEngine
     let account_id = AccountId::new("demo-account");
     let initial_equity = Decimal::new(5000000, 2); // $50,000.00
-    let risk_engine = Arc::new(RiskEngine::new(config.risk, Arc::clone(&event_bus), account_id, initial_equity));
+    let risk_engine = Arc::new(RiskEngine::new(config.risk, Arc::clone(&event_bus), account_id, initial_equity, Arc::clone(&broker)));
 
     // Create shared caches
     let market_cache = Arc::new(std::sync::Mutex::new(state::MarketDataCache::new()));
@@ -190,6 +190,12 @@ fn main() {
             commands::risk::get_risk_state,
             commands::risk::get_risk_limits,
             commands::risk::get_recent_risk_violations,
+            // New PDT-specific commands
+            commands::risk::get_pdt_status,
+            commands::risk::get_day_trade_history,
+            commands::risk::check_pdt_eligibility,
+            commands::risk::get_pdt_violations,
+            commands::risk::get_business_day_info,
             commands::system::get_system_status,
         ])
         .run(tauri::generate_context!())

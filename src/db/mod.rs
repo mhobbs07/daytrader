@@ -46,7 +46,11 @@
 pub mod connection;
 pub mod models;
 pub mod repositories;
+pub mod traits;
 pub mod migrations;
+
+#[cfg(feature = "mock")]
+pub mod mock;
 
 // Re-export commonly used types
 pub use connection::{Database, DatabaseConfig};

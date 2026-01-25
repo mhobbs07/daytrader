@@ -52,6 +52,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Configuration for pattern-specific risk management
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,7 +274,7 @@ impl PatternRiskState {
 pub struct PatternRiskEvaluator {
     config: PatternRiskConfig,
     pattern_states: HashMap<String, PatternRiskState>,
-    stats_tracker: Option<crate::risk::pattern_stats::PatternStatsTracker>,
+    stats_tracker: Option<Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>>,
     event_bus: Option<Arc<EventBus>>,
     // Cache for frequently accessed pattern keys to avoid repeated string operations
     pattern_key_cache: Arc<DashMap<String, String>>,
@@ -292,7 +293,7 @@ impl PatternRiskEvaluator {
     }
 
     /// Creates a new pattern risk evaluator with statistics tracking
-    pub fn with_stats_tracker(config: PatternRiskConfig, stats_tracker: crate::risk::pattern_stats::PatternStatsTracker) -> Self {
+    pub fn with_stats_tracker(config: PatternRiskConfig, stats_tracker: Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>) -> Self {
         Self {
             config,
             pattern_states: HashMap::new(),
@@ -303,7 +304,7 @@ impl PatternRiskEvaluator {
     }
 
     /// Sets the statistics tracker for performance-based adjustments
-    pub fn set_stats_tracker(&mut self, stats_tracker: crate::risk::pattern_stats::PatternStatsTracker) {
+    pub fn set_stats_tracker(&mut self, stats_tracker: Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>) {
         self.stats_tracker = Some(stats_tracker);
     }
     
@@ -322,7 +323,7 @@ impl PatternRiskEvaluator {
     /// # Returns
     ///
     /// RiskEvaluation indicating whether the trade passes risk checks
-    pub fn evaluate_pattern_trade(
+    pub async fn evaluate_pattern_trade(
         &self,
         pattern_name: &PatternName,
         confidence: f64,
@@ -435,7 +436,8 @@ impl PatternRiskEvaluator {
 
         // Apply performance-based adjustments if stats tracker is available
         if let Some(stats_tracker) = &self.stats_tracker {
-            let performance_multiplier = stats_tracker.get_weighted_risk_multiplier(pattern_name);
+            let stats = stats_tracker.read().await;
+            let performance_multiplier = stats.get_weighted_risk_multiplier(pattern_name);
             let performance_multiplier_decimal = Decimal::from_f64_retain(performance_multiplier).unwrap_or(Decimal::ONE);
 
             // Combine confidence and performance multipliers
@@ -528,7 +530,8 @@ impl PatternRiskEvaluator {
     
             // Publish performance update
             if let Some(stats_tracker) = &self.stats_tracker {
-                if let Some(stats) = stats_tracker.get_pattern_stats(pattern_name) {
+                let stats = stats_tracker.read().await;
+                if let Some(stats) = stats.get_pattern_stats(pattern_name) {
                     bus.publish(MarketEvent::PatternPerformanceUpdate {
                         pattern_name: pattern_name.clone(),
                         win_rate: stats.win_rate,
@@ -576,21 +579,23 @@ impl PatternRiskEvaluator {
 
     /// Updates risk multipliers based on recent performance
     /// This should be called periodically to adjust risk levels
-    pub fn update_performance_based_multipliers(&mut self) {
+    pub async fn update_performance_based_multipliers(&mut self) {
         if let Some(stats_tracker) = &self.stats_tracker {
+            let stats = stats_tracker.read().await;
             // Update pattern states with new risk multipliers
             for (pattern_key, state) in &mut self.pattern_states {
                 let pattern_name = PatternName::new(pattern_key);
-                let new_multiplier = stats_tracker.get_weighted_risk_multiplier(&pattern_name);
+                let new_multiplier = stats.get_weighted_risk_multiplier(&pattern_name);
                 state.update_risk_multiplier(new_multiplier);
             }
         }
     }
 
     /// Gets patterns that need risk escalation due to poor performance
-    pub fn get_patterns_needing_escalation(&self, performance_threshold: f64) -> Vec<String> {
+    pub async fn get_patterns_needing_escalation(&self, performance_threshold: f64) -> Vec<String> {
         if let Some(stats_tracker) = &self.stats_tracker {
-            stats_tracker
+            let stats = stats_tracker.read().await;
+            stats
                 .get_patterns_for_risk_escalation(performance_threshold)
                 .into_iter()
                 .map(|(pattern, _)| pattern)
@@ -601,9 +606,10 @@ impl PatternRiskEvaluator {
     }
 
     /// Gets patterns that need risk de-escalation due to excellent performance
-    pub fn get_patterns_needing_deescalation(&self, performance_threshold: f64) -> Vec<String> {
+    pub async fn get_patterns_needing_deescalation(&self, performance_threshold: f64) -> Vec<String> {
         if let Some(stats_tracker) = &self.stats_tracker {
-            stats_tracker
+            let stats = stats_tracker.read().await;
+            stats
                 .get_patterns_for_risk_deescalation(performance_threshold)
                 .into_iter()
                 .map(|(pattern, _)| pattern)
@@ -614,15 +620,16 @@ impl PatternRiskEvaluator {
     }
 
     /// Updates pattern enable/disable status based on rolling performance
-    pub fn update_pattern_status_from_performance(&mut self, min_performance_score: f64, min_sample_size: u32) {
-        if let Some(stats_tracker) = &mut self.stats_tracker {
+    pub async fn update_pattern_status_from_performance(&mut self, min_performance_score: f64, min_sample_size: u32) {
+        if let Some(stats_tracker) = &self.stats_tracker {
+            let mut stats = stats_tracker.write().await;
             let pattern_names: Vec<String> = self.pattern_states.keys().cloned().collect();
             for pattern_name in pattern_names {
                 let pattern_name_obj = PatternName::new(&pattern_name);
-                stats_tracker.update_pattern_status_from_rolling(&pattern_name_obj, min_performance_score, min_sample_size);
+                stats.update_pattern_status_from_rolling(&pattern_name_obj, min_performance_score, min_sample_size);
 
                 // Update our local state to match
-                if let Some(stats) = stats_tracker.get_pattern_stats(&pattern_name_obj) {
+                if let Some(stats) = stats.get_pattern_stats(&pattern_name_obj) {
                     if let Some(state) = self.pattern_states.get_mut(&pattern_name) {
                         state.set_enabled(stats.is_enabled);
                     }
@@ -743,114 +750,135 @@ mod tests {
         assert!(evaluation.is_passed());
     }
 
-    #[test]
-    fn test_performance_based_risk_adjustment() {
-        let mut tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
+    #[tokio::test]
+    async fn test_performance_based_risk_adjustment() {
+        let tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
         let pattern_name = PatternName::new("hammer");
 
         // Add excellent performance history
-        for _ in 0..15 {
-            tracker.record_trade_outcome(&pattern_name, 0.9, Decimal::new(1000, 2));
+        {
+            let mut t = tracker.write().await;
+            for _ in 0..15 {
+                t.record_trade_outcome(&pattern_name, 0.9, Decimal::new(1000, 2));
+            }
         }
 
-        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), tracker);
+        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), Arc::clone(&tracker));
         let confidence = 0.85;
         let order_value = Decimal::new(500000, 2); // $5,000 order
 
-        let evaluation = evaluator.evaluate_pattern_trade(&pattern_name, confidence, order_value);
+        let evaluation = evaluator.evaluate_pattern_trade(&pattern_name, confidence, order_value).await;
         assert!(evaluation.is_passed()); // Should pass due to reduced risk from excellent performance
     }
 
-    #[test]
-    fn test_performance_based_escalation_detection() {
-        let mut tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
+    #[tokio::test]
+    async fn test_performance_based_escalation_detection() {
+        let tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
         let pattern_name = PatternName::new("hammer");
 
         // Add poor performance history
-        for _ in 0..12 {
-            tracker.record_trade_outcome(&pattern_name, 0.6, Decimal::new(-1000, 2));
-        }
-        for _ in 0..3 {
-            tracker.record_trade_outcome(&pattern_name, 0.6, Decimal::new(1000, 2));
+        {
+            let mut t = tracker.write().await;
+            for _ in 0..12 {
+                t.record_trade_outcome(&pattern_name, 0.6, Decimal::new(-1000, 2));
+            }
+            for _ in 0..3 {
+                t.record_trade_outcome(&pattern_name, 0.6, Decimal::new(1000, 2));
+            }
         }
 
-        let evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), tracker);
+        let evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), Arc::clone(&tracker));
 
-        let escalation_patterns = evaluator.get_patterns_needing_escalation(0.5);
+        let escalation_patterns = evaluator.get_patterns_needing_escalation(0.5).await;
         assert!(escalation_patterns.contains(&"hammer".to_string()));
     }
 
-    #[test]
-    fn test_performance_based_deescalation_detection() {
-        let mut tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
+    #[tokio::test]
+    async fn test_performance_based_deescalation_detection() {
+        let tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
         let pattern_name = PatternName::new("hammer");
 
         // Add excellent performance history
-        for _ in 0..18 {
-            tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+        {
+            let mut t = tracker.write().await;
+            for _ in 0..18 {
+                t.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+            }
         }
 
-        let evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), tracker);
+        let evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), Arc::clone(&tracker));
 
-        let deescalation_patterns = evaluator.get_patterns_needing_deescalation(0.7);
+        let deescalation_patterns = evaluator.get_patterns_needing_deescalation(0.7).await;
         assert!(deescalation_patterns.contains(&"hammer".to_string()));
     }
 
-    #[test]
-    fn test_risk_multiplier_updates() {
-        let mut tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
+    #[tokio::test]
+    async fn test_risk_multiplier_updates() {
+        let tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
         let pattern_name = PatternName::new("hammer");
 
         // Start with good performance
-        for _ in 0..10 {
-            tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+        {
+            let mut t = tracker.write().await;
+            for _ in 0..10 {
+                t.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+            }
         }
 
-        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), tracker);
+        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), Arc::clone(&tracker));
 
         // Initially should have lower risk multiplier due to good performance
-        evaluator.update_performance_based_multipliers();
+        evaluator.update_performance_based_multipliers().await;
         let initial_multiplier = evaluator.get_pattern_state(&pattern_name).unwrap().current_risk_multiplier;
         assert!(initial_multiplier < 1.0); // Reduced risk for good performance
 
         // Simulate poor performance by directly modifying tracker
-        let mut new_tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
-        for _ in 0..10 {
-            new_tracker.record_trade_outcome(&pattern_name, 0.5, Decimal::new(-1000, 2));
+        let new_tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
+        {
+            let mut t = new_tracker.write().await;
+            for _ in 0..10 {
+                t.record_trade_outcome(&pattern_name, 0.5, Decimal::new(-1000, 2));
+            }
         }
-        evaluator.set_stats_tracker(new_tracker);
+        evaluator.set_stats_tracker(Arc::clone(&new_tracker));
 
-        evaluator.update_performance_based_multipliers();
+        evaluator.update_performance_based_multipliers().await;
         let final_multiplier = evaluator.get_pattern_state(&pattern_name).unwrap().current_risk_multiplier;
         assert!(final_multiplier > initial_multiplier); // Increased risk
     }
 
-    #[test]
-    fn test_pattern_status_updates_from_performance() {
-        let mut tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
+    #[tokio::test]
+    async fn test_pattern_status_updates_from_performance() {
+        let tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
         let pattern_name = PatternName::new("hammer");
 
         // Start with poor performance
-        for _ in 0..20 {
-            tracker.record_trade_outcome(&pattern_name, 0.5, Decimal::new(-1000, 2));
+        {
+            let mut t = tracker.write().await;
+            for _ in 0..20 {
+                t.record_trade_outcome(&pattern_name, 0.5, Decimal::new(-1000, 2));
+            }
         }
 
-        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), tracker);
+        let mut evaluator = PatternRiskEvaluator::with_stats_tracker(PatternRiskConfig::default(), Arc::clone(&tracker));
 
         // Should disable pattern due to poor performance
-        evaluator.update_pattern_status_from_performance(0.5, 10);
+        evaluator.update_pattern_status_from_performance(0.5, 10).await;
         let state = evaluator.get_pattern_state(&pattern_name).unwrap();
         assert!(!state.is_enabled);
 
         // Now add good performance
-        let mut new_tracker = crate::risk::pattern_stats::PatternStatsTracker::new();
-        for _ in 0..20 {
-            new_tracker.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+        let new_tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
+        {
+            let mut t = new_tracker.write().await;
+            for _ in 0..20 {
+                t.record_trade_outcome(&pattern_name, 0.8, Decimal::new(1000, 2));
+            }
         }
-        evaluator.set_stats_tracker(new_tracker);
+        evaluator.set_stats_tracker(Arc::clone(&new_tracker));
 
         // Should re-enable pattern due to improved performance
-        evaluator.update_pattern_status_from_performance(0.5, 10);
+        evaluator.update_pattern_status_from_performance(0.5, 10).await;
         let state_after = evaluator.get_pattern_state(&pattern_name).unwrap();
         assert!(state_after.is_enabled);
     }

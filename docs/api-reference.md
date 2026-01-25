@@ -347,21 +347,37 @@ pub struct RiskState {
 ### Risk Engine
 
 #### `RiskEngine`
-Main risk management engine.
+Central risk management engine with Phase 2C-D features including position sizing, PDT enforcement, emergency liquidation, and audit trails.
 
 ```rust
 pub struct RiskEngine {
     config: RiskConfig,
-    state: Arc<Mutex<RiskState>>,
+    state: Arc<RwLock<RiskState>>,
     event_bus: Arc<EventBus>,
+    rule_engine: RiskRuleEngine,
+    daily_loss_tracker: Arc<DailyLossTracker>,
+    position_sizer: Arc<PositionSizer>,
+    pdt_enforcer: Option<Arc<PdtEnforcer>>,
+    position_tracker: Arc<PositionTracker>,
+    pattern_stats_tracker: Arc<RwLock<PatternStatsTracker>>,
+    pattern_risk_evaluator: Arc<RwLock<PatternRiskEvaluator>>,
+    broker: Arc<dyn OrderExecutionProvider>,
+    database: Option<Arc<Database>>,
 }
 
 impl RiskEngine {
-    pub fn new(config: RiskConfig, event_bus: Arc<EventBus>, account_id: AccountId, initial_equity: Decimal) -> Self { ... }
-    pub async fn start(&self) -> Result<()> { ... }
-    pub async fn validate_order(&self, order: &Order) -> Result<()> { ... }
-    pub async fn update_position(&self, symbol: Symbol, position: Position) -> Result<()> { ... }
+    pub fn new(config: RiskConfig, event_bus: Arc<EventBus>, account_id: AccountId, initial_equity: Decimal, broker: Arc<dyn OrderExecutionProvider>) -> Self { ... }
+    pub fn with_database(config: RiskConfig, event_bus: Arc<EventBus>, account_id: AccountId, initial_equity: Decimal, broker: Arc<dyn OrderExecutionProvider>, database: Option<Arc<Database>>) -> Self { ... }
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> { ... }
+    pub async fn validate_order_placement(&self, order: &Order) -> Result<(), Box<dyn std::error::Error + Send + Sync>> { ... }
+    pub async fn update_on_fill(&self, order_id: OrderId, fill: &Fill) -> Result<(), Box<dyn std::error::Error + Send + Sync>> { ... }
+    pub async fn update_position_pl(&self, position: &Position) -> Result<(), Box<dyn std::error::Error + Send + Sync>> { ... }
+    pub async fn update_daily_pl(&self, realized_pl: Decimal) -> Result<(), Box<dyn std::error::Error + Send + Sync>> { ... }
     pub async fn get_risk_state(&self) -> RiskState { ... }
+    pub async fn is_trading_allowed(&self) -> bool { ... }
+    pub async fn halt_trading(&self, reason: impl Into<String>) { ... }
+    pub async fn resume_trading(&self) { ... }
+    pub async fn perform_emergency_liquidation(&self) -> Result<(Vec<Symbol>, Decimal), Box<dyn std::error::Error + Send + Sync>> { ... }
 }
 ```
 
@@ -663,7 +679,18 @@ The following Cargo features are available:
 
 ## Examples
 
-See `api-usage-examples.md` for comprehensive usage examples covering all major APIs.</content>
+See `api-usage-examples.md` for comprehensive usage examples covering all major APIs.
+
+## Related Documentation
+
+- [Risk Management Guide](risk-management-guide.md) - Comprehensive risk system documentation including position sizing, emergency liquidation, and audit trails
+- [PDT Implementation Guide](pdt-implementation-guide.md)
+- [PDT Compliance Checklist](pdt-compliance-checklist.md)
+- [Troubleshooting Guide](troubleshooting.md)
+
+**Last Updated:** January 24, 2026
+**Version:** 2.0 (Phase 2C-D)
+**Next Review:** February 24, 2026</content>
 </xai:function_call">The API reference document has been created successfully. It provides comprehensive documentation for all public modules, types, traits, and functions in the Day Trading Platform. The document includes:
 
 - Core configuration types

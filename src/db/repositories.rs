@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use rust_decimal::prelude::ToPrimitive;
 
 /// Repository for pattern-related database operations
+#[derive(Clone, Debug)]
 pub struct PatternRepository {
     pool: SqlitePool,
 }
@@ -177,6 +178,7 @@ impl PatternRepository {
 }
 
 /// Repository for signal-related database operations
+#[derive(Clone, Debug)]
 pub struct SignalRepository {
     pool: SqlitePool,
 }
@@ -279,9 +281,273 @@ impl SignalRepository {
 
         Ok(signals)
     }
+
+    // ========================================
+    // TradingSignal Methods (Phase 3D-2)
+    // ========================================
+
+    /// Saves a trading signal to the database
+    pub async fn save_trading_signal(&self, signal: &crate::patterns::signals::TradingSignal) -> Result<i64, sqlx::Error> {
+        use crate::db::models::TradingSignalRow;
+        
+        let row = TradingSignalRow::from(signal);
+        
+        sqlx::query!(
+            r#"
+            INSERT INTO trading_signals (
+                id, symbol, signal_type, confidence, price_level, generated_at,
+                trend_type, trend_strength, volatility, market_strength,
+                components, metadata, acted_upon
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            row.id,
+            row.symbol,
+            row.signal_type,
+            row.confidence,
+            row.price_level,
+            row.generated_at,
+            row.trend_type,
+            row.trend_strength,
+            row.volatility,
+            row.market_strength,
+            row.components,
+            row.metadata,
+            row.acted_upon
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(1) // SQLite doesn't return row ID for TEXT primary keys
+    }
+
+    /// Saves a PatternSignal (simple pattern detection) to the database
+    pub async fn save_pattern_signal(&self, signal: &crate::events::types::PatternSignal) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO pattern_signals (
+                symbol, pattern_name, signal_type, confidence, detected_at,
+                candle_timestamp, price_at_detection, acted_upon
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            signal.symbol.as_str(),
+            signal.pattern_name.as_str(),
+            signal.signal_type.as_str(),
+            signal.confidence.value(),
+            signal.detected_at,
+            signal.detected_at,
+            signal.price.value().to_f64().unwrap_or(0.0),
+            false
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Gets trading signals for a symbol with optional limit
+    pub async fn get_signals_for_symbol(
+        &self,
+        symbol: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::patterns::signals::TradingSignal>, sqlx::Error> {
+        use crate::db::models::TradingSignalRow;
+        
+        let rows = sqlx::query_as!(
+            TradingSignalRow,
+            "SELECT * FROM trading_signals WHERE symbol = ? ORDER BY generated_at DESC LIMIT ?",
+            symbol,
+            limit as i32
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let signals = rows
+            .into_iter()
+            .filter_map(|row| row.to_trading_signal().ok())
+            .collect();
+
+        Ok(signals)
+    }
+
+    /// Updates the outcome of a trading signal
+    pub async fn update_signal_outcome(
+        &self,
+        signal_id: &str,
+        outcome: &str,
+        order_id: Option<i64>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "UPDATE trading_signals SET outcome = ?, acted_upon = TRUE, order_id = ? WHERE id = ?",
+            outcome,
+            order_id,
+            signal_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Gets signal statistics for a date range
+    pub async fn get_signal_statistics(
+        &self,
+        from_date: DateTime<Utc>,
+    ) -> Result<crate::db::models::SignalStatistics, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(*) as total_signals,
+                SUM(CASE WHEN signal_type = 'buy' THEN 1 ELSE 0 END) as buy_signals,
+                SUM(CASE WHEN signal_type = 'sell' THEN 1 ELSE 0 END) as sell_signals,
+                AVG(confidence) as avg_confidence,
+                SUM(CASE WHEN confidence >= 0.8 THEN 1 ELSE 0 END) as high_confidence_signals,
+                SUM(CASE WHEN acted_upon = TRUE THEN 1 ELSE 0 END) as signals_acted_upon,
+                SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) as win_count,
+                SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as loss_count,
+                SUM(CASE WHEN outcome = 'pending' THEN 1 ELSE 0 END) as pending_count
+            FROM trading_signals
+            WHERE generated_at >= ?
+            "#,
+            from_date
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let total_signals = row.total_signals.unwrap_or(0) as i32;
+        let win_count = row.win_count.unwrap_or(0) as i32;
+        let loss_count = row.loss_count.unwrap_or(0) as i32;
+        let total_decided = win_count + loss_count;
+        
+        let win_rate = if total_decided > 0 {
+            win_count as f64 / total_decided as f64
+        } else {
+            0.0
+        };
+
+        Ok(crate::db::models::SignalStatistics {
+            total_signals,
+            buy_signals: row.buy_signals.unwrap_or(0) as i32,
+            sell_signals: row.sell_signals.unwrap_or(0) as i32,
+            avg_confidence: row.avg_confidence.unwrap_or(0.0),
+            high_confidence_signals: row.high_confidence_signals.unwrap_or(0) as i32,
+            signals_acted_upon: row.signals_acted_upon.unwrap_or(0) as i32,
+            win_count,
+            loss_count,
+            pending_count: row.pending_count.unwrap_or(0) as i32,
+            win_rate,
+        })
+    }
+
+    /// Batch inserts trading signals for improved performance
+    pub async fn batch_save_trading_signals(
+        &self,
+        signals: &[crate::patterns::signals::TradingSignal],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        use crate::db::models::TradingSignalRow;
+        
+        let mut inserted_ids = Vec::new();
+        
+        // SQLite doesn't support batch inserts in the same way as other databases
+        // We'll use a transaction for better performance
+        let mut tx = self.pool.begin().await?;
+        
+        for signal in signals {
+            let row = TradingSignalRow::from(signal);
+            
+            sqlx::query!(
+                r#"
+                INSERT INTO trading_signals (
+                    id, symbol, signal_type, confidence, price_level, generated_at,
+                    trend_type, trend_strength, volatility, market_strength,
+                    components, metadata, acted_upon
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+                row.id,
+                row.symbol,
+                row.signal_type,
+                row.confidence,
+                row.price_level,
+                row.generated_at,
+                row.trend_type,
+                row.trend_strength,
+                row.volatility,
+                row.market_strength,
+                row.components,
+                row.metadata,
+                row.acted_upon
+            )
+            .execute(&mut *tx)
+            .await?;
+            
+            inserted_ids.push(row.id.clone());
+        }
+        
+        tx.commit().await?;
+        
+        Ok(inserted_ids)
+    }
+
+    /// Stores an indicator value
+    pub async fn save_indicator_value(
+        &self,
+        symbol: &str,
+        indicator_name: &str,
+        value: f64,
+        timestamp: DateTime<Utc>,
+        metadata: Option<String>,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO indicator_values (symbol, indicator_name, value, timestamp, metadata)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, indicator_name, timestamp) DO UPDATE SET
+                value = excluded.value,
+                metadata = excluded.metadata
+            "#,
+            symbol,
+            indicator_name,
+            value,
+            timestamp,
+            metadata
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Gets indicator values for a symbol and indicator
+    pub async fn get_indicator_values(
+        &self,
+        symbol: &str,
+        indicator_name: &str,
+        since: DateTime<Utc>,
+        limit: i32,
+    ) -> Result<Vec<crate::db::models::IndicatorValueRow>, sqlx::Error> {
+        use crate::db::models::IndicatorValueRow;
+        
+        let rows = sqlx::query_as!(
+            IndicatorValueRow,
+            r#"
+            SELECT * FROM indicator_values
+            WHERE symbol = ? AND indicator_name = ? AND timestamp >= ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            "#,
+            symbol,
+            indicator_name,
+            since,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
 }
 
 /// Repository for performance analytics database operations
+#[derive(Clone, Debug)]
 pub struct PerformanceRepository {
     pool: SqlitePool,
 }
