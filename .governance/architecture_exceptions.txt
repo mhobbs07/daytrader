@@ -1,0 +1,24 @@
+# Architectural Boundary Exceptions
+# Format: source_module -> target_module | justification
+# Each exception must have a clear justification. Do not add exceptions without review.
+#
+# These exceptions are loaded by scripts/verify_architecture.sh and suppress
+# violations that would otherwise fail the architecture check.
+
+# Config needs risk type definitions for RiskConfig struct fields
+config -> risk | Config structs embed risk type definitions (ConfidenceMultiplier, PatternRiskProfile, etc.)
+
+# Database models need pattern and broker types for serialization/deserialization
+db -> patterns | Database models mirror pattern signal types (SignalComponent, MarketContext, TrendContext)
+db -> brokers | Database models use broker shared types (Confidence, Price, Symbol, SignalType)
+db -> events | Database models reference event types (SignalType)
+
+# Utils errors reference broker types for error context
+utils -> brokers | BrokerError in utils/errors.rs references broker type names (PatternName, Reason)
+
+# Positions tracker needs order types for fill processing
+positions -> orders | PositionTracker processes FillInfo and ManagedOrder from order lifecycle
+
+# Infrastructure layer bridges domain and db
+infrastructure -> db | Repository implementations wrap database operations
+infrastructure -> domain | Repository implementations fulfill domain port contracts

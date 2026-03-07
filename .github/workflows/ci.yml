@@ -41,6 +41,19 @@ jobs:
           cargo tarpaulin --out Xml
         continue-on-error: true
 
+  governance:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify architecture boundaries
+        run: ./scripts/verify_architecture.sh
+
+      - name: Verify test quality
+        run: ./scripts/verify_test_quality.sh
+
   integration-test:
     runs-on: ubuntu-latest
     needs: test

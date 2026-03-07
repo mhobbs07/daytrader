@@ -1,0 +1,34 @@
+#!/bin/sh
+# =============================================================================
+# Pre-commit hook: Build and test verification
+# Runs the agent verification pipeline when Rust files are staged.
+# Complements .husky/commit-msg (commitlint).
+# =============================================================================
+
+# Check if any Rust source files are staged
+CHANGED_RS=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.rs$' || true)
+CHANGED_TOML=$(git diff --cached --name-only --diff-filter=ACMR | grep 'Cargo\.toml' || true)
+
+if [ -n "$CHANGED_RS" ] || [ -n "$CHANGED_TOML" ]; then
+    echo "Rust files staged for commit. Running verification pipeline..."
+    echo ""
+
+    if [ -x "./scripts/verify_agent_work.sh" ]; then
+        ./scripts/verify_agent_work.sh
+        exit $?
+    else
+        # Fallback: basic checks if the full script isn't available
+        echo "verify_agent_work.sh not found, running basic checks..."
+        cargo check && cargo test --lib && cargo clippy -- -D warnings
+        exit $?
+    fi
+fi
+
+# For non-Rust changes, just check backlog
+CHANGED_SRC=$(git diff --cached --name-only --diff-filter=ACMR | grep '^src/' || true)
+CHANGED_BACKLOG=$(git diff --cached --name-only --diff-filter=ACMR | grep 'BACKLOG.md' || true)
+
+if [ -n "$CHANGED_SRC" ] && [ -z "$CHANGED_BACKLOG" ]; then
+    echo "WARNING: Source files changed but BACKLOG.md was not updated."
+    echo "If this is agent-generated code, please update BACKLOG.md."
+fi

@@ -1,0 +1,8 @@
+# Known Pre-Existing Test Quality Issues
+# Format: file_path:pattern
+# These are tracked technical debt and do not fail verify_test_quality.sh
+# New trivial tests WILL fail the check — only pre-existing issues are exempt
+#
+# To resolve an issue: fix the test, then remove the line from this file.
+
+src/risk/mod.rs:assert!(true)
