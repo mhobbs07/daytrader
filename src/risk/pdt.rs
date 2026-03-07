@@ -33,11 +33,16 @@
 
 use crate::config::RiskConfig;
 use crate::risk::types::{DollarAmount, RiskEvaluation, ViolationSeverity};
+#[cfg(feature = "database")]
+use crate::db::traits::PdtRepositoryTrait;
+#[cfg(feature = "mock")]
+use crate::db::mock::MockPdtRepository;
 use chrono::{DateTime, Datelike, Utc, Weekday};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 /// PDT rule configuration
 ///
@@ -183,20 +188,61 @@ impl PdtState {
 /// PDT rule enforcer with thread-safe state management
 ///
 /// Provides compliance checking and enforcement for Pattern Day Trading rules.
-/// Uses RwLock for concurrent access to PDT state.
+/// Uses RwLock for concurrent access to PDT state and optional database persistence.
 #[derive(Clone)]
 pub struct PdtEnforcer {
     config: PdtConfig,
     state: Arc<RwLock<PdtState>>,
+    #[cfg(any(feature = "database", feature = "mock"))]
+    repository: Option<Arc<dyn PdtRepositoryTrait>>,
+    #[cfg(any(feature = "database", feature = "mock"))]
+    account_id: i64,
 }
 
 impl PdtEnforcer {
-    /// Creates a new PDT enforcer
+    /// Creates a new PDT enforcer without database persistence
     pub fn new(config: PdtConfig, initial_equity: Decimal) -> Self {
         Self {
             config,
             state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            #[cfg(any(feature = "database", feature = "mock"))]
+            repository: None,
+            #[cfg(any(feature = "database", feature = "mock"))]
+            account_id: 0,
         }
+    }
+
+    /// Creates a new PDT enforcer without database (for testing)
+    #[cfg(feature = "mock")]
+    pub fn new_without_db(config: PdtConfig, initial_equity: Decimal) -> Self {
+        let repository: Arc<dyn PdtRepositoryTrait> = Arc::new(MockPdtRepository::new());
+        Self {
+            config,
+            state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            repository: Some(repository),
+            account_id: 0, // Default account ID for testing
+        }
+    }
+
+    /// Creates a new PDT enforcer with database persistence
+    #[cfg(feature = "database")]
+    pub async fn new_with_db(
+        config: PdtConfig,
+        initial_equity: Decimal,
+        repository: Arc<dyn PdtRepositoryTrait>,
+        account_id: i64
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let enforcer = Self {
+            config,
+            state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            repository: Some(repository),
+            account_id,
+        };
+
+        // Restore state from database if available
+        enforcer.restore_state_from_database().await?;
+
+        Ok(enforcer)
     }
 
     /// Creates an enforcer from RiskConfig
@@ -345,15 +391,89 @@ impl PdtEnforcer {
     /// let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
     ///
     /// let today = Utc::now().date_naive();
-    /// enforcer.record_day_trade(today).await;
+    /// enforcer.record_day_trade(today).await.unwrap();
     ///
     /// let count = enforcer.count_day_trades().await;
     /// assert_eq!(count, 1);
     /// # });
     /// ```
-    pub async fn record_day_trade(&self, trade_date: chrono::NaiveDate) {
-        let mut state = self.state.write().await;
-        state.add_day_trade(trade_date);
+    pub async fn record_day_trade(&self, trade_date: chrono::NaiveDate) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Update in-memory state
+        {
+            let mut state = self.state.write().await;
+            state.add_day_trade(trade_date);
+        }
+
+        // Persist to database if available
+        #[cfg(any(feature = "database", feature = "mock"))]
+        if let Some(ref repository) = self.repository {
+            // Create a minimal trade record for database storage
+            let trade_record = crate::db::models::DayTradeRecord {
+                id: 0,
+                account_id: self.account_id,
+                trade_id: format!("simple_trade_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+                symbol: "UNKNOWN".to_string(),
+                quantity: 1,
+                open_time: trade_date.and_hms_opt(9, 30, 0).unwrap().and_utc(),
+                close_time: trade_date.and_hms_opt(16, 0, 0).unwrap().and_utc(),
+                open_price: 0.0,
+                close_price: 0.0,
+                realized_pl: 0.0,
+                commission: 0.0,
+                pattern_name: None,
+                is_validated: true,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            repository.record_day_trade(&trade_record).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Restores PDT state from database on startup
+    #[cfg(any(feature = "database", feature = "mock"))]
+    async fn restore_state_from_database(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref repository) = self.repository {
+            debug!("Restoring PDT state from database for account {}", self.account_id);
+
+            // Get the latest tracking record to restore equity and counts
+            if let Some(tracking) = repository.get_current_pdt_tracking(self.account_id).await? {
+                let mut state = self.state.write().await;
+                state.current_equity = Decimal::try_from(tracking.equity_value).unwrap_or(Decimal::ZERO);
+
+                // Restore recent day trades for accurate window calculations
+                let current_date = Utc::now().date_naive();
+                let window_start = state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+
+                // Get day trades from database to restore in-memory state
+                let recent_trades = repository.get_day_trades_in_range(
+                    self.account_id,
+                    window_start,
+                    current_date
+                ).await?;
+
+                // Rebuild the in-memory VecDeque from database records
+                state.day_trade_history.clear();
+                for trade in recent_trades {
+                    let trade_date = trade.close_time.date_naive();
+                    if let Some(existing_record) = state.day_trade_history.front_mut() {
+                        if existing_record.date == trade_date {
+                            existing_record.count += 1;
+                            continue;
+                        }
+                    }
+                    state.day_trade_history.push_front(DayTradeRecord::new(trade_date, 1));
+                }
+
+                info!("Restored PDT state: equity=${}, day trades in window={}",
+                      state.current_equity,
+                      state.total_day_trades_in_window(self.config.rolling_window_days, current_date));
+            }
+        }
+
+        Ok(())
     }
 
     /// Updates current account equity
@@ -361,9 +481,66 @@ impl PdtEnforcer {
     /// # Arguments
     ///
     /// * `new_equity` - The new account equity value
-    pub async fn update_equity(&self, new_equity: Decimal) {
-        let mut state = self.state.write().await;
-        state.update_equity(new_equity);
+    pub async fn update_equity(&self, new_equity: Decimal) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let old_equity = {
+            let mut state = self.state.write().await;
+            let old_equity = state.current_equity;
+            state.update_equity(new_equity);
+            old_equity
+        };
+
+        // Update database tracking if available
+        #[cfg(any(feature = "database", feature = "mock"))]
+        if let Some(ref repository) = self.repository {
+            // Update daily tracking with new equity
+            self.update_daily_tracking().await?;
+        }
+
+        debug!("Equity updated from ${} to ${}", old_equity, new_equity);
+        Ok(())
+    }
+
+    /// Updates daily PDT tracking record
+    #[cfg(any(feature = "database", feature = "mock"))]
+    async fn update_daily_tracking(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref repository) = self.repository {
+            let state = self.state.read().await;
+            let current_date = Utc::now().date_naive();
+            let window_start = state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+            let window_end = current_date;
+
+            // Count day trades from database for accuracy
+            let day_trades_count = repository.count_day_trades_in_window(
+                self.account_id,
+                window_start,
+                window_end
+            ).await?;
+
+            let today_trades = state.day_trade_history.front()
+                .filter(|record| record.date == current_date)
+                .map(|record| record.count as i32)
+                .unwrap_or(0);
+
+            let tracking_record = crate::db::models::PdtTracking {
+                id: 0,
+                account_id: self.account_id,
+                trading_date: current_date,
+                day_trades_count: today_trades,
+                rolling_window_start: window_start,
+                rolling_window_end: window_end,
+                total_day_trades_window: day_trades_count,
+                equity_value: state.current_equity.to_f64().unwrap_or(0.0),
+                min_equity_threshold: Some(self.config.min_equity_threshold.to_f64().unwrap_or(25000.0)),
+                max_day_trades_allowed: Some(self.config.max_day_trades_under_threshold as i32),
+                is_restricted: !state.meets_equity_threshold(self.config.min_equity_threshold) &&
+                              day_trades_count >= self.config.max_day_trades_under_threshold as i32,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            repository.upsert_pdt_tracking(&tracking_record).await?;
+        }
+        Ok(())
     }
 
     /// Resets the PDT rolling window (typically at month end or on request)

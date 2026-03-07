@@ -29,22 +29,67 @@ CREATE TABLE IF NOT EXISTS candles (
 CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp DESC);
 
--- Positions
+-- Positions (Active Positions Only)
 CREATE TABLE IF NOT EXISTS positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
     symbol TEXT NOT NULL,
     quantity INTEGER NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('long', 'short')) DEFAULT 'long',
     avg_entry_price REAL NOT NULL,
-    current_price REAL,
-    market_value REAL,
-    unrealized_pl REAL,
-    unrealized_pl_percent REAL,
+    current_price REAL NOT NULL,
+    market_value REAL NOT NULL,
+    cost_basis REAL NOT NULL,
+    unrealized_pl REAL NOT NULL DEFAULT 0.0,
+    unrealized_pl_percent REAL NOT NULL DEFAULT 0.0,
+    realized_pl REAL NOT NULL DEFAULT 0.0,
     opened_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Pattern tracking
+    pattern_name TEXT,
+    signal_confidence REAL,
+    -- Order tracking stored as JSON arrays
+    entry_orders TEXT,  -- JSON array of order IDs
+    exit_orders TEXT,   -- JSON array of order IDs
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     UNIQUE(account_id, symbol)
 );
+
+CREATE INDEX IF NOT EXISTS idx_positions_account ON positions(account_id);
+CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_positions_pattern ON positions(pattern_name) WHERE pattern_name IS NOT NULL;
+
+-- Position History (Closed Positions)
+CREATE TABLE IF NOT EXISTS position_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('long', 'short')),
+    avg_entry_price REAL NOT NULL,
+    exit_price REAL NOT NULL,
+    cost_basis REAL NOT NULL,
+    unrealized_pl REAL,
+    realized_pl REAL NOT NULL,
+    total_pl REAL NOT NULL,
+    opened_at TIMESTAMP NOT NULL,
+    closed_at TIMESTAMP NOT NULL,
+    holding_period_minutes INTEGER,
+    close_reason TEXT CHECK(close_reason IN ('manual', 'stop_loss', 'take_profit', 'risk_violation', 'pattern_exit', 'end_of_day')),
+    -- Pattern tracking
+    pattern_name TEXT,
+    signal_confidence REAL,
+    -- Order tracking stored as JSON arrays
+    entry_orders TEXT,
+    exit_orders TEXT,
+    notes TEXT,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_history_account_closed ON position_history(account_id, closed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_position_history_symbol ON position_history(symbol);
+CREATE INDEX IF NOT EXISTS idx_position_history_pattern ON position_history(pattern_name) WHERE pattern_name IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_position_history_pl ON position_history(realized_pl);
 
 -- Orders
 CREATE TABLE IF NOT EXISTS orders (
@@ -132,6 +177,8 @@ CREATE TABLE IF NOT EXISTS pattern_stats (
     stop_after_consecutive_losses INTEGER DEFAULT 3,
     required_win_rate REAL DEFAULT 60.0,
     min_sample_size INTEGER DEFAULT 20,
+    avg_confidence REAL DEFAULT 0.0,
+    confidence_weighted_win_rate REAL DEFAULT 0.0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -367,3 +414,48 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES
     ('events.retention_days', '90'),  -- Default retention for risk events
     ('events.persistence_enabled', 'true'),
     ('events.metrics_collection', 'true');
+
+-- Trading Signals Table (Phase 3D-2)
+-- Stores composite trading signals from SignalEngine
+CREATE TABLE IF NOT EXISTS trading_signals (
+    id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    signal_type TEXT NOT NULL CHECK(signal_type IN ('buy', 'sell')),
+    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+    price_level REAL NOT NULL,
+    generated_at TIMESTAMP NOT NULL,
+    
+    -- Market context fields
+    trend_type TEXT,
+    trend_strength REAL,
+    volatility REAL,
+    market_strength REAL,
+    
+    -- Components and metadata as JSON
+    components TEXT NOT NULL,
+    metadata TEXT,
+    
+    -- Outcome tracking
+    acted_upon BOOLEAN DEFAULT FALSE,
+    outcome TEXT CHECK(outcome IN ('win', 'loss', 'pending', 'ignored')),
+    order_id INTEGER,
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trading_signals_symbol_time ON trading_signals(symbol, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trading_signals_confidence ON trading_signals(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_trading_signals_outcome ON trading_signals(outcome);
+
+-- Indicator Values Table (Phase 3D-2)
+-- Stores technical indicator values for analytics
+CREATE TABLE IF NOT EXISTS indicator_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    indicator_name TEXT NOT NULL,
+    value REAL NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    metadata TEXT,
+    UNIQUE(symbol, indicator_name, timestamp)
+);
+
+CREATE INDEX IF NOT EXISTS idx_indicator_values_symbol_time ON indicator_values(symbol, timestamp DESC);

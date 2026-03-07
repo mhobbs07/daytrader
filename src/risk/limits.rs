@@ -363,16 +363,20 @@ impl DailyLossTracker {
     /// # Returns
     ///
     /// `true` if it's time for daily reset
-    pub fn should_reset_daily(&self, current_time: DateTime<Utc>) -> bool {
-        // Market open is 9:30 AM ET (14:30 UTC)
+    pub async fn should_reset_daily(&self, current_time: DateTime<Utc>) -> bool {
+        // Market open is 9:30 AM ET
         let market_open_et = NaiveTime::from_hms_opt(9, 30, 0).unwrap();
-        let market_open_utc = market_open_et; // Assuming ET = UTC for simplicity
 
-        let current_naive = current_time.naive_utc().time();
+        // Convert current time to ET (assuming EST, UTC-5; in production, handle DST)
+        let current_et = current_time.naive_utc() - chrono::Duration::hours(5);
+        let current_naive_et = current_et.time();
         let current_date = current_time.date_naive();
 
-        // Reset if it's market open time and we're on a new trading day
-        current_naive == market_open_utc
+        let state = self.state.read().await;
+        let last_reset_date = state.trading_date;
+
+        // Reset if current date is after last reset date and time is at or after market open
+        current_date > last_reset_date && current_naive_et >= market_open_et
     }
 }
 

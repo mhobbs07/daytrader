@@ -30,6 +30,18 @@ test:
     - main
     - develop
 
+# Governance checks (architecture boundaries + test quality)
+governance:
+  stage: test
+  image: rust:${RUST_VERSION}
+  script:
+    - ./scripts/verify_architecture.sh
+    - ./scripts/verify_test_quality.sh
+  only:
+    - merge_requests
+    - main
+    - develop
+
 # Security audit
 security:
   stage: test

@@ -104,20 +104,26 @@ async fn test_daily_reset_timing() {
     let state_before = tracker.get_daily_state().await;
     assert_eq!(state_before.realized_pl, Decimal::new(-10000, 2));
 
-    // Test reset timing - should reset at exactly 9:30 AM ET (14:30 UTC)
+    // Set last reset date to previous day for testing
+    {
+        let mut state = tracker.state.write().await;
+        state.trading_date = chrono::NaiveDate::from_ymd_opt(2023, 12, 14).unwrap();
+    }
+
+    // Test reset timing - should reset at or after 9:30 AM ET (14:30 UTC)
     let market_open_utc = Utc.with_ymd_and_hms(2023, 12, 15, 14, 30, 0).unwrap();
-    let should_reset = tracker.should_reset_daily(market_open_utc);
+    let should_reset = tracker.should_reset_daily(market_open_utc).await;
     assert!(should_reset, "Should reset at market open time");
 
     // One second before market open - should not reset
     let before_open = Utc.with_ymd_and_hms(2023, 12, 15, 14, 29, 59).unwrap();
-    let should_not_reset = tracker.should_reset_daily(before_open);
+    let should_not_reset = tracker.should_reset_daily(before_open).await;
     assert!(!should_not_reset, "Should not reset before market open");
 
-    // One second after market open - should not reset (exact time only)
+    // One second after market open - should reset (at or after)
     let after_open = Utc.with_ymd_and_hms(2023, 12, 15, 14, 30, 1).unwrap();
-    let should_not_reset_after = tracker.should_reset_daily(after_open);
-    assert!(!should_not_reset_after, "Should not reset after market open");
+    let should_reset_after = tracker.should_reset_daily(after_open).await;
+    assert!(should_reset_after, "Should reset after market open on new day");
 
     // Perform actual reset
     tracker.reset_daily_limits(Decimal::new(1000000, 2)).await;

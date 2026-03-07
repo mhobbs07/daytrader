@@ -15,6 +15,24 @@ This guide helps you diagnose and resolve common issues when working with the Da
 
 ## Build and Compilation Issues
 
+### Cargo Command Not Found
+
+**Error:** `cargo: command not found` or `/bin/sh: cargo: command not found`
+
+**Cause:** Cargo is not available in the current system PATH.
+
+**Solution:**
+This project includes a cargo wrapper script that handles PATH configuration:
+```bash
+# Use project cargo script instead of direct cargo commands
+./scripts/cargo.sh --version
+./scripts/cargo.sh build
+./scripts/cargo.sh test
+./scripts/cargo.sh run
+```
+
+The [`./scripts/cargo.sh`](../scripts/cargo.sh) script automatically configures the correct PATH to the Cargo binary. This is documented in the [Development Environment Setup](#cargo-path-configuration) section for future reference.
+
 ### Compilation Fails with "unsafe code" Error
 
 **Error:** `error: unsafe code is not allowed in this crate`
@@ -669,6 +687,45 @@ If you can't resolve an issue:
        alert_system.send_alert(&format!("Critical error: {}", e)).await;
    }
    ```
+   
+## Development Environment Setup
+
+### Cargo Path Configuration
+
+This project requires cargo to be available for both interactive and automated use. Due to system PATH configuration, cargo may not be available directly in all environments.
+
+**Current Configuration:**
+- **Direct cargo command**: May fail with "cargo: command not found" 
+- **Project wrapper**: Use [`./scripts/cargo.sh`](../scripts/cargo.sh) which automatically configures the correct PATH
+
+**Usage for Development:**
+```bash
+# Instead of: cargo build
+./scripts/cargo.sh build
+
+# Instead of: cargo test
+./scripts/cargo.sh test
+
+# Instead of: cargo run
+./scripts/cargo.sh run
+```
+
+**For AI Tools and Automation:**
+The [`cargo.sh`](../scripts/cargo.sh) script ensures consistent cargo access across different environments and is documented here for future sessions and team members.
+
+**Script Contents:**
+```bash
+#!/bin/bash
+export PATH="/Users/michaelhobbs/.cargo/bin:$PATH"
+exec /Users/michaelhobbs/.cargo/bin/cargo "$@"
+```
+
+**Verification:**
+```bash
+# Test cargo availability
+./scripts/cargo.sh --version
+# Should output: cargo 1.93.0 (083ac5135 2025-12-15)
+```
 
 This troubleshooting guide covers the most common issues. For additional support, check the documentation or file an issue on GitHub.</content>
 </xai:function_call">The troubleshooting guide has been created successfully. It provides comprehensive solutions for:
