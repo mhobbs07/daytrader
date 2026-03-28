@@ -573,6 +573,11 @@ impl RiskEngine {
         self.state.read().await.clone()
     }
 
+    /// Gets a reference to the risk configuration
+    pub fn get_config(&self) -> &RiskConfig {
+        &self.config
+    }
+
     /// Checks if trading is currently allowed
     pub async fn is_trading_allowed(&self) -> bool {
         let state = self.state.read().await;

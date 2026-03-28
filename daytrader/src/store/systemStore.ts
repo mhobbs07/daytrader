@@ -12,19 +12,26 @@ interface SystemStatus {
 
 interface SystemStore {
   status: SystemStatus | null;
+  error: string | null;
   refreshStatus: () => Promise<void>;
 }
 
 export const useSystemStore = create<SystemStore>((set) => ({
   status: null,
+  error: null,
 
   refreshStatus: async () => {
-    const status = await invoke<SystemStatus>('get_system_status');
-    set({ status });
+    try {
+      const status = await invoke<SystemStatus>('get_system_status');
+      set({ status, error: null });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Failed to fetch system status' });
+    }
   },
 }));
 
-// Poll status every 5 seconds
+// Fetch immediately on module load, then poll every 5 seconds
+useSystemStore.getState().refreshStatus();
 setInterval(() => {
   useSystemStore.getState().refreshStatus();
 }, 5000);

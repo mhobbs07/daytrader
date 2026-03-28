@@ -1,10 +1,9 @@
 use tauri::State;
-use daytrader::risk::{RiskEngine, engine::RiskState};
 use crate::state::AppState;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
+use serde::Serialize;
 use tracing::{error, warn, debug};
-use std::collections::HashMap;
+use daytrader::utils::holidays::MarketHolidayCalendar;
 
 // ============================================================================
 // Response Structures for Frontend
@@ -164,19 +163,17 @@ pub async fn get_risk_limits(
     state: State<'_, AppState>
 ) -> Result<RiskLimitsResponse, String> {
     debug!("Getting risk limits from configuration");
-    
-    // Access the risk configuration from the RiskEngine
-    // For now, we'll use hardcoded values but with proper structure for future enhancement
-    // TODO: Add method to RiskEngine to expose actual configuration
+
+    let config = state.risk_engine.get_config();
     Ok(RiskLimitsResponse {
-        max_daily_loss_dollars: 500.0,
-        max_daily_loss_percent: 2.0,
-        max_position_size_dollars: 5000.0,
-        max_position_size_percent: 10.0,
-        max_concurrent_positions: 5,
-        enforce_pdt_rule: true,
-        pdt_min_equity: 25000.0,
-        max_day_trades_under_pdt: 3,
+        max_daily_loss_dollars: config.max_daily_loss_dollars,
+        max_daily_loss_percent: config.max_daily_loss_percent,
+        max_position_size_dollars: config.max_position_size_dollars,
+        max_position_size_percent: config.max_position_size_percent,
+        max_concurrent_positions: config.max_concurrent_positions as u32,
+        enforce_pdt_rule: config.enforce_pdt_rule,
+        pdt_min_equity: config.pdt_min_equity,
+        max_day_trades_under_pdt: config.max_day_trades_under_pdt as u32,
     })
 }
 

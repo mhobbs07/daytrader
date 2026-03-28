@@ -2,12 +2,16 @@ import { MarketData } from "./components/MarketData";
 import { PatternList } from "./components/PatternList";
 import { SystemStatus } from "./components/SystemStatus";
 import { RiskStatus } from "./components/RiskStatus";
+import { ConnectionStatus } from "./components/ConnectionStatus";
 import "./App.css";
 
 function App() {
   return (
     <main className="container">
-      <h1>DayTrader Thin Slice</h1>
+      <header className="app-header">
+        <h1>DayTrader</h1>
+        <ConnectionStatus />
+      </header>
 
       <div className="dashboard">
         <div className="dashboard-section">

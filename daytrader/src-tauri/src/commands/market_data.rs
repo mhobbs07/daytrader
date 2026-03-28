@@ -19,10 +19,19 @@ pub async fn get_latest_quote(
         .ok_or_else(|| format!("No quote available for {}", symbol))?;
 
     // 3. Convert to response type
+    let bid = quote.bid.as_f64();
+    let ask = quote.ask.as_f64();
+    // Use cached last price if available; fall back to midpoint
+    let last = if quote.last.as_f64() > 0.0 {
+        quote.last.as_f64()
+    } else {
+        (bid + ask) / 2.0
+    };
     Ok(QuoteResponse {
         symbol: symbol.to_string(),
-        bid: quote.bid.as_f64(),
-        ask: quote.ask.as_f64(),
+        bid,
+        ask,
+        last,
         timestamp: quote.timestamp.to_rfc3339(),
     })
 }
@@ -72,6 +81,8 @@ pub struct QuoteResponse {
     pub symbol: String,
     pub bid: f64,
     pub ask: f64,
+    /// Last traded price. Uses ask as proxy when no last trade is available.
+    pub last: f64,
     pub timestamp: String,
 }
 
