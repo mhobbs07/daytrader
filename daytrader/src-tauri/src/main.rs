@@ -20,8 +20,7 @@ use daytrader::risk::RiskEngine;
 use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 fn main() {
     // Load configuration
@@ -94,7 +93,7 @@ fn main() {
     // Create RiskEngine
     let account_id = AccountId::new("demo-account");
     let initial_equity = Decimal::new(5000000, 2); // $50,000.00
-    let risk_engine = Arc::new(RiskEngine::new(config.risk, Arc::clone(&event_bus), account_id, initial_equity, Arc::clone(&broker)));
+    let risk_engine = Arc::new(RiskEngine::new(config.risk, Arc::clone(&event_bus), account_id, initial_equity));
 
     // Create shared caches
     let market_cache = Arc::new(std::sync::Mutex::new(state::MarketDataCache::new()));
