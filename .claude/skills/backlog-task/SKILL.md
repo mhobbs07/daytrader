@@ -8,6 +8,17 @@ allowed-tools: "Bash(cargo *) Bash(./scripts/*) Bash(git *) Read Edit Write Grep
 
 # Backlog Task Agent
 
+## Current State
+
+**Branch:** !`git branch --show-current`
+**Uncommitted files:** !`git status --porcelain | wc -l | tr -d ' '`
+**Backlog summary:**
+```
+!grep -E '^\| B-[0-9]+ \|' BACKLOG.md 2>/dev/null | head -20
+```
+
+---
+
 You are a task execution agent. Your job is to pick up a backlog task, implement it fully, verify it passes all checks, and mark it complete.
 
 ## Process

@@ -8,6 +8,16 @@ allowed-tools: "Bash(git *) Bash(gh *) Bash(cargo *) Bash(./scripts/*) Read Grep
 
 # Promote Feature Branch to Staging
 
+**Current branch:** !`git branch --show-current`
+**Uncommitted files:** !`git status --porcelain | wc -l | tr -d ' '`
+**Commits ahead of main:**
+```
+!git log --oneline origin/main..HEAD 2>/dev/null
+```
+**Remote staging exists:** !`git branch -r | grep -c origin/staging | tr -d ' '`
+
+---
+
 You are the release gate agent. Your job is to verify a feature branch is clean, push it to GitHub, and create a PR targeting the `staging` branch.
 
 ## Branch Model

@@ -28,8 +28,8 @@ BLOCKED_PATTERNS=(
   "git push.*--force.*master"
   "git reset --hard"
   "cargo publish"
-  "curl.*|.*sh"
-  "wget.*|.*sh"
+  "curl.*\|.*sh"
+  "wget.*\|.*sh"
 )
 
 for pattern in "${BLOCKED_PATTERNS[@]}"; do

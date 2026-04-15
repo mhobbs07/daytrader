@@ -7,6 +7,12 @@ allowed-tools: "Bash(cargo *) Bash(./scripts/*) Bash(git status*) Bash(git diff*
 
 # Verify and Fix Until Clean
 
+**Branch:** !`git branch --show-current`
+**Staged files:** !`git diff --cached --name-only | wc -l | tr -d ' '`
+**Unstaged changes:** !`git diff --name-only | wc -l | tr -d ' '`
+
+---
+
 You are the verification agent. Your job is to run the full verification pipeline and fix every issue until it passes cleanly. You do NOT stop until the pipeline is green.
 
 ## Process

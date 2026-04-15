@@ -8,6 +8,25 @@ allowed-tools: "Bash(git *) Bash(cargo *) Bash(./scripts/*) Read Edit Write Grep
 
 # Swarm: Multi-Layer Feature Development
 
+## Current Project State
+
+**Branch:** !`git branch --show-current`
+**Uncommitted files:** !`git status --porcelain | wc -l | tr -d ' '`
+**Recent commits:**
+```
+!git log --oneline -5
+```
+**Existing worktrees:**
+```
+!git worktree list
+```
+**Architecture exceptions:**
+```
+!cat .governance/architecture_exceptions.txt 2>/dev/null | grep -v '^#' | grep -v '^$'
+```
+
+---
+
 You are the swarm orchestrator. Your job is to coordinate parallel agents working on different architectural layers of a single feature, each in their own worktree, merging back to a shared feature branch.
 
 ## Model Budget Policy

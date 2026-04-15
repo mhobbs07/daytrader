@@ -127,6 +127,8 @@ Max 72 chars in subject line, lowercase, no trailing period
 - `/backlog-task <id|next>` — Pick up and complete a backlog task end-to-end
 - `/swarm <feature> <description>` — Orchestrate parallel worktree agents across layers
 - `/promote-to-staging <branch> [--auto-merge]` — Verify, push, and PR a feature branch to staging
+- `/code-review [branch|PR|--staged]` — Review changes for architecture, safety, and compliance
+- `/api-contract <feature> [--generate|--verify]` — Define/verify shared type contracts between layers
 
 ### Accountability
 - Hooks enforce boundaries and quality checks in real-time as you edit
