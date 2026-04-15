@@ -126,6 +126,7 @@ Max 72 chars in subject line, lowercase, no trailing period
 - `/architecture-audit` — Audit boundaries, report violations, optionally fix
 - `/backlog-task <id|next>` — Pick up and complete a backlog task end-to-end
 - `/swarm <feature> <description>` — Orchestrate parallel worktree agents across layers
+- `/promote-to-staging <branch> [--auto-merge]` — Verify, push, and PR a feature branch to staging
 
 ### Accountability
 - Hooks enforce boundaries and quality checks in real-time as you edit
@@ -163,3 +164,29 @@ See `.claude/rules/agent-models.md` for full policy. Maximum 4 concurrent agents
 .claude/hooks/swarm-worktree-cleanup.sh --dry-run   # List stale worktrees
 .claude/hooks/swarm-worktree-cleanup.sh --clean      # Remove stale worktrees
 ```
+
+---
+
+## Git Branching & Staging Workflow
+
+```
+main              ← production (protected, PR + review required)
+  └─ staging      ← integration testing (PRs from feature branches)
+       └─ feat/*  ← feature work (from /swarm or direct development)
+            └─ worktree branches  ← parallel agent work (merged to feat/)
+```
+
+### Flow
+1. Work happens on `feat/<name>` branches (created by `/backlog-task` or `/swarm`)
+2. When a feature is ready, use `/promote-to-staging <branch>` to:
+   - Run full verification
+   - Rebase on staging
+   - Push and create a PR targeting `staging`
+   - Optionally auto-merge with `--auto-merge`
+3. `staging -> main` promotion is a human decision after integration testing
+
+### Rules
+- Never commit directly to `main` or `staging`
+- Feature branches target `staging`, not `main`
+- Never force-push to `main` or `staging`
+- See `.claude/rules/branching.md` for full policy
