@@ -125,8 +125,41 @@ Max 72 chars in subject line, lowercase, no trailing period
 - `/fix-module <name>` — Fix all issues in a specific module until clean
 - `/architecture-audit` — Audit boundaries, report violations, optionally fix
 - `/backlog-task <id|next>` — Pick up and complete a backlog task end-to-end
+- `/swarm <feature> <description>` — Orchestrate parallel worktree agents across layers
 
 ### Accountability
 - Hooks enforce boundaries and quality checks in real-time as you edit
 - `verify_agent_work.sh` is the final gate — all checks must pass
 - All claims are machine-verified. Follow through is not optional.
+
+---
+
+## Worktree Swarm System
+
+For features that cut across multiple architectural layers (db + backend + frontend), use `/swarm` to spawn parallel agents in isolated worktrees on a shared feature branch.
+
+### How It Works
+1. Orchestrator creates `feat/<feature-name>` branch
+2. Spawns 2-4 agents, each in its own worktree (via `isolation: "worktree"`)
+3. Each agent works in isolation — no merge conflicts during development
+4. Agents commit their work to their worktree branches
+5. Orchestrator merges all branches back to the feature branch
+6. Integration verification runs on the merged result
+
+### Model Budget Policy
+
+Costs are controlled by assigning models based on task complexity:
+
+| Agent Role | Model | Cost Tier |
+|------------|-------|-----------|
+| Orchestrator | opus | High (only for coordination) |
+| Backend / DB agents | sonnet | Medium |
+| Frontend / Test agents | haiku | Low |
+
+See `.claude/rules/agent-models.md` for full policy. Maximum 4 concurrent agents.
+
+### Worktree Cleanup
+```
+.claude/hooks/swarm-worktree-cleanup.sh --dry-run   # List stale worktrees
+.claude/hooks/swarm-worktree-cleanup.sh --clean      # Remove stale worktrees
+```
