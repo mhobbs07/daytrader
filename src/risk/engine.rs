@@ -20,9 +20,9 @@ use crate::config::RiskConfig;
 use crate::db::{Database, PatternRepository, PerformanceRepository, SignalRepository};
 use crate::events::bus::EventBus;
 use crate::events::types::{MarketEvent, RiskViolation, RiskViolationType};
-use crate::risk::limits::{DailyLossTracker, DailyLossLimits};
-use crate::risk::pdt::{PdtEnforcer, PdtConfig};
-use crate::risk::position_sizing::{PositionSizer, PositionSizeLimits};
+use crate::risk::limits::{DailyLossLimits, DailyLossTracker};
+use crate::risk::pdt::{PdtConfig, PdtEnforcer};
+use crate::risk::position_sizing::{PositionSizeLimits, PositionSizer};
 use crate::risk::rules::{RiskRuleEngine, TradeContext};
 use crate::risk::types::*;
 use chrono::{DateTime, Utc};
@@ -63,7 +63,12 @@ pub struct RiskState {
 
 impl RiskEngine {
     /// Creates a new risk engine with the given configuration
-    pub fn new(config: RiskConfig, event_bus: Arc<EventBus>, account_id: AccountId, initial_equity: Decimal) -> Self {
+    pub fn new(
+        config: RiskConfig,
+        event_bus: Arc<EventBus>,
+        account_id: AccountId,
+        initial_equity: Decimal,
+    ) -> Self {
         Self::with_database(config, event_bus, account_id, initial_equity, None)
     }
 
@@ -96,11 +101,14 @@ impl RiskEngine {
         let pdt_enforcer = Arc::new(PdtEnforcer::new(pdt_config, initial_equity));
 
         // Initialize pattern statistics tracker
-        let pattern_stats_tracker = Arc::new(RwLock::new(crate::risk::pattern_stats::PatternStatsTracker::new()));
+        let pattern_stats_tracker = Arc::new(RwLock::new(
+            crate::risk::pattern_stats::PatternStatsTracker::new(),
+        ));
 
         // Initialize pattern risk evaluator with stats tracker
         let pattern_config = crate::risk::pattern_limits::PatternRiskConfig::from_config(&config);
-        let mut pattern_risk_evaluator = crate::risk::pattern_limits::PatternRiskEvaluator::new(pattern_config);
+        let mut pattern_risk_evaluator =
+            crate::risk::pattern_limits::PatternRiskEvaluator::new(pattern_config);
         pattern_risk_evaluator.set_stats_tracker(Arc::clone(&pattern_stats_tracker));
         let pattern_risk_evaluator = Arc::new(RwLock::new(pattern_risk_evaluator));
 
@@ -188,7 +196,7 @@ impl RiskEngine {
             MarketEvent::PatternDetected { signal } => {
                 // Record pattern signal detection for statistics
                 self.record_pattern_signal(&signal).await?;
-    
+
                 // Real-time risk evaluation on pattern detection
                 self.evaluate_pattern_risk_on_detection(&signal).await?;
             }
@@ -206,18 +214,22 @@ impl RiskEngine {
                 // Update P&L tracking
                 self.update_position_pl(&position).await?;
             }
-            MarketEvent::PositionClosed { symbol, realized_pl } => {
+            MarketEvent::PositionClosed {
+                symbol,
+                realized_pl,
+            } => {
                 // Update daily P&L
                 self.update_daily_pl(realized_pl).await?;
                 // Update pattern statistics from position close (assuming pattern association via symbol or metadata)
                 // For now, general update; pattern-specific requires trade-pattern linking
-                self.update_pattern_stats_from_close(symbol, realized_pl).await?;
+                self.update_pattern_stats_from_close(symbol, realized_pl)
+                    .await?;
             }
             _ => {
                 // Other events may be relevant in future phases
             }
         }
-    
+
         Ok(())
     }
 
@@ -239,7 +251,7 @@ impl RiskEngine {
             Decimal::from(order.quantity.value()),
             order.price.map(|p| p.value()).unwrap_or(Decimal::ZERO), // Use limit price or assume market order
             current_state.daily_pl, // Use current equity approximation
-            false, // TODO: Implement day trade detection
+            false,                  // TODO: Implement day trade detection
         );
 
         // Evaluate all risk rules
@@ -257,14 +269,18 @@ impl RiskEngine {
                             _ => RiskViolationType::Other,
                         },
                         message: crate::brokers::types::Message::new(
-                            evaluation.message.unwrap_or_else(|| format!("{:?} violation", rule_id))
+                            evaluation
+                                .message
+                                .unwrap_or_else(|| format!("{:?} violation", rule_id)),
                         ),
                         timestamp: Utc::now(),
                         pattern_name: None,
                     };
 
                     // Publish risk violation event
-                    let event = MarketEvent::RiskViolation { violation: violation.clone() };
+                    let event = MarketEvent::RiskViolation {
+                        violation: violation.clone(),
+                    };
                     self.event_bus.publish(event);
 
                     // Store risk violation in database if available
@@ -292,7 +308,9 @@ impl RiskEngine {
 
         // Update day trade count if applicable (simplified - assume all fills are day trades for now)
         // TODO: Implement proper day trade detection based on position lifecycle
-        self.pdt_enforcer.record_day_trade(Utc::now().date_naive()).await;
+        self.pdt_enforcer
+            .record_day_trade(Utc::now().date_naive())
+            .await;
 
         // Update daily P&L (realized P&L from commissions)
         let pl_change = fill.commission; // Negative for losses, positive for profits
@@ -312,16 +330,20 @@ impl RiskEngine {
         let mut current_state = self.state.write().await;
 
         // Update position in position sizer for portfolio allocation tracking
-        self.position_sizer.update_position(
-            position.symbol.to_string(),
-            Decimal::from(position.quantity.value()),
-            position.average_entry_price.value(),
-            position.current_price.value(),
-        ).await;
+        self.position_sizer
+            .update_position(
+                position.symbol.to_string(),
+                Decimal::from(position.quantity.value()),
+                position.average_entry_price.value(),
+                position.current_price.value(),
+            )
+            .await;
 
         // Update unrealized P&L in daily loss tracker
         let unrealized_change = position.unrealized_pl;
-        self.daily_loss_tracker.update_unrealized_pnl(unrealized_change).await;
+        self.daily_loss_tracker
+            .update_unrealized_pnl(unrealized_change)
+            .await;
 
         current_state.last_updated = Utc::now();
 
@@ -342,7 +364,8 @@ impl RiskEngine {
         current_state.last_updated = Utc::now();
 
         // Check for emergency liquidation
-        self.check_emergency_liquidation(current_state.daily_pl).await?;
+        self.check_emergency_liquidation(current_state.daily_pl)
+            .await?;
 
         Ok(())
     }
@@ -358,11 +381,15 @@ impl RiskEngine {
         // Persist signal to database if available
         if let Some(ref signal_repo) = self.signal_repo {
             let trading_signal = crate::patterns::signals::TradingSignal::new(
-                crate::brokers::types::Symbol::new(signal.symbol.as_str()).unwrap_or_else(|_| crate::brokers::types::Symbol::new("UNKNOWN").unwrap()),
+                crate::brokers::types::Symbol::new(signal.symbol.as_str())
+                    .unwrap_or_else(|_| crate::brokers::types::Symbol::new("UNKNOWN").unwrap()),
                 crate::events::types::SignalType::Buy, // Default, should be determined from signal
-                crate::brokers::types::Confidence::new(signal.confidence.value()).unwrap_or_else(|_| crate::brokers::types::Confidence::new(0.5).unwrap()),
+                crate::brokers::types::Confidence::new(signal.confidence.value())
+                    .unwrap_or_else(|_| crate::brokers::types::Confidence::new(0.5).unwrap()),
                 crate::brokers::types::Price::new(rust_decimal::Decimal::ZERO).unwrap(), // Placeholder
-                crate::patterns::signals::MarketContext::new(crate::patterns::types::TrendContext::Sideways { volatility: 0.5 }),
+                crate::patterns::signals::MarketContext::new(
+                    crate::patterns::types::TrendContext::Sideways { volatility: 0.5 },
+                ),
             );
 
             if let Err(e) = signal_repo.store_signal(&trading_signal).await {
@@ -372,7 +399,7 @@ impl RiskEngine {
 
         Ok(())
     }
-    
+
     /// Real-time risk evaluation on pattern detection
     async fn evaluate_pattern_risk_on_detection(
         &self,
@@ -380,37 +407,45 @@ impl RiskEngine {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut evaluator = self.pattern_risk_evaluator.write().await;
         let mut stats_tracker = self.pattern_stats_tracker.write().await;
-    
+
         // Evaluate if pattern is tradable
         // Estimate order value based on typical position size (e.g., from config)
         let estimated_order_value = Decimal::new(5000i64, 2); // $50.00 placeholder
-    
-        let evaluation = evaluator.evaluate_pattern_trade(
-            &signal.pattern_name,
-            signal.confidence.value(),
-            estimated_order_value,
-        );
-    
+
+        let evaluation = evaluator
+            .evaluate_pattern_trade(
+                &signal.pattern_name,
+                signal.confidence.value(),
+                estimated_order_value,
+            )
+            .await;
+
         match evaluation {
             RiskEvaluation::Passed => {
                 // Pattern is good to trade, no action needed
             }
-            RiskEvaluation::Violated { severity, suggested_action } => {
+            RiskEvaluation::Violated {
+                severity,
+                suggested_action,
+            } => {
                 // Publish pattern-specific violation
                 let violation = RiskViolation {
                     violation_type: RiskViolationType::PatternDisabled, // or appropriate type
                     message: Message::new(format!(
                         "Pattern risk violation: {} - {}",
                         signal.pattern_name.as_str(),
-                        suggested_action.as_ref().map(|s| s.as_str()).unwrap_or_default()
+                        suggested_action
+                            .as_ref()
+                            .map(|s| s.as_str())
+                            .unwrap_or_default()
                     )),
                     timestamp: Utc::now(),
                     pattern_name: Some(signal.pattern_name.clone()),
                 };
-    
+
                 let event = MarketEvent::RiskViolation { violation };
                 self.event_bus.publish(event);
-    
+
                 // If critical, disable pattern
                 if matches!(severity, ViolationSeverity::Critical) {
                     evaluator.update_pattern_status(
@@ -418,12 +453,8 @@ impl RiskEngine {
                         0.0, // Force disable
                         0,
                     );
-                    stats_tracker.update_pattern_status(
-                        &signal.pattern_name,
-                        0.0,
-                        0,
-                    );
-    
+                    stats_tracker.update_pattern_status(&signal.pattern_name, 0.0, 0);
+
                     // Publish PatternDisabled event
                     let disable_event = MarketEvent::PatternDisabled {
                         pattern_name: signal.pattern_name.clone(),
@@ -433,10 +464,10 @@ impl RiskEngine {
                 }
             }
         }
-    
+
         // Update performance-based multipliers periodically or on detection
         evaluator.update_performance_based_multipliers().await;
-    
+
         // Check for status changes and publish events
         if let Some(state) = evaluator.get_pattern_state(&signal.pattern_name) {
             if !state.is_enabled {
@@ -449,9 +480,11 @@ impl RiskEngine {
                 // Check if recently enabled
                 // (Would need previous state tracking, simplified here)
             }
-    
+
             // Publish performance update if significant change
-            let stats = stats_tracker.get_pattern_stats(&signal.pattern_name).cloned();
+            let stats = stats_tracker
+                .get_pattern_stats(&signal.pattern_name)
+                .cloned();
             if let Some(s) = stats {
                 if s.total_trades > 0 {
                     let perf_event = MarketEvent::PatternPerformanceUpdate {
@@ -471,10 +504,10 @@ impl RiskEngine {
                 }
             }
         }
-    
+
         Ok(())
     }
-    
+
     /// Records pattern trade outcome for performance tracking
     async fn record_pattern_trade_outcome(
         &self,
@@ -484,7 +517,7 @@ impl RiskEngine {
         // TODO: Determine pattern association (e.g., via order metadata or pending trades map)
         // For Phase 2B-3, implement basic update assuming pattern lookup
         // Placeholder: assume a default pattern or skip pattern-specific for non-linked trades
-    
+
         // Example implementation assuming pattern lookup function (to be implemented)
         // let (pattern_name, confidence) = self.lookup_pattern_for_order(&order_id).await?;
         // if let (Some(pattern_name), Some(confidence)) = (pattern_name, confidence) {
@@ -510,11 +543,11 @@ impl RiskEngine {
         //         }
         //     }
         // }
-    
+
         // For now, update general statistics
         Ok(())
     }
-    
+
     /// Updates pattern statistics from position close
     async fn update_pattern_stats_from_close(
         &self,
@@ -539,16 +572,19 @@ impl RiskEngine {
         &self,
         current_balance: Decimal,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let threshold = Decimal::from_f64_retain(self.config.emergency_liquidate_threshold).unwrap_or(Decimal::ZERO);
+        let threshold = Decimal::from_f64_retain(self.config.emergency_liquidate_threshold)
+            .unwrap_or(Decimal::ZERO);
 
         if current_balance <= threshold {
             tracing::error!(
                 "Emergency liquidation triggered: balance {} below threshold {}",
-                current_balance, threshold
+                current_balance,
+                threshold
             );
 
             // Halt trading immediately
-            self.halt_trading("Emergency liquidation: account balance below threshold").await;
+            self.halt_trading("Emergency liquidation: account balance below threshold")
+                .await;
 
             // TODO: Implement actual liquidation logic
             // This would involve:
@@ -559,7 +595,10 @@ impl RiskEngine {
 
             // For now, just log and halt
             let event = MarketEvent::EmergencyLiquidation {
-                reason: format!("Account balance {} below emergency threshold {}", current_balance, threshold),
+                reason: format!(
+                    "Account balance {} below emergency threshold {}",
+                    current_balance, threshold
+                ),
                 timestamp: Utc::now(),
             };
             self.event_bus.publish(event);
@@ -580,13 +619,20 @@ impl RiskEngine {
     }
 
     /// Gets access to the pattern risk evaluator (for internal use)
-    pub fn get_pattern_risk_evaluator(&self) -> &Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>> {
+    pub fn get_pattern_risk_evaluator(
+        &self,
+    ) -> &Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>> {
         &self.pattern_risk_evaluator
     }
 
     /// Gets access to the position sizer (for internal use)
     pub fn get_position_sizer(&self) -> &Arc<PositionSizer> {
         &self.position_sizer
+    }
+
+    /// Gets access to the risk configuration
+    pub fn config(&self) -> &RiskConfig {
+        &self.config
     }
 
     /// Manually halts trading (emergency stop)
@@ -615,7 +661,6 @@ impl RiskEngine {
         self.event_bus.publish(event);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -678,7 +723,8 @@ mod tests {
             emergency_liquidate_threshold: 500.0,
             pattern_profiles: std::collections::HashMap::new(),
             confidence_multipliers: vec![],
-            pattern_performance_thresholds: crate::risk::types::PatternPerformanceThresholds::default(),
+            pattern_performance_thresholds:
+                crate::risk::types::PatternPerformanceThresholds::default(),
         }
     }
 }

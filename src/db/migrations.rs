@@ -30,7 +30,7 @@ impl MigrationManager {
             // Create migrations table and set initial version
             sqlx::query!(
                 r#"
-                CREATE TABLE schema_migrations (
+                CREATE TABLE IF NOT EXISTS schema_migrations (
                     version INTEGER PRIMARY KEY,
                     description TEXT NOT NULL,
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -55,7 +55,7 @@ impl MigrationManager {
             .fetch_one(&self.pool)
             .await?;
 
-        Ok(row.version.unwrap_or(1))
+        Ok(row.version.unwrap_or(1) as i32)
     }
 
     /// Runs pending migrations
@@ -67,7 +67,10 @@ impl MigrationManager {
             self.migrate_to_v2().await?;
         }
 
-        tracing::info!("Database schema is at version {}", self.get_schema_version().await?);
+        tracing::info!(
+            "Database schema is at version {}",
+            self.get_schema_version().await?
+        );
         Ok(())
     }
 

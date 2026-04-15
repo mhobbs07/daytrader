@@ -3,8 +3,8 @@
 // This module provides comprehensive position lifecycle management, including position
 // opening from fills, real-time price updates, P&L tracking, and position closure workflows.
 
-use crate::brokers::types::{OrderId, PatternName, Price, Quantity, Symbol};
 use crate::brokers::traits::{OrderExecutionProvider, OrderSide};
+use crate::brokers::types::{OrderId, PatternName, Price, Quantity, Symbol};
 use crate::events::{EventBus, MarketEvent};
 use crate::orders::types::{FillInfo, ManagedOrder};
 use crate::positions::pnl::{PnLCalculator, PnLConfig};
@@ -260,21 +260,24 @@ impl PositionTracker {
         order: &ManagedOrder,
         fill_info: &FillInfo,
     ) -> Result<(), PositionError> {
-        let _symbol = &order.symbol;
+        let symbol = &order.symbol;
 
         // Get or create position
         if let Some(mut position_ref) = self.positions.get_mut(symbol) {
             // Position exists - average in the new shares
             let existing_cost =
                 position_ref.avg_entry_price.value() * Decimal::from(position_ref.quantity.value());
-            let new_cost = fill_info.filled_price.value() * Decimal::from(fill_info.filled_quantity.value());
+            let new_cost =
+                fill_info.filled_price.value() * Decimal::from(fill_info.filled_quantity.value());
             let total_cost = existing_cost + new_cost;
 
             let total_quantity = position_ref.quantity.value() + fill_info.filled_quantity.value();
 
             // Update position
-            position_ref.quantity = Quantity::new(total_quantity);
-            position_ref.avg_entry_price = Price::new(total_cost / Decimal::from(total_quantity));
+            position_ref.quantity = Quantity::new(total_quantity)
+                .map_err(|e| PositionError::Internal(e.to_string()))?;
+            position_ref.avg_entry_price = Price::new(total_cost / Decimal::from(total_quantity))
+                .map_err(|e| PositionError::Internal(e.to_string()))?;
             position_ref.cost_basis = total_cost;
             position_ref.entry_orders.push(order.id.clone());
             position_ref.updated_at = Utc::now();
@@ -386,11 +389,12 @@ impl PositionTracker {
             );
         } else {
             // Partial close
-            position_ref.quantity = Quantity::new(new_quantity);
+            position_ref.quantity =
+                Quantity::new(new_quantity).map_err(|e| PositionError::Internal(e.to_string()))?;
 
             // Recalculate cost basis (proportional reduction)
-            let remaining_ratio = Decimal::from(new_quantity) / 
-                Decimal::from(new_quantity + fill_info.filled_quantity.value());
+            let remaining_ratio = Decimal::from(new_quantity)
+                / Decimal::from(new_quantity + fill_info.filled_quantity.value());
             position_ref.cost_basis *= remaining_ratio;
 
             // Update P&L
@@ -461,20 +465,30 @@ impl PositionTracker {
             position.current_price,
         );
 
-        position.market_value = self.pnl_calculator.calculate_market_value(
-            position.quantity.value(),
-            position.current_price,
-        );
+        position.market_value = self
+            .pnl_calculator
+            .calculate_market_value(position.quantity.value(), position.current_price);
     }
 
     /// Get current position for symbol
     pub async fn get_position(&self, symbol: &Symbol) -> Result<Option<Position>, PositionError> {
-        Ok(self.positions.get(symbol).map(|p: dashmap::mapref::one::Ref<Symbol, Position>| p.clone()))
+        Ok(self
+            .positions
+            .get(symbol)
+            .map(|p: dashmap::mapref::one::Ref<Symbol, Position>| p.clone()))
     }
 
     /// Get all open positions
     pub async fn get_all_positions(&self) -> Result<Vec<Position>, PositionError> {
-        let positions: Vec<Position> = self.positions.iter().map(|entry: dashmap::mapref::multiple::RefMulti<Symbol, Position>| entry.value().clone()).collect();
+        let positions: Vec<Position> = self
+            .positions
+            .iter()
+            .map(
+                |entry: dashmap::mapref::multiple::RefMulti<Symbol, Position>| {
+                    entry.value().clone()
+                },
+            )
+            .collect();
         Ok(positions)
     }
 
@@ -526,6 +540,7 @@ impl PositionTracker {
     /// Synchronizes local position state with broker's position data.
     pub async fn sync_from_broker(&self) -> Result<(), PositionError> {
         let broker_positions = self.broker.get_positions().await?;
+        let position_count = broker_positions.len();
 
         for broker_pos in broker_positions {
             let quantity_abs = broker_pos.quantity.abs() as u32;
@@ -537,12 +552,14 @@ impl PositionTracker {
 
             let position = Position {
                 symbol: broker_pos.symbol.clone(),
-                quantity: Quantity::new(quantity_abs),
+                quantity: Quantity::new(quantity_abs)
+                    .map_err(|e| PositionError::Internal(e.to_string()))?,
                 side,
-                avg_entry_price: Price::new(broker_pos.avg_entry_price),
-                current_price: Price::new(broker_pos.current_price),
+                avg_entry_price: broker_pos.avg_entry_price,
+                current_price: broker_pos.current_price,
                 market_value: broker_pos.market_value,
-                cost_basis: broker_pos.avg_entry_price * Decimal::from(quantity_abs),
+                cost_basis: broker_pos.avg_entry_price.value() * Decimal::from(quantity_abs),
+
                 unrealized_pl: broker_pos.unrealized_pl,
                 unrealized_pl_percent: if broker_pos.market_value != Decimal::ZERO {
                     (broker_pos.unrealized_pl / broker_pos.market_value) * Decimal::from(100)
@@ -558,14 +575,15 @@ impl PositionTracker {
                 signal_confidence: None,
             };
 
-            self.positions.insert(broker_pos.symbol.clone(), position.clone());
+            self.positions
+                .insert(broker_pos.symbol.clone(), position.clone());
 
             if self.config.enable_persistence {
                 self.save_position(&position).await?;
             }
         }
 
-        tracing::info!("Synced {} positions from broker", broker_positions.len());
+        tracing::info!("Synced {} positions from broker", position_count);
 
         Ok(())
     }
@@ -577,14 +595,14 @@ impl PositionTracker {
     /// Save position to database
     async fn save_position(&self, position: &Position) -> Result<(), PositionError> {
         use crate::db::repositories::PositionRepository;
-        
+
         let repo = PositionRepository::new((*self.db_pool).clone());
-        
+
         // Use account_id = 1 as default; in production, this would come from context
         let account_id = 1;
-        
+
         repo.save_position(position, account_id).await?;
-        
+
         tracing::debug!("Saved position to database: {}", position.symbol);
         Ok(())
     }
@@ -592,20 +610,21 @@ impl PositionTracker {
     /// Archive closed position to history
     async fn archive_position(&self, position: &Position) -> Result<(), PositionError> {
         use crate::db::repositories::PositionRepository;
-        
+
         let repo = PositionRepository::new((*self.db_pool).clone());
-        
+
         // Use account_id = 1 as default; in production, this would come from context
         let account_id = 1;
-        
+
         // Use current price as exit price for archival
         let exit_price = position.current_price;
-        
+
         // Determine close reason based on position state
         let close_reason = CloseReason::Manual; // Default; caller should specify
-        
-        repo.close_position(position, account_id, &close_reason, exit_price).await?;
-        
+
+        repo.close_position(position, account_id, &close_reason, exit_price)
+            .await?;
+
         tracing::debug!("Archived position to history: {}", position.symbol);
         Ok(())
     }
@@ -678,10 +697,10 @@ mod tests {
 
     fn create_test_position(symbol: &str) -> Position {
         Position::new(
-            Symbol::new(symbol),
+            Symbol::new(symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(dec!(100.00)),
+            Quantity::new(100).unwrap(),
+            Price::new(dec!(100.00)).unwrap(),
             OrderId::new("test-order"),
             None,
             None,

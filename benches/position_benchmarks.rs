@@ -6,19 +6,19 @@
 //! - Database queries: < 20ms for complex aggregations
 //! - Memory efficient: < 1MB per 1000 positions
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use daytrader::brokers::types::{OrderId, PatternName, Price, Quantity, Symbol};
+use chrono::Utc;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use daytrader::brokers::traits::{OrderExecutionProvider, OrderSide, OrderType, TimeInForce};
+use daytrader::brokers::types::{OrderId, PatternName, Price, Quantity, Symbol};
+use daytrader::db::repositories::PositionRepository;
 use daytrader::events::EventBus;
 use daytrader::orders::types::{FillInfo, ManagedOrder, OrderRequest};
 use daytrader::positions::{
     pnl::{PnLCalculator, PnLConfig, TaxLotMethod},
     tracker::{CloseReason, Position, PositionConfig, PositionSide, PositionTracker},
 };
-use daytrader::db::repositories::PositionRepository;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use chrono::Utc;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -100,7 +100,7 @@ pub fn bench_unrealized_pl_single(c: &mut Criterion) {
     let current_price = Price::new(dec!(105.00));
 
     let mut group = c.benchmark_group("pnl_calculations");
-    
+
     group.bench_function("unrealized_pl_single_position", |b| {
         b.iter(|| {
             let _ = black_box(calculator.calculate_unrealized_pl(
@@ -110,7 +110,7 @@ pub fn bench_unrealized_pl_single(c: &mut Criterion) {
             ));
         });
     });
-    
+
     group.finish();
 }
 
@@ -122,7 +122,7 @@ pub fn bench_unrealized_pl_percent(c: &mut Criterion) {
     let current_price = Price::new(dec!(105.00));
 
     let mut group = c.benchmark_group("pnl_calculations");
-    
+
     group.bench_function("unrealized_pl_percent", |b| {
         b.iter(|| {
             let _ = black_box(calculator.calculate_unrealized_pl_percent(
@@ -132,7 +132,7 @@ pub fn bench_unrealized_pl_percent(c: &mut Criterion) {
             ));
         });
     });
-    
+
     group.finish();
 }
 
@@ -145,7 +145,7 @@ pub fn bench_realized_pl(c: &mut Criterion) {
     let commission = dec!(2.00);
 
     let mut group = c.benchmark_group("pnl_calculations");
-    
+
     group.bench_function("realized_pl_with_commission", |b| {
         b.iter(|| {
             let _ = black_box(calculator.calculate_realized_pl(
@@ -156,16 +156,16 @@ pub fn bench_realized_pl(c: &mut Criterion) {
             ));
         });
     });
-    
+
     group.finish();
 }
 
 /// Benchmark portfolio-wide P&L calculation
 pub fn bench_portfolio_pl(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
-    
+
     let mut group = c.benchmark_group("portfolio_pnl");
-    
+
     for size in [10, 100, 1000].iter() {
         let positions: Vec<(Decimal, u32, Price)> = (0..*size)
             .map(|i| {
@@ -175,17 +175,17 @@ pub fn bench_portfolio_pl(c: &mut Criterion) {
                 (cost_basis, quantity, current_price)
             })
             .collect();
-        
+
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
-                let _ = black_box(calculator.calculate_portfolio_pl(
-                    black_box(positions.clone().into_iter())
-                ));
+                let _ = black_box(
+                    calculator.calculate_portfolio_pl(black_box(positions.clone().into_iter())),
+                );
             });
         });
     }
-    
+
     group.finish();
 }
 
@@ -198,7 +198,7 @@ pub fn bench_average_entry_calculation(c: &mut Criterion) {
     let new_qty = 50;
 
     let mut group = c.benchmark_group("pnl_calculations");
-    
+
     group.bench_function("average_entry_price", |b| {
         b.iter(|| {
             let _ = black_box(calculator.calculate_avg_entry(
@@ -209,7 +209,7 @@ pub fn bench_average_entry_calculation(c: &mut Criterion) {
             ));
         });
     });
-    
+
     group.finish();
 }
 
@@ -220,11 +220,11 @@ pub fn bench_average_entry_calculation(c: &mut Criterion) {
 /// Benchmark position updates from order fills
 pub fn bench_position_updates(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     // Create in-memory database for testing
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         // Run migrations
         sqlx::query(
             r#"
@@ -254,13 +254,13 @@ pub fn bench_position_updates(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("position_updates");
     group.sample_size(50); // Reduce sample size for async operations
-    
+
     for count in [10, 100].iter() {
         group.throughput(Throughput::Elements(*count as u64));
         group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, &count| {
@@ -269,11 +269,11 @@ pub fn bench_position_updates(c: &mut Criterion) {
                     // Create positions and update them
                     let positions = create_test_positions(count);
                     let repo = PositionRepository::new(db_pool.clone());
-                    
+
                     for position in &positions {
                         let _ = repo.save_position(position, 1).await;
                     }
-                    
+
                     // Now update all positions with new prices
                     for (i, mut position) in positions.into_iter().enumerate() {
                         position.current_price = Price::new(dec!(105.00) + Decimal::from(i % 10));
@@ -283,17 +283,17 @@ pub fn bench_position_updates(c: &mut Criterion) {
             });
         });
     }
-    
+
     group.finish();
 }
 
 /// Benchmark opening new positions
 pub fn bench_position_opening(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS positions (
@@ -322,22 +322,22 @@ pub fn bench_position_opening(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("position_opening");
     group.sample_size(50);
-    
+
     for count in [10, 100, 1000].iter() {
         let positions = create_test_positions(*count);
-        
+
         group.throughput(Throughput::Elements(*count as u64));
         group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, _| {
             b.iter(|| {
                 rt.block_on(async {
                     let repo = PositionRepository::new(db_pool.clone());
-                    
+
                     for position in &positions {
                         let _ = repo.save_position(black_box(position), 1).await;
                     }
@@ -345,17 +345,17 @@ pub fn bench_position_opening(c: &mut Criterion) {
             });
         });
     }
-    
+
     group.finish();
 }
 
 /// Benchmark position closing with P&L calculation
 pub fn bench_position_closing(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         // Create both positions and position_history tables
         sqlx::query(
             r#"
@@ -380,7 +380,7 @@ pub fn bench_position_closing(c: &mut Criterion) {
                 exit_orders TEXT,
                 UNIQUE(account_id, symbol)
             );
-            
+
             CREATE TABLE IF NOT EXISTS position_history (
                 id INTEGER PRIMARY KEY,
                 account_id INTEGER NOT NULL,
@@ -408,15 +408,15 @@ pub fn bench_position_closing(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("position_closing");
     group.sample_size(50);
-    
+
     let positions = create_test_positions(100);
-    
+
     // First, save all positions
     rt.block_on(async {
         let repo = PositionRepository::new(db_pool.clone());
@@ -424,7 +424,7 @@ pub fn bench_position_closing(c: &mut Criterion) {
             let _ = repo.save_position(position, 1).await;
         }
     });
-    
+
     group.bench_function("close_position_with_archival", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -432,17 +432,20 @@ pub fn bench_position_closing(c: &mut Criterion) {
                 let position = &positions[0];
                 let exit_price = Price::new(dec!(110.00));
                 let close_reason = CloseReason::TakeProfit;
-                
-                let _ = black_box(repo.close_position(
-                    black_box(position),
-                    1,
-                    black_box(&close_reason),
-                    black_box(exit_price),
-                ).await);
+
+                let _ = black_box(
+                    repo.close_position(
+                        black_box(position),
+                        1,
+                        black_box(&close_reason),
+                        black_box(exit_price),
+                    )
+                    .await,
+                );
             });
         });
     });
-    
+
     group.finish();
 }
 
@@ -453,10 +456,10 @@ pub fn bench_position_closing(c: &mut Criterion) {
 /// Benchmark position retrieval by symbol
 pub fn bench_position_retrieval(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS positions (
@@ -480,7 +483,7 @@ pub fn bench_position_retrieval(c: &mut Criterion) {
                 exit_orders TEXT,
                 UNIQUE(account_id, symbol)
             );
-            
+
             CREATE INDEX idx_positions_account_symbol ON positions(account_id, symbol);
             CREATE INDEX idx_positions_pattern ON positions(pattern_name);
             "#,
@@ -488,20 +491,20 @@ pub fn bench_position_retrieval(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         // Populate with test data
         let repo = PositionRepository::new(pool.clone());
         let positions = create_test_positions(1000);
         for position in &positions {
             let _ = repo.save_position(position, 1).await;
         }
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("database_queries");
     group.sample_size(100);
-    
+
     group.bench_function("get_position_by_symbol", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -510,7 +513,7 @@ pub fn bench_position_retrieval(c: &mut Criterion) {
             });
         });
     });
-    
+
     group.bench_function("get_all_active_positions", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -519,17 +522,17 @@ pub fn bench_position_retrieval(c: &mut Criterion) {
             });
         });
     });
-    
+
     group.finish();
 }
 
 /// Benchmark complex position history queries
 pub fn bench_position_history_queries(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS position_history (
@@ -554,7 +557,7 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
                 exit_orders TEXT,
                 notes TEXT
             );
-            
+
             CREATE INDEX idx_position_history_account_closed ON position_history(account_id, closed_at);
             CREATE INDEX idx_position_history_pattern ON position_history(pattern_name);
             CREATE INDEX idx_position_history_symbol ON position_history(symbol);
@@ -563,7 +566,7 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         // Populate with test history data
         let positions = create_test_positions(500);
         for position in &positions {
@@ -600,13 +603,13 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
             .await
             .unwrap();
         }
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("history_queries");
     group.sample_size(100);
-    
+
     group.bench_function("get_position_history", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -616,7 +619,7 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
             });
         });
     });
-    
+
     group.bench_function("get_position_performance_stats", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -626,17 +629,17 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
             });
         });
     });
-    
+
     group.finish();
 }
 
 /// Benchmark pattern-based position filtering
 pub fn bench_pattern_filtering(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     let db_pool = rt.block_on(async {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
-        
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS positions (
@@ -660,7 +663,7 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
                 exit_orders TEXT,
                 UNIQUE(account_id, symbol)
             );
-            
+
             CREATE TABLE IF NOT EXISTS position_history (
                 id INTEGER PRIMARY KEY,
                 account_id INTEGER NOT NULL,
@@ -683,7 +686,7 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
                 exit_orders TEXT,
                 notes TEXT
             );
-            
+
             CREATE INDEX idx_positions_pattern ON positions(pattern_name);
             CREATE INDEX idx_position_history_pattern ON position_history(pattern_name);
             "#,
@@ -691,7 +694,7 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
         .execute(&pool)
         .await
         .unwrap();
-        
+
         // Populate with test data with patterns
         let repo = PositionRepository::new(pool.clone());
         for i in 0..500 {
@@ -701,13 +704,13 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
             }
             let _ = repo.save_position(&position, 1).await;
         }
-        
+
         pool
     });
-    
+
     let mut group = c.benchmark_group("pattern_filtering");
     group.sample_size(100);
-    
+
     group.bench_function("get_positions_by_pattern", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -716,7 +719,7 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
             });
         });
     });
-    
+
     group.finish();
 }
 
@@ -727,7 +730,7 @@ pub fn bench_pattern_filtering(c: &mut Criterion) {
 /// Benchmark memory usage of position collections
 pub fn bench_position_memory(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_usage");
-    
+
     for count in [100, 1000, 10000].iter() {
         group.throughput(Throughput::Elements(*count as u64));
         group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, &count| {
@@ -737,33 +740,33 @@ pub fn bench_position_memory(c: &mut Criterion) {
             });
         });
     }
-    
+
     group.finish();
 }
 
 /// Benchmark P&L calculation scaling
 pub fn bench_pnl_scaling(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
-    
+
     let mut group = c.benchmark_group("pnl_scaling");
-    
+
     for count in [10, 100, 1000, 10000].iter() {
         let positions = create_test_positions(*count);
         let position_data: Vec<(Decimal, u32, Price)> = positions
             .iter()
             .map(|p| (p.cost_basis, p.quantity.value(), p.current_price))
             .collect();
-        
+
         group.throughput(Throughput::Elements(*count as u64));
         group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, _| {
             b.iter(|| {
-                let _ = black_box(calculator.calculate_portfolio_pl(
-                    black_box(position_data.clone().into_iter())
-                ));
+                let _ = black_box(
+                    calculator.calculate_portfolio_pl(black_box(position_data.clone().into_iter())),
+                );
             });
         });
     }
-    
+
     group.finish();
 }
 
@@ -794,11 +797,7 @@ criterion_group!(
     bench_pattern_filtering,
 );
 
-criterion_group!(
-    scaling_benches,
-    bench_position_memory,
-    bench_pnl_scaling,
-);
+criterion_group!(scaling_benches, bench_position_memory, bench_pnl_scaling,);
 
 criterion_main!(
     pnl_benches,

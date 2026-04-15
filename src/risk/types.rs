@@ -406,9 +406,9 @@ pub struct ConfidenceMultiplier {
 impl ConfidenceMultiplier {
     /// Returns the appropriate multiplier for a given confidence score
     pub fn for_confidence(confidence: f64, multipliers: &[Self]) -> Option<&Self> {
-        multipliers.iter().find(|m| {
-            confidence >= m.min_confidence && confidence < m.max_confidence
-        })
+        multipliers
+            .iter()
+            .find(|m| confidence >= m.min_confidence && confidence < m.max_confidence)
     }
 }
 
@@ -436,7 +436,7 @@ impl Default for PatternPerformanceThresholds {
         Self {
             min_win_rate_short: Percentage::new(Decimal::new(500, 1)).unwrap(), // 50%
             min_win_rate_medium: Percentage::new(Decimal::new(550, 1)).unwrap(), // 55%
-            min_win_rate_long: Percentage::new(Decimal::new(600, 1)).unwrap(), // 60%
+            min_win_rate_long: Percentage::new(Decimal::new(600, 1)).unwrap(),  // 60%
             max_consecutive_losses: Count::new(3).unwrap(),
             min_sample_size: Count::new(20).unwrap(),
             auto_disable_threshold: Percentage::new(Decimal::new(400, 1)).unwrap(), // 40%
@@ -475,6 +475,25 @@ impl fmt::Display for PatternRiskViolationType {
         };
         write!(f, "{}", s)
     }
+}
+
+/// Lightweight daily risk metrics for execution context
+///
+/// This is the domain-layer representation of daily risk metrics,
+/// containing only the fields needed by the execution and strategy layers.
+/// For full database-backed metrics, see `db::models::DailyRiskMetrics`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DailyRiskMetrics {
+    /// Realized profit/loss for the day
+    pub realized_pl: Decimal,
+    /// Unrealized profit/loss for the day
+    pub unrealized_pl: Decimal,
+    /// Total profit/loss for the day
+    pub total_pl: Decimal,
+    /// Number of day trades today
+    pub day_trade_count: u32,
+    /// Whether trading is halted
+    pub trading_halted: bool,
 }
 
 /// Pattern risk violation information
@@ -549,9 +568,15 @@ mod tests {
     #[test]
     fn test_risk_rule_id() {
         assert_eq!(RiskRuleId::DailyLossLimit.as_str(), "daily_loss_limit");
-        assert_eq!(RiskRuleId::PositionSizeLimit.as_str(), "position_size_limit");
+        assert_eq!(
+            RiskRuleId::PositionSizeLimit.as_str(),
+            "position_size_limit"
+        );
         assert_eq!(RiskRuleId::PdtLimit.as_str(), "pdt_limit");
-        assert_eq!(RiskRuleId::PatternSpecificLimit.as_str(), "pattern_specific_limit");
+        assert_eq!(
+            RiskRuleId::PatternSpecificLimit.as_str(),
+            "pattern_specific_limit"
+        );
         assert_eq!(RiskRuleId::AccountSafeguard.as_str(), "account_safeguard");
     }
 

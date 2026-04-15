@@ -53,8 +53,14 @@ impl DailyLossLimits {
     /// Creates limits from RiskConfig
     pub fn from_config(config: &RiskConfig, starting_balance: Decimal) -> Self {
         Self {
-            max_loss_dollars: DollarAmount::new(Decimal::try_from(config.max_daily_loss_dollars).unwrap()).unwrap(),
-            max_loss_percent: Percentage::new(Decimal::try_from(config.max_daily_loss_percent).unwrap()).unwrap(),
+            max_loss_dollars: DollarAmount::new(
+                Decimal::try_from(config.max_daily_loss_dollars).unwrap(),
+            )
+            .unwrap(),
+            max_loss_percent: Percentage::new(
+                Decimal::try_from(config.max_daily_loss_percent).unwrap(),
+            )
+            .unwrap(),
         }
     }
 
@@ -204,7 +210,9 @@ impl DailyLossTracker {
         }
 
         // Check against percentage limit
-        let percent_limit = self.limits.dollar_limit_from_percent(state.starting_balance);
+        let percent_limit = self
+            .limits
+            .dollar_limit_from_percent(state.starting_balance);
         if projected_loss >= percent_limit {
             return Ok(false);
         }
@@ -409,7 +417,10 @@ mod tests {
         let tracker = DailyLossTracker::new(limits);
 
         // Small loss should be allowed
-        let can_trade = tracker.check_daily_loss_limit(Decimal::new(-1000, 2)).await.unwrap();
+        let can_trade = tracker
+            .check_daily_loss_limit(Decimal::new(-1000, 2))
+            .await
+            .unwrap();
         assert!(can_trade);
     }
 
@@ -419,7 +430,10 @@ mod tests {
         let tracker = DailyLossTracker::new(limits);
 
         // Large loss should be blocked
-        let can_trade = tracker.check_daily_loss_limit(Decimal::new(-60000, 2)).await.unwrap();
+        let can_trade = tracker
+            .check_daily_loss_limit(Decimal::new(-60000, 2))
+            .await
+            .unwrap();
         assert!(!can_trade);
     }
 
@@ -466,7 +480,7 @@ mod tests {
         let starting_balance = Decimal::new(1000000, 2); // $10,000.00
         let limits = DailyLossLimits {
             max_loss_dollars: DollarAmount::new(Decimal::new(100000, 2)).unwrap(), // $1,000.00
-            max_loss_percent: Percentage::new(Decimal::new(100, 1)).unwrap(),     // 10.0%
+            max_loss_percent: Percentage::new(Decimal::new(100, 1)).unwrap(),      // 10.0%
         };
 
         let percent_limit = limits.dollar_limit_from_percent(starting_balance);

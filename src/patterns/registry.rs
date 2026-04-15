@@ -6,7 +6,7 @@
 //! error handling and performance monitoring.
 
 use crate::events::types::Candle;
-use crate::patterns::traits::{PatternDetector, PatternDetectorFactory, PatternCategory};
+use crate::patterns::traits::{PatternCategory, PatternDetector, PatternDetectorFactory};
 use crate::patterns::types::{PatternError, PatternParams, PatternResult, PatternStats};
 use dashmap::DashMap;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ use tracing::{debug, error, info, warn};
 /// use daytrader::patterns::types::PatternParams;
 ///
 /// let registry = PatternRegistry::new();
-/// 
+///
 /// // Register patterns would be done here
 /// // let detector = Box::new(HammerDetector::new());
 /// // registry.register("hammer", detector);
@@ -125,7 +125,7 @@ impl PatternRegistry {
         detector: Box<dyn PatternDetector>,
     ) -> Result<(), PatternError> {
         let name = name.into();
-        
+
         // Validate detector
         let default_params = detector.default_params();
         detector.validate_params(&default_params)?;
@@ -183,9 +183,12 @@ impl PatternRegistry {
         name: &str,
         params: PatternParams,
     ) -> Result<(), PatternError> {
-        let detector = self.detectors.get(name).ok_or_else(|| PatternError::Configuration {
-            error: format!("Pattern '{}' is not registered", name),
-        })?;
+        let detector = self
+            .detectors
+            .get(name)
+            .ok_or_else(|| PatternError::Configuration {
+                error: format!("Pattern '{}' is not registered", name),
+            })?;
 
         // Validate parameters with the detector
         detector.validate_params(&params)?;
@@ -218,11 +221,12 @@ impl PatternRegistry {
         candles: &[Candle],
         params: Option<&PatternParams>,
     ) -> Result<Option<PatternResult>, PatternError> {
-        let detector = self.detectors.get(pattern_name).ok_or_else(|| {
-            PatternError::Configuration {
-                error: format!("Pattern '{}' is not registered", pattern_name),
-            }
-        })?;
+        let detector =
+            self.detectors
+                .get(pattern_name)
+                .ok_or_else(|| PatternError::Configuration {
+                    error: format!("Pattern '{}' is not registered", pattern_name),
+                })?;
 
         // Get parameters (custom or registered)
         let detection_params = match params {
@@ -251,7 +255,8 @@ impl PatternRegistry {
 
         // Record statistics if monitoring is enabled
         if self.is_monitoring_enabled().await {
-            let confidence = result.as_ref()
+            let confidence = result
+                .as_ref()
                 .ok()
                 .and_then(|r| r.as_ref())
                 .map(|r| r.confidence.value())
@@ -296,7 +301,9 @@ impl PatternRegistry {
         candles: &[Candle],
         global_params: Option<&PatternParams>,
     ) -> Vec<PatternResult> {
-        let pattern_names: Vec<String> = self.detectors.iter()
+        let pattern_names: Vec<String> = self
+            .detectors
+            .iter()
             .map(|entry| entry.key().clone())
             .collect();
 
@@ -311,33 +318,35 @@ impl PatternRegistry {
                 let pattern_name = pattern_name.clone();
                 let candles = candles.to_vec(); // Clone for async
                 let params = global_params.cloned();
-                
+
                 // Clone detector and params for async execution
                 let detector = match self.detectors.get(&pattern_name) {
                     Some(d) => d.clone(),
                     None => continue,
                 };
-                
+
                 let detection_params = match params.as_ref() {
                     Some(p) => p.clone(),
                     None => self.get_pattern_params(&pattern_name).unwrap_or_default(),
                 };
-                
+
                 let global_min_confidence = self.config.read().await.global_min_confidence;
                 let category = detector.category();
                 let is_enabled = self.is_category_enabled(&category).await;
-                
+
                 let handle = tokio::spawn(async move {
                     if !is_enabled {
                         return None;
                     }
-                    
+
                     if candles.len() < detector.min_candles_required() {
                         return None;
                     }
-                    
+
                     match detector.detect(&candles, &detection_params) {
-                        Ok(Some(result)) if result.confidence.value() >= global_min_confidence => Some(result),
+                        Ok(Some(result)) if result.confidence.value() >= global_min_confidence => {
+                            Some(result)
+                        }
                         Ok(_) => None,
                         Err(e) => {
                             warn!("Pattern detection failed for '{}': {}", pattern_name, e);
@@ -357,9 +366,18 @@ impl PatternRegistry {
         }
 
         // Sort by confidence (highest first)
-        results.sort_by(|a, b| b.confidence.value().partial_cmp(&a.confidence.value()).unwrap());
-        
-        info!("Detected {} patterns from {} registered detectors", results.len(), pattern_names.len());
+        results.sort_by(|a, b| {
+            b.confidence
+                .value()
+                .partial_cmp(&a.confidence.value())
+                .unwrap()
+        });
+
+        info!(
+            "Detected {} patterns from {} registered detectors",
+            results.len(),
+            pattern_names.len()
+        );
         results
     }
 
@@ -372,7 +390,9 @@ impl PatternRegistry {
         category: PatternCategory,
         global_params: Option<&PatternParams>,
     ) -> Vec<PatternResult> {
-        let pattern_names: Vec<String> = self.categories.iter()
+        let pattern_names: Vec<String> = self
+            .categories
+            .iter()
             .filter(|entry| *entry.value() == category)
             .map(|entry| entry.key().clone())
             .collect();
@@ -380,21 +400,30 @@ impl PatternRegistry {
         let mut results = Vec::new();
 
         for pattern_name in pattern_names {
-            match self.detect_pattern(&pattern_name, candles, global_params).await {
+            match self
+                .detect_pattern(&pattern_name, candles, global_params)
+                .await
+            {
                 Ok(Some(result)) => results.push(result),
-                Ok(None) => {},
+                Ok(None) => {}
                 Err(e) => warn!("Pattern detection failed for '{}': {}", pattern_name, e),
             }
         }
 
         // Sort by confidence
-        results.sort_by(|a, b| b.confidence.value().partial_cmp(&a.confidence.value()).unwrap());
+        results.sort_by(|a, b| {
+            b.confidence
+                .value()
+                .partial_cmp(&a.confidence.value())
+                .unwrap()
+        });
         results
     }
 
     /// Returns statistics for all registered patterns
     pub fn get_all_stats(&self) -> HashMap<String, PatternStats> {
-        self.stats.iter()
+        self.stats
+            .iter()
             .map(|entry| (entry.key().clone(), entry.value().clone()))
             .collect()
     }
@@ -414,14 +443,16 @@ impl PatternRegistry {
 
     /// Returns list of all registered pattern names
     pub fn list_patterns(&self) -> Vec<String> {
-        self.detectors.iter()
+        self.detectors
+            .iter()
             .map(|entry| entry.key().clone())
             .collect()
     }
 
     /// Returns list of patterns by category
     pub fn list_patterns_by_category(&self, category: PatternCategory) -> Vec<String> {
-        self.categories.iter()
+        self.categories
+            .iter()
             .filter(|entry| *entry.value() == category)
             .map(|entry| entry.key().clone())
             .collect()
@@ -488,7 +519,10 @@ impl PatternRegistry {
             });
         }
 
-        info!("Validated {} pattern detectors successfully", self.pattern_count());
+        info!(
+            "Validated {} pattern detectors successfully",
+            self.pattern_count()
+        );
         Ok(())
     }
 }
@@ -633,7 +667,7 @@ mod tests {
     #[tokio::test]
     async fn test_registry_registration() {
         let registry = PatternRegistry::new();
-        
+
         let detector = Box::new(MockDetector {
             name: "test_pattern",
             should_detect: true,
@@ -656,7 +690,7 @@ mod tests {
     #[tokio::test]
     async fn test_pattern_detection() {
         let registry = PatternRegistry::new();
-        
+
         let detector = Box::new(MockDetector {
             name: "test_pattern",
             should_detect: true,
@@ -665,7 +699,9 @@ mod tests {
         registry.register("test_pattern", detector).unwrap();
 
         let candles = vec![create_test_candle()];
-        let result = registry.detect_pattern("test_pattern", &candles, None).await;
+        let result = registry
+            .detect_pattern("test_pattern", &candles, None)
+            .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
@@ -674,7 +710,7 @@ mod tests {
     #[tokio::test]
     async fn test_detect_all() {
         let registry = PatternRegistry::new();
-        
+
         // Register multiple detectors
         let detector1 = Box::new(MockDetector {
             name: "pattern1",
@@ -711,7 +747,7 @@ mod tests {
         let mut config = RegistryConfig::default();
         config.global_min_confidence = 0.8;
         let registry = PatternRegistry::with_config(config);
-        
+
         let detector = Box::new(MockDetector {
             name: "low_confidence",
             should_detect: true,
@@ -720,7 +756,9 @@ mod tests {
         registry.register("low_confidence", detector).unwrap();
 
         let candles = vec![create_test_candle()];
-        let result = registry.detect_pattern("low_confidence", &candles, None).await;
+        let result = registry
+            .detect_pattern("low_confidence", &candles, None)
+            .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none()); // Filtered out by global threshold
@@ -729,7 +767,7 @@ mod tests {
     #[tokio::test]
     async fn test_pattern_params() {
         let registry = PatternRegistry::new();
-        
+
         let detector = Box::new(MockDetector {
             name: "test_pattern",
             should_detect: true,
@@ -739,7 +777,11 @@ mod tests {
 
         // Update parameters
         let custom_params = PatternParams::new().with_min_confidence(0.9);
-        assert!(registry.update_pattern_params("test_pattern", custom_params.clone()).is_ok());
+        assert!(
+            registry
+                .update_pattern_params("test_pattern", custom_params.clone())
+                .is_ok()
+        );
 
         // Verify parameters were updated
         let retrieved_params = registry.get_pattern_params("test_pattern");
@@ -758,7 +800,7 @@ mod tests {
 
         assert!(registry.is_ok());
         let registry = registry.unwrap();
-        
+
         let config = registry.get_config().await;
         assert_eq!(config.max_parallel_patterns, 5);
         assert_eq!(config.global_min_confidence, 0.7);

@@ -56,8 +56,14 @@ impl PositionSizeLimits {
     /// Creates limits from RiskConfig
     pub fn from_config(config: &RiskConfig) -> Self {
         Self {
-            max_position_dollars: DollarAmount::new(Decimal::try_from(config.max_position_size_dollars).unwrap()).unwrap(),
-            max_portfolio_percent: Percentage::new(Decimal::try_from(config.max_position_size_percent).unwrap()).unwrap(),
+            max_position_dollars: DollarAmount::new(
+                Decimal::try_from(config.max_position_size_dollars).unwrap(),
+            )
+            .unwrap(),
+            max_portfolio_percent: Percentage::new(
+                Decimal::try_from(config.max_position_size_percent).unwrap(),
+            )
+            .unwrap(),
             max_concurrent_positions: config.max_concurrent_positions,
         }
     }
@@ -84,7 +90,12 @@ pub struct PositionInfo {
 
 impl PositionInfo {
     /// Creates a new position info
-    pub fn new(symbol: String, quantity: Decimal, avg_entry_price: Decimal, current_price: Decimal) -> Self {
+    pub fn new(
+        symbol: String,
+        quantity: Decimal,
+        avg_entry_price: Decimal,
+        current_price: Decimal,
+    ) -> Self {
         let market_value = quantity * current_price;
         let cost_basis = quantity * avg_entry_price;
         let unrealized_pl = market_value - cost_basis;
@@ -163,7 +174,12 @@ impl PortfolioState {
 
     /// Calculates total portfolio value including positions
     pub fn total_portfolio_value(&self) -> Decimal {
-        self.total_equity + self.positions.values().map(|p| p.market_value).sum::<Decimal>()
+        self.total_equity
+            + self
+                .positions
+                .values()
+                .map(|p| p.market_value)
+                .sum::<Decimal>()
     }
 
     /// Calculates the portfolio allocation percentage for a given value
@@ -235,7 +251,8 @@ impl PositionSizer {
                 severity: ViolationSeverity::Critical,
                 suggested_action: Some(format!(
                     "Position size ${:.2} exceeds maximum ${:.2}",
-                    position_value, self.limits.max_position_dollars.value()
+                    position_value,
+                    self.limits.max_position_dollars.value()
                 )),
             };
         }
@@ -247,7 +264,8 @@ impl PositionSizer {
                 severity: ViolationSeverity::Moderate,
                 suggested_action: Some(format!(
                     "Position allocation {:.2}% exceeds maximum {:.2}%",
-                    allocation_pct.value(), self.limits.max_portfolio_percent.value()
+                    allocation_pct.value(),
+                    self.limits.max_portfolio_percent.value()
                 )),
             };
         }
@@ -283,7 +301,9 @@ impl PositionSizer {
                     severity: ViolationSeverity::Warning,
                     suggested_action: Some(format!(
                         "Position {} allocation {:.2}% exceeds maximum {:.2}% - consider reducing",
-                        symbol, allocation_pct.value(), self.limits.max_portfolio_percent.value()
+                        symbol,
+                        allocation_pct.value(),
+                        self.limits.max_portfolio_percent.value()
                     )),
                 };
                 violations.push((symbol.clone(), violation));
@@ -321,7 +341,8 @@ impl PositionSizer {
         let portfolio = self.portfolio.read().await;
 
         // Calculate based on portfolio percentage limit
-        let percent_limit = self.limits.max_portfolio_percent.as_fraction() * portfolio.total_equity;
+        let percent_limit =
+            self.limits.max_portfolio_percent.as_fraction() * portfolio.total_equity;
 
         // Take the minimum of dollar limit and percentage limit
         percent_limit.min(self.limits.max_position_dollars.value())
@@ -338,7 +359,12 @@ impl PositionSizer {
     /// # Returns
     ///
     /// Recommended position size in dollars
-    pub async fn calculate_position_size(&self, symbol: &str, price: Decimal, confidence: f64) -> Decimal {
+    pub async fn calculate_position_size(
+        &self,
+        symbol: &str,
+        price: Decimal,
+        confidence: f64,
+    ) -> Decimal {
         let max_size = self.calculate_max_position_size().await;
 
         // Apply confidence-based adjustment
@@ -356,7 +382,8 @@ impl PositionSizer {
         let portfolio = self.portfolio.read().await;
         let existing_position = portfolio.get_position(symbol);
 
-        let mut recommended_size = max_size * Decimal::from_f64_retain(confidence_multiplier).unwrap_or(Decimal::ONE);
+        let mut recommended_size =
+            max_size * Decimal::from_f64_retain(confidence_multiplier).unwrap_or(Decimal::ONE);
 
         // Reduce size if we already have a position (avoid over-concentration)
         if existing_position.is_some() {
@@ -415,7 +442,13 @@ impl PositionSizer {
     /// * `quantity` - Current quantity
     /// * `avg_entry_price` - Average entry price
     /// * `current_price` - Current market price
-    pub async fn update_position(&self, symbol: String, quantity: Decimal, avg_entry_price: Decimal, current_price: Decimal) {
+    pub async fn update_position(
+        &self,
+        symbol: String,
+        quantity: Decimal,
+        avg_entry_price: Decimal,
+        current_price: Decimal,
+    ) {
         let position = PositionInfo::new(symbol.clone(), quantity, avg_entry_price, current_price);
         let mut portfolio = self.portfolio.write().await;
         portfolio.update_position(position);
@@ -517,12 +550,14 @@ mod tests {
         let sizer = PositionSizer::new(limits, Decimal::new(1000000, 2));
 
         // Add a position
-        sizer.update_position(
-            "AAPL".to_string(),
-            Decimal::new(100, 0),     // 100 shares
-            Decimal::new(15000, 2),   // $150.00 avg entry
-            Decimal::new(15500, 2),   // $155.00 current
-        ).await;
+        sizer
+            .update_position(
+                "AAPL".to_string(),
+                Decimal::new(100, 0),   // 100 shares
+                Decimal::new(15000, 2), // $150.00 avg entry
+                Decimal::new(15500, 2), // $155.00 current
+            )
+            .await;
 
         let portfolio = sizer.get_portfolio_state().await;
         assert_eq!(portfolio.position_count(), 1);
@@ -541,12 +576,14 @@ mod tests {
         let sizer = PositionSizer::new(limits, Decimal::new(1000000, 2));
 
         // Add a large position that exceeds allocation limit
-        sizer.update_position(
-            "AAPL".to_string(),
-            Decimal::new(200, 0),     // 200 shares
-            Decimal::new(15000, 2),   // $150.00 avg entry
-            Decimal::new(30000, 2),   // $300.00 current (price appreciation)
-        ).await;
+        sizer
+            .update_position(
+                "AAPL".to_string(),
+                Decimal::new(200, 0),   // 200 shares
+                Decimal::new(15000, 2), // $150.00 avg entry
+                Decimal::new(30000, 2), // $300.00 current (price appreciation)
+            )
+            .await;
 
         let violations = sizer.check_portfolio_allocation().await;
         assert_eq!(violations.len(), 1);
@@ -570,8 +607,22 @@ mod tests {
         let sizer = PositionSizer::new(limits, Decimal::new(1000000, 2));
 
         // Add 2 positions
-        sizer.update_position("AAPL".to_string(), Decimal::new(10, 0), Decimal::new(15000, 2), Decimal::new(15000, 2)).await;
-        sizer.update_position("GOOGL".to_string(), Decimal::new(5, 0), Decimal::new(20000, 2), Decimal::new(20000, 2)).await;
+        sizer
+            .update_position(
+                "AAPL".to_string(),
+                Decimal::new(10, 0),
+                Decimal::new(15000, 2),
+                Decimal::new(15000, 2),
+            )
+            .await;
+        sizer
+            .update_position(
+                "GOOGL".to_string(),
+                Decimal::new(5, 0),
+                Decimal::new(20000, 2),
+                Decimal::new(20000, 2),
+            )
+            .await;
 
         // Try to add a third position
         let evaluation = sizer.validate_position_size(Decimal::new(10000, 2)).await;

@@ -55,7 +55,7 @@ pub struct OrderRequest {
     pub trailing_percent: Option<Decimal>,
     /// Time in force
     pub time_in_force: TimeInForce,
-    
+
     // Pattern metadata (optional)
     /// Pattern name if this is a pattern-based trade
     pub pattern_name: Option<PatternName>,
@@ -183,7 +183,7 @@ pub struct ManagedOrder {
     pub submitted_at: Option<DateTime<Utc>>,
     /// Timestamp when filled (or partially filled)
     pub filled_at: Option<DateTime<Utc>>,
-    
+
     // Enhanced tracking fields
     /// Broker's order ID (assigned after submission)
     pub broker_order_id: Option<String>,
@@ -191,7 +191,7 @@ pub struct ManagedOrder {
     pub commission: Option<Decimal>,
     /// Error message if order was rejected
     pub error_message: Option<String>,
-    
+
     // Pattern tracking
     /// Whether this is a pattern-based trade
     pub is_pattern_trade: bool,
@@ -201,13 +201,13 @@ pub struct ManagedOrder {
     pub signal_id: Option<String>,
     /// Confidence score of the signal
     pub signal_confidence: Option<Decimal>,
-    
+
     // Risk tracking
     /// Whether pre-trade risk validation passed
     pub pre_trade_validation_passed: bool,
     /// Timestamp of risk validation
     pub risk_validation_timestamp: Option<DateTime<Utc>>,
-    
+
     // Timestamps
     /// When order was created internally
     pub created_at: DateTime<Utc>,
@@ -282,7 +282,10 @@ impl ManagedOrder {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
-            OrderStatus::Filled | OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
+            OrderStatus::Filled
+                | OrderStatus::Cancelled
+                | OrderStatus::Rejected
+                | OrderStatus::Expired
         )
     }
 
@@ -295,11 +298,12 @@ impl ManagedOrder {
     /// Updates the order with fill information
     pub fn update_with_fill(&mut self, fill: &FillInfo) {
         self.filled_quantity += fill.filled_quantity.value();
-        
+
         // Update average fill price
         if let Some(existing_avg) = self.filled_avg_price {
             // Weighted average calculation
-            let total_value = existing_avg.value() * Decimal::from(self.filled_quantity - fill.filled_quantity.value())
+            let total_value = existing_avg.value()
+                * Decimal::from(self.filled_quantity - fill.filled_quantity.value())
                 + fill.filled_price.value() * Decimal::from(fill.filled_quantity.value());
             let new_avg = total_value / Decimal::from(self.filled_quantity);
             self.filled_avg_price = Price::new(new_avg).ok();
@@ -340,7 +344,10 @@ impl OrderStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            OrderStatus::Filled | OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
+            OrderStatus::Filled
+                | OrderStatus::Cancelled
+                | OrderStatus::Rejected
+                | OrderStatus::Expired
         )
     }
 }
@@ -514,18 +521,18 @@ impl OrderRequestBuilder {
     /// Returns an error if required fields are missing or validation fails
     pub fn build(self) -> Result<OrderRequest, OrderError> {
         let request = OrderRequest {
-            symbol: self.symbol.ok_or_else(|| {
-                OrderError::ValidationFailed("Symbol is required".into())
-            })?,
-            side: self.side.ok_or_else(|| {
-                OrderError::ValidationFailed("Order side is required".into())
-            })?,
-            order_type: self.order_type.ok_or_else(|| {
-                OrderError::ValidationFailed("Order type is required".into())
-            })?,
-            quantity: self.quantity.ok_or_else(|| {
-                OrderError::ValidationFailed("Quantity is required".into())
-            })?,
+            symbol: self
+                .symbol
+                .ok_or_else(|| OrderError::ValidationFailed("Symbol is required".into()))?,
+            side: self
+                .side
+                .ok_or_else(|| OrderError::ValidationFailed("Order side is required".into()))?,
+            order_type: self
+                .order_type
+                .ok_or_else(|| OrderError::ValidationFailed("Order type is required".into()))?,
+            quantity: self
+                .quantity
+                .ok_or_else(|| OrderError::ValidationFailed("Quantity is required".into()))?,
             limit_price: self.limit_price,
             stop_price: self.stop_price,
             trailing_percent: self.trailing_percent,
@@ -560,9 +567,7 @@ pub enum OrderEvent {
         reason: String,
     },
     /// Order placed and tracked internally
-    OrderPlaced {
-        order: Arc<ManagedOrder>,
-    },
+    OrderPlaced { order: Arc<ManagedOrder> },
     /// Order submitted to broker successfully
     OrderSubmitted {
         order_id: OrderId,

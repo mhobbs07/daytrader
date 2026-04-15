@@ -1,11 +1,9 @@
-use tauri::State;
-use std::sync::atomic::Ordering;
 use crate::state::AppState;
+use std::sync::atomic::Ordering;
+use tauri::State;
 
 #[tauri::command]
-pub async fn get_system_status(
-    state: State<'_, AppState>
-) -> Result<SystemStatus, String> {
+pub async fn get_system_status(state: State<'_, AppState>) -> Result<SystemStatus, String> {
     Ok(SystemStatus {
         broker_connected: state.broker_connected.load(Ordering::Relaxed),
         event_bus_active: state.event_bus.subscriber_count() > 0,

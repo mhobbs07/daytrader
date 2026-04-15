@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-03-07
+Last Updated: 2026-04-14
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -50,6 +50,7 @@ Last Updated: 2026-03-07
 | B-004 | Phase 3D: Integration & optimization | 2025 | main | Pre-governance | Database, streaming, performance tuning |
 | B-005 | Phase 4A: Order management | 2026-01-25 | main | Pre-governance | 2,649 lines, 5 modules |
 | B-006 | Phase 4B-C: Position tracking & execution | 2026-01-25 | main | Pre-governance | Position tracker, execution engine |
+| B-025 | Fix test compilation errors in src/data/ module | 2026-04-14 | fix/test-compilation | Partial (pre-existing failures in other modules) | Fixed Symbol::new/Quantity::new .unwrap() in cache.rs and ingestion.rs tests; removed erroneous ? on Decimal::new; fixed create_test_candle return type |
 
 ---
 

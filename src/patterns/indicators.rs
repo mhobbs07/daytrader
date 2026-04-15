@@ -77,9 +77,7 @@ pub fn sma(prices: &[Decimal], period: usize) -> IndicatorResult<Vec<Decimal>> {
     let mut result = Vec::with_capacity(prices.len().saturating_sub(period - 1));
 
     for i in (period - 1)..prices.len() {
-        let sum: Decimal = prices[i.saturating_sub(period - 1)..=i]
-            .iter()
-            .sum();
+        let sum: Decimal = prices[i.saturating_sub(period - 1)..=i].iter().sum();
         result.push(sum / Decimal::from(period));
     }
 
@@ -209,7 +207,11 @@ pub fn rsi(prices: &[Decimal], period: usize) -> IndicatorResult<Vec<f64>> {
     let mut avg_loss: f64 = losses[..period].iter().sum::<f64>() / period as f64;
 
     // Calculate first RSI
-    let rs = if avg_loss == 0.0 { f64::INFINITY } else { avg_gain / avg_loss };
+    let rs = if avg_loss == 0.0 {
+        f64::INFINITY
+    } else {
+        avg_gain / avg_loss
+    };
     let rsi_val = 100.0 - (100.0 / (1.0 + rs));
     result.push(rsi_val);
 
@@ -218,7 +220,11 @@ pub fn rsi(prices: &[Decimal], period: usize) -> IndicatorResult<Vec<f64>> {
         avg_gain = (avg_gain * (period as f64 - 1.0) + gains[i]) / period as f64;
         avg_loss = (avg_loss * (period as f64 - 1.0) + losses[i]) / period as f64;
 
-        let rs = if avg_loss == 0.0 { f64::INFINITY } else { avg_gain / avg_loss };
+        let rs = if avg_loss == 0.0 {
+            f64::INFINITY
+        } else {
+            avg_gain / avg_loss
+        };
         let rsi_val = 100.0 - (100.0 / (1.0 + rs));
         result.push(rsi_val);
     }
@@ -322,9 +328,11 @@ pub fn bollinger_bands(
                 let diff = price - mean;
                 diff * diff
             })
-            .sum::<Decimal>() / Decimal::from(period);
+            .sum::<Decimal>()
+            / Decimal::from(period);
 
-        let std_dev = Decimal::from_f64((variance.to_f64().unwrap_or(0.0)).sqrt()).unwrap_or(Decimal::ZERO);
+        let std_dev =
+            Decimal::from_f64((variance.to_f64().unwrap_or(0.0)).sqrt()).unwrap_or(Decimal::ZERO);
         let multiplier = Decimal::from_f64(std_dev_multiplier).unwrap_or(Decimal::from(2));
 
         upper_band.push(mean + (std_dev * multiplier));

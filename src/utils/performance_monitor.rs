@@ -67,7 +67,10 @@ pub struct PerformanceMonitor {
 
 impl PerformanceMonitor {
     /// Create a new performance monitor
-    pub fn new(metrics_collector: Arc<ErrorMetricsCollector>, baseline_path: impl AsRef<Path>) -> Self {
+    pub fn new(
+        metrics_collector: Arc<ErrorMetricsCollector>,
+        baseline_path: impl AsRef<Path>,
+    ) -> Self {
         Self {
             baselines: Arc::new(RwLock::new(HashMap::new())),
             metrics_collector,
@@ -138,15 +141,20 @@ impl PerformanceMonitor {
                 .unwrap_or(self.default_regression_threshold),
         };
 
-        let mut baselines = self.baselines.write().await;
-        baselines.insert(identifier.to_string(), baseline.clone());
+        {
+            let mut baselines = self.baselines.write().await;
+            baselines.insert(identifier.to_string(), baseline.clone());
+        }
 
         info!(
             "Established baseline for {}: mean={:.2}ns, std_dev={:.2}ns, samples={}",
-            identifier, mean, std_dev, metrics.len()
+            identifier,
+            mean,
+            std_dev,
+            metrics.len()
         );
 
-        // Save to disk
+        // Save to disk (needs read lock, so write lock must be dropped first)
         self.save_baselines().await?;
 
         Ok(())
@@ -159,9 +167,9 @@ impl PerformanceMonitor {
         current_metric: PerformanceMetric,
     ) -> Result<RegressionResult, Box<dyn std::error::Error + Send + Sync>> {
         let baselines = self.baselines.read().await;
-        let baseline = baselines.get(identifier).ok_or_else(|| {
-            format!("No baseline found for identifier: {}", identifier)
-        })?;
+        let baseline = baselines
+            .get(identifier)
+            .ok_or_else(|| format!("No baseline found for identifier: {}", identifier))?;
 
         let current_time = current_metric.execution_time_ns as f64;
         let baseline_mean = baseline.mean_time_ns;
@@ -194,7 +202,9 @@ impl PerformanceMonitor {
         if is_regression {
             warn!(
                 "Performance regression detected for {}: {:.2}% slower (confidence: {:.2}%)",
-                identifier, regression_percent, confidence * 100.0
+                identifier,
+                regression_percent,
+                confidence * 100.0
             );
         } else {
             info!(
@@ -220,7 +230,9 @@ impl PerformanceMonitor {
             additional_data: additional_data.unwrap_or_default(),
         };
 
-        self.metrics_collector.record_performance_metric(metric.clone()).await?;
+        self.metrics_collector
+            .record_performance_metric(metric.clone())
+            .await?;
 
         // Check for regression if baseline exists
         if let Ok(regression_result) = self.check_regression(identifier, metric).await {
@@ -246,7 +258,10 @@ impl PerformanceMonitor {
     }
 
     /// Remove a baseline
-    pub async fn remove_baseline(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn remove_baseline(
+        &self,
+        identifier: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut baselines = self.baselines.write().await;
         baselines.remove(identifier);
         self.save_baselines().await?;
@@ -280,9 +295,15 @@ impl PerformanceDashboard {
     }
 
     /// Generate a performance report
-    pub async fn generate_report(&self) -> Result<PerformanceReport, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn generate_report(
+        &self,
+    ) -> Result<PerformanceReport, Box<dyn std::error::Error + Send + Sync>> {
         let baselines = self.monitor.list_baselines().await;
-        let recent_metrics = self.monitor.metrics_collector.get_recent_metrics(100).await?;
+        let recent_metrics = self
+            .monitor
+            .metrics_collector
+            .get_recent_metrics(100)
+            .await?;
         let metrics_count = recent_metrics.len();
 
         let mut report = PerformanceReport {
@@ -295,9 +316,12 @@ impl PerformanceDashboard {
         // Calculate summary statistics
         if !report.baselines.is_empty() {
             let total_baselines = report.baselines.len();
-            let avg_regression_threshold: f64 = report.baselines.iter()
+            let avg_regression_threshold: f64 = report
+                .baselines
+                .iter()
                 .map(|b| b.regression_threshold_percent)
-                .sum::<f64>() / total_baselines as f64;
+                .sum::<f64>()
+                / total_baselines as f64;
 
             report.summary = PerformanceSummary {
                 total_baselines,
@@ -363,7 +387,10 @@ mod tests {
             },
         ];
 
-        monitor.establish_baseline("test_pattern", &metrics, Some(5.0)).await.unwrap();
+        monitor
+            .establish_baseline("test_pattern", &metrics, Some(5.0))
+            .await
+            .unwrap();
 
         let baseline = monitor.get_baseline("test_pattern").await.unwrap();
         assert_eq!(baseline.identifier, "test_pattern");
@@ -380,16 +407,17 @@ mod tests {
         let monitor = PerformanceMonitor::new(metrics_collector, &baseline_path);
 
         // Establish baseline
-        let baseline_metrics = vec![
-            PerformanceMetric {
-                name: "test_pattern".to_string(),
-                execution_time_ns: 1000,
-                timestamp: chrono::Utc::now(),
-                additional_data: HashMap::new(),
-            },
-        ];
+        let baseline_metrics = vec![PerformanceMetric {
+            name: "test_pattern".to_string(),
+            execution_time_ns: 1000,
+            timestamp: chrono::Utc::now(),
+            additional_data: HashMap::new(),
+        }];
 
-        monitor.establish_baseline("test_pattern", &baseline_metrics, Some(10.0)).await.unwrap();
+        monitor
+            .establish_baseline("test_pattern", &baseline_metrics, Some(10.0))
+            .await
+            .unwrap();
 
         // Test with slower performance (20% regression)
         let current_metric = PerformanceMetric {
@@ -399,7 +427,10 @@ mod tests {
             additional_data: HashMap::new(),
         };
 
-        let regression_result = monitor.check_regression("test_pattern", current_metric).await.unwrap();
+        let regression_result = monitor
+            .check_regression("test_pattern", current_metric)
+            .await
+            .unwrap();
 
         assert!(regression_result.is_regression);
         assert!((regression_result.regression_percent - 20.0).abs() < 1.0);

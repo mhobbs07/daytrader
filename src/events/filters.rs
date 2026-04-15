@@ -94,7 +94,9 @@ use tokio_stream::wrappers::BroadcastStream;
 /// # Returns
 ///
 /// A stream of `MarketEvent` items
-pub fn to_stream(rx: broadcast::Receiver<MarketEvent>) -> Pin<Box<dyn Stream<Item = MarketEvent> + Send>> {
+pub fn to_stream(
+    rx: broadcast::Receiver<MarketEvent>,
+) -> Pin<Box<dyn Stream<Item = MarketEvent> + Send>> {
     Box::pin(BroadcastStream::new(rx).filter_map(|result| async move {
         match result {
             Ok(event) => Some(event),
@@ -178,7 +180,7 @@ pub fn filter_candles(
 ///     let mut pattern_stream = filter_patterns(rx);
 ///     
 ///     while let Some(signal) = pattern_stream.next().await {
-///         println!("Pattern detected: {} ({})", 
+///         println!("Pattern detected: {} ({})",
 ///                  signal.pattern_name, signal.confidence);
 ///     }
 /// }
@@ -223,12 +225,14 @@ pub fn filter_patterns(
 ///     let mut order_stream = filter_orders(rx);
 ///     
 ///     while let Some(order) = order_stream.next().await {
-///         println!("Order placed: {} {} {}", 
+///         println!("Order placed: {} {} {}",
 ///                  order.side, order.quantity, order.symbol);
 ///     }
 /// }
 /// ```
-pub fn filter_orders(stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>) -> Pin<Box<dyn Stream<Item = Arc<Order>> + Send>> {
+pub fn filter_orders(
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
+) -> Pin<Box<dyn Stream<Item = Arc<Order>> + Send>> {
     Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::OrderPlaced { order } = event {
             Some(order)
@@ -269,7 +273,9 @@ pub fn filter_orders(stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>) ->
 ///     }
 /// }
 /// ```
-pub fn filter_fills(stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>) -> Pin<Box<dyn Stream<Item = OrderId> + Send>> {
+pub fn filter_fills(
+    stream: Pin<Box<dyn Stream<Item = MarketEvent> + Send>>,
+) -> Pin<Box<dyn Stream<Item = OrderId> + Send>> {
     Box::pin(stream.filter_map(|event| async move {
         if let MarketEvent::OrderFilled { order_id, .. } = event {
             Some(order_id)
@@ -425,7 +431,7 @@ pub fn filter_symbols(
 ///     let mut stream = filter_high_confidence_patterns(rx, 0.8);
 ///     
 ///     while let Some(signal) = stream.next().await {
-///         println!("High-confidence pattern: {} ({})", 
+///         println!("High-confidence pattern: {} ({})",
 ///                  signal.pattern_name, signal.confidence);
 ///     }
 /// }

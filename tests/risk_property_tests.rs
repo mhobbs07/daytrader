@@ -7,14 +7,12 @@
 use daytrader::brokers::types::{OrderId, Price, Quantity, Symbol};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
-use daytrader::events::types::{
-    Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType,
-};
-use daytrader::risk::types::{AccountId, DollarAmount, Percentage};
+use daytrader::events::types::{Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType};
+use daytrader::risk::RiskEngine;
 use daytrader::risk::pdt::PdtEnforcer;
 use daytrader::risk::position_sizing::PositionSizer;
 use daytrader::risk::rules::TradeContext;
-use daytrader::risk::RiskEngine;
+use daytrader::risk::types::{AccountId, DollarAmount, Percentage};
 use proptest::prelude::*;
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -51,7 +49,7 @@ fn extreme_price_strategy() -> impl Strategy<Value = Decimal> {
 fn market_crash_strategy() -> impl Strategy<Value = (Decimal, Decimal)> {
     (extreme_price_strategy(), extreme_price_strategy()).prop_filter(
         "Second price must be lower than first (crash)",
-        |(entry, exit)| exit < entry * Decimal::new(95, 2) // At least 5% drop
+        |(entry, exit)| exit < entry * Decimal::new(95, 2), // At least 5% drop
     )
 }
 
@@ -380,6 +378,7 @@ fn create_test_risk_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }

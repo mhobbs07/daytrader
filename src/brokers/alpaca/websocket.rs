@@ -6,8 +6,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{interval, Duration};
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Duration, interval};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use super::config::AlpacaConfig;
@@ -23,19 +23,23 @@ enum WsMessage {
     /// Connection success
     #[serde(rename = "success")]
     Success { msg: String },
-    
+
     /// Subscription confirmation
     #[serde(rename = "subscription")]
-    Subscription { trades: Vec<String>, quotes: Vec<String>, bars: Vec<String> },
-    
+    Subscription {
+        trades: Vec<String>,
+        quotes: Vec<String>,
+        bars: Vec<String>,
+    },
+
     /// Error message
     #[serde(rename = "error")]
     Error { msg: String },
-    
+
     /// Quote update
     #[serde(rename = "q")]
     Quote(AlpacaQuote),
-    
+
     /// Bar/candle update
     #[serde(rename = "b")]
     Bar(AlpacaBar),
@@ -87,7 +91,7 @@ impl WebSocketClient {
     /// Connects to Alpaca WebSocket and starts the client
     pub async fn connect(config: &AlpacaConfig) -> Result<Self, BrokerError> {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        
+
         let state = Arc::new(RwLock::new(WsState {
             subscribed_symbols: HashMap::new(),
             latest_quotes: HashMap::new(),
@@ -102,11 +106,7 @@ impl WebSocketClient {
         };
 
         // Spawn the WebSocket handler task
-        tokio::spawn(Self::ws_handler(
-            config.clone(),
-            state,
-            command_rx,
-        ));
+        tokio::spawn(Self::ws_handler(config.clone(), state, command_rx));
 
         Ok(client)
     }
@@ -150,8 +150,8 @@ impl WebSocketClient {
             key: config.api_key.clone(),
             secret: config.api_secret.clone(),
         };
-        let auth_json = serde_json::to_string(&auth_msg)
-            .map_err(|e| BrokerError::ApiError(e.to_string()))?;
+        let auth_json =
+            serde_json::to_string(&auth_msg).map_err(|e| BrokerError::ApiError(e.to_string()))?;
         write
             .send(Message::Text(auth_json))
             .await
@@ -307,8 +307,8 @@ impl WebSocketClient {
             bars: symbol_strs.clone(),
         };
 
-        let json = serde_json::to_string(&sub_msg)
-            .map_err(|e| BrokerError::ApiError(e.to_string()))?;
+        let json =
+            serde_json::to_string(&sub_msg).map_err(|e| BrokerError::ApiError(e.to_string()))?;
 
         write
             .send(Message::Text(json))

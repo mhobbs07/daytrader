@@ -44,10 +44,10 @@
 //! ```
 
 pub mod connection;
+pub mod migrations;
 pub mod models;
 pub mod repositories;
 pub mod traits;
-pub mod migrations;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -55,12 +55,10 @@ pub mod mock;
 // Re-export commonly used types
 pub use connection::{Database, DatabaseConfig};
 pub use repositories::{
-    PatternRepository, SignalRepository, PerformanceRepository,
-    OrderRepository, PositionRepository,
+    OrderRepository, PatternRepository, PerformanceRepository, PositionRepository, SignalRepository,
 };
 
 // Re-export models for convenience
 pub use models::{
-    PatternSignal, PatternStats, RollingStats, TradeRecord,
-    RiskAdjustmentAudit, SystemPerformance,
+    PatternSignal, PatternStats, RiskAdjustmentAudit, RollingStats, SystemPerformance, TradeRecord,
 };

@@ -15,7 +15,7 @@
 use daytrader::brokers::alpaca::{AlpacaConfig, AlpacaProvider};
 use daytrader::brokers::{MarketDataProvider, Symbol};
 use std::env;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,10 +23,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     // Get credentials from environment
-    let api_key = env::var("ALPACA_API_KEY")
-        .expect("ALPACA_API_KEY environment variable not set");
-    let api_secret = env::var("ALPACA_API_SECRET")
-        .expect("ALPACA_API_SECRET environment variable not set");
+    let api_key = env::var("ALPACA_API_KEY").expect("ALPACA_API_KEY environment variable not set");
+    let api_secret =
+        env::var("ALPACA_API_SECRET").expect("ALPACA_API_SECRET environment variable not set");
 
     println!("🚀 Initializing Alpaca provider with WebSocket...");
 
@@ -67,8 +66,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match provider.get_quote(symbol).await {
                 Ok(quote) => {
                     let spread = quote.ask.value() - quote.bid.value();
-                    let spread_pct = (spread / quote.bid.value()) * rust_decimal::Decimal::new(100, 0);
-                    
+                    let spread_pct =
+                        (spread / quote.bid.value()) * rust_decimal::Decimal::new(100, 0);
+
                     println!(
                         "{:6} | Bid: ${:8.2} x {:4} | Ask: ${:8.2} x {:4} | Last: ${:8.2} | Spread: ${:.4} ({:.3}%)",
                         quote.symbol,

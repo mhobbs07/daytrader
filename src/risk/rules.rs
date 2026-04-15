@@ -183,7 +183,11 @@ impl RuleEvaluation {
     }
 
     /// Creates a violated evaluation
-    pub fn violated(severity: ViolationSeverity, action: ViolationAction, message: impl Into<String>) -> Self {
+    pub fn violated(
+        severity: ViolationSeverity,
+        action: ViolationAction,
+        message: impl Into<String>,
+    ) -> Self {
         let message_str = message.into();
         Self {
             evaluation: RiskEvaluation::Violated {
@@ -265,18 +269,20 @@ impl RiskRule for DailyLossLimitRule {
 
     async fn evaluate(&self, context: &TradeContext) -> RuleEvaluation {
         // Check if the potential trade would violate daily loss limits
-        match self.tracker.check_daily_loss_limit(context.order_value).await {
+        match self
+            .tracker
+            .check_daily_loss_limit(context.order_value)
+            .await
+        {
             Ok(true) => RuleEvaluation::passed(),
             Ok(false) => RuleEvaluation::violated(
                 ViolationSeverity::Critical,
                 ViolationAction::Halt,
                 "Trade would exceed daily loss limits",
             ),
-            Err(msg) => RuleEvaluation::violated(
-                ViolationSeverity::Critical,
-                ViolationAction::Halt,
-                msg,
-            ),
+            Err(msg) => {
+                RuleEvaluation::violated(ViolationSeverity::Critical, ViolationAction::Halt, msg)
+            }
         }
     }
 
@@ -310,7 +316,10 @@ impl RiskRule for PositionSizeLimitRule {
     async fn evaluate(&self, context: &TradeContext) -> RuleEvaluation {
         match self.sizer.validate_position_size(context.order_value).await {
             RiskEvaluation::Passed => RuleEvaluation::passed(),
-            RiskEvaluation::Violated { severity, suggested_action } => {
+            RiskEvaluation::Violated {
+                severity,
+                suggested_action,
+            } => {
                 let action = match severity {
                     ViolationSeverity::Critical => ViolationAction::Block,
                     ViolationSeverity::Moderate => ViolationAction::ReduceSize,
@@ -361,7 +370,10 @@ impl RiskRule for PdtLimitRule {
 
         match self.enforcer.enforce_pdt_limits().await {
             RiskEvaluation::Passed => RuleEvaluation::passed(),
-            RiskEvaluation::Violated { severity, suggested_action } => {
+            RiskEvaluation::Violated {
+                severity,
+                suggested_action,
+            } => {
                 let action = match severity {
                     ViolationSeverity::Critical => ViolationAction::Halt,
                     ViolationSeverity::Moderate => ViolationAction::Block,
@@ -411,9 +423,16 @@ impl RiskRule for PatternSpecificLimitRule {
             _ => return RuleEvaluation::passed(), // Not a pattern trade, skip evaluation
         };
 
-        match self.evaluator.evaluate_pattern_trade(pattern_name, confidence, context.order_value) {
+        match self
+            .evaluator
+            .evaluate_pattern_trade(pattern_name, confidence, context.order_value)
+            .await
+        {
             RiskEvaluation::Passed => RuleEvaluation::passed(),
-            RiskEvaluation::Violated { severity, suggested_action } => {
+            RiskEvaluation::Violated {
+                severity,
+                suggested_action,
+            } => {
                 let action = match severity {
                     ViolationSeverity::Critical => ViolationAction::Block,
                     ViolationSeverity::Moderate => ViolationAction::ReduceSize,
@@ -423,7 +442,8 @@ impl RiskRule for PatternSpecificLimitRule {
                 RuleEvaluation::violated(
                     severity,
                     action,
-                    suggested_action.unwrap_or_else(|| "Pattern-specific limit violation".to_string()),
+                    suggested_action
+                        .unwrap_or_else(|| "Pattern-specific limit violation".to_string()),
                 )
             }
         }
@@ -455,12 +475,16 @@ impl RiskRuleEngine {
         // Initialize daily loss limits
         let daily_limits = DailyLossLimits::from_config(&config, Decimal::ZERO);
         let daily_tracker = Arc::new(DailyLossTracker::new(daily_limits));
-        rules.push(Box::new(DailyLossLimitRule::new(Arc::clone(&daily_tracker))));
+        rules.push(Box::new(DailyLossLimitRule::new(Arc::clone(
+            &daily_tracker,
+        ))));
 
         // Initialize position sizing
         let position_limits = PositionSizeLimits::from_config(&config);
         let position_sizer = Arc::new(PositionSizer::new(position_limits, Decimal::ZERO));
-        rules.push(Box::new(PositionSizeLimitRule::new(Arc::clone(&position_sizer))));
+        rules.push(Box::new(PositionSizeLimitRule::new(Arc::clone(
+            &position_sizer,
+        ))));
 
         // Initialize PDT enforcement
         let pdt_config = PdtConfig::from_config(&config);
@@ -470,7 +494,9 @@ impl RiskRuleEngine {
         // Initialize pattern-specific limits
         let pattern_config = PatternRiskConfig::from_config(&config);
         let pattern_evaluator = Arc::new(PatternRiskEvaluator::new(pattern_config));
-        rules.push(Box::new(PatternSpecificLimitRule::new(Arc::clone(&pattern_evaluator))));
+        rules.push(Box::new(PatternSpecificLimitRule::new(Arc::clone(
+            &pattern_evaluator,
+        ))));
 
         Self { rules, config }
     }
@@ -507,7 +533,10 @@ impl RiskRuleEngine {
     /// assert!(!results.is_empty());
     /// # });
     /// ```
-    pub async fn evaluate_all_rules(&self, context: TradeContext) -> HashMap<RiskRuleId, RuleEvaluation> {
+    pub async fn evaluate_all_rules(
+        &self,
+        context: TradeContext,
+    ) -> HashMap<RiskRuleId, RuleEvaluation> {
         let mut results = HashMap::new();
 
         // Evaluate all rules in parallel
@@ -538,7 +567,10 @@ impl RiskRuleEngine {
     /// # Returns
     ///
     /// Map of rule IDs to violations (empty if all rules pass)
-    pub async fn evaluate_violations_only(&self, context: TradeContext) -> HashMap<RiskRuleId, RuleEvaluation> {
+    pub async fn evaluate_violations_only(
+        &self,
+        context: TradeContext,
+    ) -> HashMap<RiskRuleId, RuleEvaluation> {
         let all_results = self.evaluate_all_rules(context).await;
 
         all_results
@@ -559,9 +591,9 @@ impl RiskRuleEngine {
     pub async fn has_critical_violations(&self, context: TradeContext) -> bool {
         let violations = self.evaluate_violations_only(context).await;
 
-        violations.values().any(|evaluation| {
-            matches!(evaluation.severity(), Some(ViolationSeverity::Critical))
-        })
+        violations
+            .values()
+            .any(|evaluation| matches!(evaluation.severity(), Some(ViolationSeverity::Critical)))
     }
 
     /// Gets all configured rules
@@ -653,9 +685,11 @@ mod tests {
 
     #[test]
     fn test_rule_metadata() {
-        let evaluation = RuleEvaluation::passed()
-            .with_metadata("test_key", "test_value");
+        let evaluation = RuleEvaluation::passed().with_metadata("test_key", "test_value");
 
-        assert_eq!(evaluation.metadata.get("test_key"), Some(&"test_value".to_string()));
+        assert_eq!(
+            evaluation.metadata.get("test_key"),
+            Some(&"test_value".to_string())
+        );
     }
 }
