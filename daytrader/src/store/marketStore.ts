@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
-// Unlisten functions for cleanup
-// let unlisteners: (() => void)[] = [];
+const unlisteners = new Map<string, UnlistenFn[]>();
 
 interface Quote {
   symbol: string;
@@ -28,6 +27,8 @@ interface MarketStore {
   quotes: Map<string, Quote>;
   candles: Map<string, Candle[]>;
   subscribeToSymbol: (symbol: string) => Promise<void>;
+  unsubscribeFromSymbol: (symbol: string) => void;
+  dispose: () => void;
   getLatestQuote: (symbol: string) => Promise<Quote>;
   getRecentCandles: (symbol: string, count: number) => Promise<Candle[]>;
 }
@@ -37,25 +38,53 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
   candles: new Map(),
 
   subscribeToSymbol: async (symbol: string) => {
+    if (unlisteners.has(symbol)) {
+      for (const unlisten of unlisteners.get(symbol)!) {
+        unlisten();
+      }
+      unlisteners.delete(symbol);
+    }
+
     await invoke('subscribe_symbol', { symbol });
 
-    // Listen for updates
-    listen<Quote>('market_data:quote_update', (event) => {
+    const handlers: UnlistenFn[] = [];
+
+    handlers.push(await listen<Quote>('market_data:quote_update', (event) => {
       set(state => {
         const newQuotes = new Map(state.quotes);
         newQuotes.set(event.payload.symbol, event.payload);
         return { quotes: newQuotes };
       });
-    });
+    }));
 
-    listen<Candle>('market_data:new_candle', (event) => {
+    handlers.push(await listen<Candle>('market_data:new_candle', (event) => {
       set(state => {
         const newCandles = new Map(state.candles);
         const symbolCandles = newCandles.get(event.payload.symbol) || [];
         newCandles.set(event.payload.symbol, [...symbolCandles, event.payload]);
         return { candles: newCandles };
       });
-    });
+    }));
+
+    unlisteners.set(symbol, handlers);
+  },
+
+  unsubscribeFromSymbol: (symbol: string) => {
+    if (unlisteners.has(symbol)) {
+      for (const unlisten of unlisteners.get(symbol)!) {
+        unlisten();
+      }
+      unlisteners.delete(symbol);
+    }
+  },
+
+  dispose: () => {
+    for (const [, handlers] of unlisteners) {
+      for (const unlisten of handlers) {
+        unlisten();
+      }
+    }
+    unlisteners.clear();
   },
 
   getLatestQuote: async (symbol: string) => {
