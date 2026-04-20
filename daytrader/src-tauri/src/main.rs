@@ -19,8 +19,7 @@ use daytrader::risk::RiskEngine;
 use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 fn main() {
     // Load configuration
@@ -127,7 +126,6 @@ fn main() {
         Arc::clone(&event_bus),
         account_id,
         initial_equity,
-        Arc::clone(&broker),
     ));
 
     // Create shared caches

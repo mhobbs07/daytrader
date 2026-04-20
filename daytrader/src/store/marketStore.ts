@@ -9,6 +9,8 @@ interface Quote {
   symbol: string;
   bid: number;
   ask: number;
+  /** Last traded price (midpoint fallback when no trade data). */
+  last: number;
   timestamp: string;
 }
 
