@@ -1417,7 +1417,8 @@ mod tests {
         assert_eq!(component.name, "hammer");
         assert_eq!(component.confidence, 0.9);
         assert_eq!(component.weight, 0.4);
-        assert_eq!(component.weighted_contribution(), 0.36);
+        // Epsilon compare for IEEE 754 float math (0.9 * 0.4 * 1.0 ≈ 0.36)
+        assert!((component.weighted_contribution() - 0.36).abs() < 1e-9);
     }
 
     #[test]

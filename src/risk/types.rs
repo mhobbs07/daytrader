@@ -539,7 +539,7 @@ mod tests {
         assert!(Percentage::new(Decimal::new(250, 2)).is_ok()); // 2.50%
         assert!(Percentage::new(Decimal::new(1000, 1)).is_ok()); // 100.0%
         assert!(Percentage::new(Decimal::new(-10, 0)).is_err());
-        assert!(Percentage::new(Decimal::new(1500, 2)).is_err()); // 15.00% > 100%
+        assert!(Percentage::new(Decimal::new(10001, 2)).is_err()); // 100.01% > 100%
 
         let pct = Percentage::new(Decimal::new(250, 2)).unwrap();
         assert_eq!(pct.value(), Decimal::new(250, 2));

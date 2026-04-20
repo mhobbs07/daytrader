@@ -127,6 +127,7 @@ use tracing::debug;
 pub struct EventBus {
     sender: broadcast::Sender<MarketEvent>,
     metrics: Arc<EventBusMetrics>,
+    capacity: usize,
 }
 
 /// Metrics for monitoring event bus performance
@@ -231,6 +232,7 @@ impl EventBus {
         Self {
             sender,
             metrics: Arc::new(EventBusMetrics::new()),
+            capacity,
         }
     }
 
@@ -287,10 +289,11 @@ impl EventBus {
             MarketEvent::EmergencyLiquidation { .. } => "EmergencyLiquidation",
         };
 
+        self.metrics.increment_published();
+        self.metrics.increment_volume(event_type);
+
         match self.sender.send(event) {
             Ok(subscriber_count) => {
-                self.metrics.increment_published();
-                self.metrics.increment_volume(event_type);
 
                 let latency_ns = start.elapsed().as_nanos() as u64;
                 self.metrics.record_latency(latency_ns);
@@ -430,6 +433,7 @@ impl EventBus {
 impl std::fmt::Debug for EventBus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventBus")
+            .field("capacity", &self.capacity)
             .field("subscriber_count", &self.subscriber_count())
             .field("events_published", &self.events_published())
             .field("events_dropped", &self.events_dropped())

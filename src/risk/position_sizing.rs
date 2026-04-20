@@ -187,7 +187,11 @@ impl PortfolioState {
         if self.total_equity.is_zero() {
             return Percentage::new(Decimal::ZERO).unwrap();
         }
-        Percentage::new((position_value / self.total_equity) * Decimal::new(1000, 1)).unwrap()
+        // Clamp to 100% — over-allocated positions still flag their violation
+        // against max_portfolio_percent; clamping only prevents Percentage::new panic.
+        let raw_pct = (position_value / self.total_equity) * Decimal::new(1000, 1);
+        let clamped = raw_pct.min(Decimal::new(100, 0));
+        Percentage::new(clamped).unwrap()
     }
 }
 
@@ -245,8 +249,9 @@ impl PositionSizer {
     pub async fn validate_position_size(&self, position_value: Decimal) -> RiskEvaluation {
         let portfolio = self.portfolio.read().await;
 
-        // Check dollar limit
-        if position_value > self.limits.max_position_dollars.value() {
+        // Check dollar limit (zero = unlimited)
+        let max_dollars = self.limits.max_position_dollars.value();
+        if !max_dollars.is_zero() && position_value > max_dollars {
             return RiskEvaluation::Violated {
                 severity: ViolationSeverity::Critical,
                 suggested_action: Some(format!(
@@ -257,21 +262,24 @@ impl PositionSizer {
             };
         }
 
-        // Check portfolio allocation percentage
+        // Check portfolio allocation percentage (zero = unlimited)
+        let max_pct = self.limits.max_portfolio_percent.value();
         let allocation_pct = portfolio.allocation_percentage(position_value);
-        if allocation_pct.value() > self.limits.max_portfolio_percent.value() {
+        if !max_pct.is_zero() && allocation_pct.value() > max_pct {
             return RiskEvaluation::Violated {
                 severity: ViolationSeverity::Moderate,
                 suggested_action: Some(format!(
                     "Position allocation {:.2}% exceeds maximum {:.2}%",
                     allocation_pct.value(),
-                    self.limits.max_portfolio_percent.value()
+                    max_pct
                 )),
             };
         }
 
-        // Check concurrent position limit
-        if portfolio.position_count() >= self.limits.max_concurrent_positions as usize {
+        // Check concurrent position limit (zero = unlimited)
+        if self.limits.max_concurrent_positions > 0
+            && portfolio.position_count() >= self.limits.max_concurrent_positions as usize
+        {
             return RiskEvaluation::Violated {
                 severity: ViolationSeverity::Moderate,
                 suggested_action: Some(format!(
@@ -547,13 +555,14 @@ mod tests {
     #[tokio::test]
     async fn test_update_and_monitor_positions() {
         let limits = create_test_limits();
-        let sizer = PositionSizer::new(limits, Decimal::new(1000000, 2));
+        // $100k equity — 20 × $155 = $3,100 position (3.1% allocation, under $5k / 10% caps)
+        let sizer = PositionSizer::new(limits, Decimal::new(10000000, 2));
 
         // Add a position
         sizer
             .update_position(
                 "AAPL".to_string(),
-                Decimal::new(100, 0),   // 100 shares
+                Decimal::new(20, 0),    // 20 shares
                 Decimal::new(15000, 2), // $150.00 avg entry
                 Decimal::new(15500, 2), // $155.00 current
             )
@@ -563,7 +572,7 @@ mod tests {
         assert_eq!(portfolio.position_count(), 1);
 
         let position = portfolio.get_position("AAPL").unwrap();
-        assert_eq!(position.market_value, Decimal::new(15500, 0)); // 100 * 155.00
+        assert_eq!(position.market_value, Decimal::new(3100, 0)); // 20 * 155.00
 
         // Check for violations (should be none)
         let violations = sizer.monitor_position_sizes().await;

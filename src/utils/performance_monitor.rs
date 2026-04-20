@@ -406,13 +406,21 @@ mod tests {
 
         let monitor = PerformanceMonitor::new(metrics_collector, &baseline_path);
 
-        // Establish baseline
-        let baseline_metrics = vec![PerformanceMetric {
-            name: "test_pattern".to_string(),
-            execution_time_ns: 1000,
-            timestamp: chrono::Utc::now(),
-            additional_data: HashMap::new(),
-        }];
+        // Establish baseline (need 2+ samples for std_dev calculation)
+        let baseline_metrics = vec![
+            PerformanceMetric {
+                name: "test_pattern".to_string(),
+                execution_time_ns: 1000,
+                timestamp: chrono::Utc::now(),
+                additional_data: HashMap::new(),
+            },
+            PerformanceMetric {
+                name: "test_pattern".to_string(),
+                execution_time_ns: 1000,
+                timestamp: chrono::Utc::now(),
+                additional_data: HashMap::new(),
+            },
+        ];
 
         monitor
             .establish_baseline("test_pattern", &baseline_metrics, Some(10.0))

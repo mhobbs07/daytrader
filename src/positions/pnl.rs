@@ -351,8 +351,8 @@ mod tests {
         let portfolio_pl = calc.calculate_portfolio_pl(positions.into_iter());
 
         assert_eq!(portfolio_pl.total_cost, dec!(4500.00));
-        assert_eq!(portfolio_pl.total_value, dec!(4380.00)); // 1050 + 1900 + 1530
-        assert_eq!(portfolio_pl.unrealized_pl, dec!(-120.00));
+        assert_eq!(portfolio_pl.total_value, dec!(4480.00)); // 1050 + 1900 + 1530
+        assert_eq!(portfolio_pl.unrealized_pl, dec!(-20.00));
         assert_eq!(portfolio_pl.position_count, 3);
     }
 

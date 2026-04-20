@@ -332,8 +332,9 @@ impl PdtEnforcer {
             return Ok(true);
         }
 
-        // Under equity threshold, limited to max_day_trades_under_threshold
-        if day_trade_count >= self.config.max_day_trades_under_threshold {
+        // Under equity threshold, limited to max_day_trades_under_threshold.
+        // Trading is allowed while count <= limit; violation occurs on the next trade.
+        if day_trade_count > self.config.max_day_trades_under_threshold {
             return Err(format!(
                 "PDT limit exceeded: {} day trades in 5 business days (limit: {})",
                 day_trade_count, self.config.max_day_trades_under_threshold

@@ -555,7 +555,9 @@ mod tests {
                 trading_halted: false,
             },
             pattern_stats: HashMap::new(),
-            current_time: Utc::now(),
+            // Fixed time inside market hours (14:30 UTC = 9:30 ET) so tests pass 24/7
+            current_time: chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 14, 30, 0)
+                .unwrap(),
         }
     }
 

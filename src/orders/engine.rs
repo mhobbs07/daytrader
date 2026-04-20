@@ -392,6 +392,12 @@ impl OrderEngine {
         let filled_avg_val = order.filled_avg_price.map(|p| p.as_f64());
         let commission_val = order.commission.and_then(|c| c.to_f64());
         let pattern_name_str = order.pattern_name.as_ref().map(|p| p.as_str().to_string());
+        // Use internal order.id as placeholder broker_order_id to keep the UNIQUE
+        // constraint happy before the broker assigns its own id.
+        let initial_broker_id = order
+            .broker_order_id
+            .clone()
+            .unwrap_or_else(|| order.id.as_str().to_string());
         sqlx::query!(
             r#"
             INSERT INTO orders (
@@ -402,7 +408,7 @@ impl OrderEngine {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.account_id,
-            order.broker_order_id,
+            initial_broker_id,
             symbol_str,
             side_str,
             order_type_str,
@@ -434,13 +440,14 @@ impl OrderEngine {
         broker_order_id: &str,
         submitted_at: chrono::DateTime<Utc>,
     ) -> Result<(), OrderError> {
-        // For now, we use broker_order_id as the identifier since we haven't saved
-        // the internal order_id to the database yet. In a production system,
-        // you'd want to add an internal_order_id column.
+        // save_order used the internal order_id as the placeholder broker_order_id,
+        // so we can locate the row by that and swap in the real broker id here.
+        let internal_id = order_id.as_str();
         sqlx::query!(
-            "UPDATE orders SET broker_order_id = ?, submitted_at = ?, status = 'pending' WHERE id = (SELECT id FROM orders WHERE broker_order_id IS NULL ORDER BY id DESC LIMIT 1)",
+            "UPDATE orders SET broker_order_id = ?, submitted_at = ?, status = 'pending' WHERE broker_order_id = ?",
             broker_order_id,
             submitted_at,
+            internal_id,
         )
         .execute(&*self.db_pool)
         .await?;

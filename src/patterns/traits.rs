@@ -520,10 +520,14 @@ mod tests {
 
     #[test]
     fn test_utils_validation() {
-        let candles = vec![
-            create_test_candle(10000, 11000, 9000, 10500, 1000),
-            create_test_candle(10000, 11000, 9000, 10500, 1000),
-        ];
+        // Ensure distinct, strictly-ascending timestamps (Utc::now() can return the same instant twice)
+        // validate_candle_order expects reverse-chronological (newest first)
+        let base = Utc::now();
+        let mut c_newer = create_test_candle(10000, 11000, 9000, 10500, 1000);
+        let mut c_older = create_test_candle(10000, 11000, 9000, 10500, 1000);
+        c_newer.timestamp = base;
+        c_older.timestamp = base - chrono::Duration::seconds(1);
+        let candles = vec![c_newer, c_older];
 
         assert!(utils::validate_candle_order(&candles).is_ok());
         assert!(utils::ensure_min_candles(&candles, 2).is_ok());

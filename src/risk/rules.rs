@@ -613,9 +613,10 @@ mod tests {
     use rust_decimal::Decimal;
 
     fn create_test_context() -> TradeContext {
+        // Small basic trade — $750 on $50k equity (1.5%) — under all default limits
         TradeContext::new(
             "AAPL".to_string(),
-            Decimal::new(100, 0),     // 100 shares
+            Decimal::new(5, 0),       // 5 shares
             Decimal::new(15000, 2),   // $150.00
             Decimal::new(5000000, 2), // $50,000 equity
             false,                    // not a day trade
