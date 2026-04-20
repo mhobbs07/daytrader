@@ -35,6 +35,13 @@ data/
 *~
 .DS_Store
 
+# Claude Code worktrees (local development only)
+.claude/worktrees/
+
+# MCP server configs — per-user (contain machine-specific absolute paths)
+.mcp.json
+.kilocode/mcp.json
+
 # OS
 Thumbs.db
 
