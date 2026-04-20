@@ -2,13 +2,12 @@ use crate::brokers::types::{Confidence, PatternName, Price};
 use crate::events::types::{Candle, SignalType};
 use crate::patterns::traits::PatternDetector;
 use crate::patterns::types::{
-    PatternContext, PatternError, PatternParams, PatternResult,
-    VolumeConfirmation, TrendContext
+    PatternContext, PatternError, PatternParams, PatternResult, TrendContext, VolumeConfirmation,
 };
 use crate::patterns::utils::{
-    calculate_single_candle_confidence, calculate_volume_ratio, create_volume_confirmation,
-    validate_hammer, validate_shooting_star, validate_doji, validate_minimum_data,
-    ShadowRatios, SingleCandlePatternType
+    ShadowRatios, SingleCandlePatternType, calculate_single_candle_confidence,
+    calculate_volume_ratio, create_volume_confirmation, validate_doji, validate_hammer,
+    validate_minimum_data, validate_shooting_star,
 };
 use rust_decimal::Decimal;
 use std::fmt::Debug;
@@ -21,7 +20,6 @@ use std::fmt::Debug;
 //
 // All patterns use mathematical validation of candlestick criteria with confidence scoring
 // based on pattern metrics, market context, and volume confirmation.
-
 
 /// Hammer pattern detector - bullish reversal pattern
 ///
@@ -52,18 +50,22 @@ impl PatternDetector for HammerDetector {
         1
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         validate_minimum_data(candles, 1)?;
 
         let candle = &candles[0];
-        
+
         if !validate_hammer(candle) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(1);
-        
+
         // Add volume confirmation if we have enough data
         if candles.len() > 1 {
             let volume_ratio = calculate_volume_ratio(candle, &candles[1..]);
@@ -71,8 +73,12 @@ impl PatternDetector for HammerDetector {
         }
 
         let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
-        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::Hammer)?;
-        
+        let confidence = calculate_single_candle_confidence(
+            &shadow_ratios,
+            &context,
+            SingleCandlePatternType::Hammer,
+        )?;
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -118,18 +124,22 @@ impl PatternDetector for ShootingStarDetector {
         1
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         validate_minimum_data(candles, 1)?;
 
         let candle = &candles[0];
-        
+
         if !validate_shooting_star(candle) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(1);
-        
+
         // Add volume confirmation if we have enough data
         if candles.len() > 1 {
             let volume_ratio = calculate_volume_ratio(candle, &candles[1..]);
@@ -137,8 +147,12 @@ impl PatternDetector for ShootingStarDetector {
         }
 
         let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
-        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::ShootingStar)?;
-        
+        let confidence = calculate_single_candle_confidence(
+            &shadow_ratios,
+            &context,
+            SingleCandlePatternType::ShootingStar,
+        )?;
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -184,8 +198,14 @@ impl DojiDetector {
         let lower_shadow = candle.open.value().min(candle.close.value()) - candle.low.value();
         let upper_shadow = candle.high.value() - candle.open.value().max(candle.close.value());
 
-        let lower_shadow_ratio = (lower_shadow / range).to_string().parse::<f64>().unwrap_or(0.0);
-        let upper_shadow_ratio = (upper_shadow / range).to_string().parse::<f64>().unwrap_or(0.0);
+        let lower_shadow_ratio = (lower_shadow / range)
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let upper_shadow_ratio = (upper_shadow / range)
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0);
 
         // Dragonfly doji: long lower shadow, minimal upper shadow
         if lower_shadow_ratio >= 0.6 && upper_shadow_ratio <= 0.1 {
@@ -222,11 +242,15 @@ impl PatternDetector for DojiDetector {
         1
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         validate_minimum_data(candles, 1)?;
 
         let candle = &candles[0];
-        
+
         if !validate_doji(candle) {
             return Ok(None);
         }
@@ -235,14 +259,17 @@ impl PatternDetector for DojiDetector {
 
         // Build context
         let mut context = PatternContext::new(1);
-        
+
         // Add doji type to metadata
-        context = context.add_metadata("doji_type", match doji_type {
-            DojiType::Standard => "standard",
-            DojiType::Dragonfly => "dragonfly", 
-            DojiType::Gravestone => "gravestone",
-        });
-        
+        context = context.add_metadata(
+            "doji_type",
+            match doji_type {
+                DojiType::Standard => "standard",
+                DojiType::Dragonfly => "dragonfly",
+                DojiType::Gravestone => "gravestone",
+            },
+        );
+
         // Add volume confirmation if we have enough data
         if candles.len() > 1 {
             let volume_ratio = calculate_volume_ratio(candle, &candles[1..]);
@@ -250,15 +277,19 @@ impl PatternDetector for DojiDetector {
         }
 
         let shadow_ratios = ShadowRatios::from_candle(candle).unwrap();
-        let confidence = calculate_single_candle_confidence(&shadow_ratios, &context, SingleCandlePatternType::Doji)?;
-        
+        let confidence = calculate_single_candle_confidence(
+            &shadow_ratios,
+            &context,
+            SingleCandlePatternType::Doji,
+        )?;
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
 
         // Doji signals depend on type and context
         let signal_type = match doji_type {
-            DojiType::Dragonfly => SignalType::Buy,  // Bullish reversal
+            DojiType::Dragonfly => SignalType::Buy,   // Bullish reversal
             DojiType::Gravestone => SignalType::Sell, // Bearish reversal
             DojiType::Standard => {
                 // Neutral - could go either way, default to buy for now

@@ -9,11 +9,11 @@ use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
     Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, Position,
 };
-use daytrader::risk::types::AccountId;
 use daytrader::risk::RiskEngine;
+use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test risk engine initialization and basic state management
 #[tokio::test]
@@ -62,7 +62,10 @@ async fn test_risk_engine_event_processing() {
         violations_found += 1;
     }
 
-    assert!(violations_found > 0, "Expected risk violations for large position order");
+    assert!(
+        violations_found > 0,
+        "Expected risk violations for large position order"
+    );
 }
 
 /// Test risk engine concurrent order processing
@@ -112,7 +115,10 @@ async fn test_concurrent_order_processing() {
     }
 
     // System should handle concurrent load without panicking
-    assert!(violation_count >= 0, "Should handle concurrent operations gracefully");
+    assert!(
+        violation_count >= 0,
+        "Should handle concurrent operations gracefully"
+    );
 }
 
 /// Test risk engine position tracking integration
@@ -132,7 +138,7 @@ async fn test_position_tracking_integration() {
         quantity: Quantity::new(1000).unwrap(),
         average_entry_price: Price::new(Decimal::new(20000, 2)).unwrap(), // $200.00
         current_price: Price::new(Decimal::new(15000, 2)).unwrap(),       // $150.00
-        unrealized_pl: Decimal::new(-50000, 2), // -$500.00 loss
+        unrealized_pl: Decimal::new(-50000, 2),                           // -$500.00 loss
         realized_pl: Decimal::ZERO,
         opened_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
@@ -146,7 +152,10 @@ async fn test_position_tracking_integration() {
 
     // Check that position losses are reflected in risk state
     let state = engine.get_risk_state().await;
-    assert!(state.daily_pl <= Decimal::ZERO, "Should track unrealized position losses");
+    assert!(
+        state.daily_pl <= Decimal::ZERO,
+        "Should track unrealized position losses"
+    );
 }
 
 /// Test risk engine trading halt functionality
@@ -191,8 +200,14 @@ async fn test_trading_halt_functionality() {
         }
     }
 
-    assert!(halt_detected, "Should halt trading when loss limit exceeded");
-    assert!(!engine.is_trading_allowed().await, "Trading should be halted");
+    assert!(
+        halt_detected,
+        "Should halt trading when loss limit exceeded"
+    );
+    assert!(
+        !engine.is_trading_allowed().await,
+        "Trading should be halted"
+    );
 }
 
 /// Test risk engine recovery after halt conditions clear
@@ -223,7 +238,10 @@ async fn test_risk_engine_recovery() {
     });
 
     sleep(Duration::from_millis(50)).await;
-    assert!(!engine.is_trading_allowed().await, "Should be halted after large loss");
+    assert!(
+        !engine.is_trading_allowed().await,
+        "Should be halted after large loss"
+    );
 
     // Simulate equity recovery (e.g., profitable trades)
     let recovery_fill = Fill {
@@ -273,7 +291,9 @@ async fn test_pattern_risk_integration() {
         price: Price::new(Decimal::new(15000, 2)).unwrap(),
     };
 
-    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal });
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: pattern_signal,
+    });
 
     sleep(Duration::from_millis(50)).await;
 
@@ -281,21 +301,23 @@ async fn test_pattern_risk_integration() {
     let mut pattern_events = 0;
     while let Ok(event) = pattern_receiver.try_recv() {
         match event {
-            MarketEvent::PatternPerformanceUpdate { .. } |
-            MarketEvent::RiskViolation { .. } => {
+            MarketEvent::PatternPerformanceUpdate { .. } | MarketEvent::RiskViolation { .. } => {
                 pattern_events += 1;
             }
             _ => {}
         }
     }
 
-    assert!(pattern_events > 0, "Should process pattern signals and update risk state");
+    assert!(
+        pattern_events > 0,
+        "Should process pattern signals and update risk state"
+    );
 }
 
 /// Test that DailyLossTracker::from_config properly initializes starting balance
 #[tokio::test]
 async fn test_daily_loss_tracker_from_config_initialization() {
-    use daytrader::risk::limits::{DailyLossTracker, DailyLossLimits};
+    use daytrader::risk::limits::{DailyLossLimits, DailyLossTracker};
 
     let config = create_test_risk_config();
     let initial_equity = Decimal::new(5000000, 2); // $50,000.00
@@ -303,7 +325,10 @@ async fn test_daily_loss_tracker_from_config_initialization() {
     let tracker = DailyLossTracker::from_config(&config, initial_equity);
 
     let state = tracker.get_daily_state().await;
-    assert_eq!(state.starting_balance, initial_equity, "Starting balance should be set from from_config");
+    assert_eq!(
+        state.starting_balance, initial_equity,
+        "Starting balance should be set from from_config"
+    );
 
     // Test that percentage limits work with correct starting balance
     let test_loss = Decimal::new(-100000, 2); // $1,000 loss
@@ -325,7 +350,9 @@ async fn test_risk_engine_with_database_preserves_repos() {
 
     // Mock database (since we can't easily set up real DB in test)
     let db = Arc::new(Database {
-        pool: sqlx::PgPool::connect("postgresql://dummy").await.unwrap_or_else(|_| panic!("Mock DB")),
+        pool: sqlx::PgPool::connect("postgresql://dummy")
+            .await
+            .unwrap_or_else(|_| panic!("Mock DB")),
     });
 
     let engine = RiskEngine::with_database(
@@ -340,7 +367,10 @@ async fn test_risk_engine_with_database_preserves_repos() {
     assert!(engine.database.is_some(), "Database should be set");
     assert!(engine.pattern_repo.is_some(), "Pattern repo should be set");
     assert!(engine.signal_repo.is_some(), "Signal repo should be set");
-    assert!(engine.performance_repo.is_some(), "Performance repo should be set");
+    assert!(
+        engine.performance_repo.is_some(),
+        "Performance repo should be set"
+    );
 
     // Start the engine
     engine.start().await.unwrap();
@@ -369,7 +399,8 @@ fn create_test_risk_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 

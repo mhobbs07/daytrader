@@ -211,10 +211,7 @@ mod tests {
     use super::*;
 
     fn test_config() -> AlpacaConfig {
-        AlpacaConfig::paper().with_credentials(
-            "test_key".to_string(),
-            "test_secret".to_string(),
-        )
+        AlpacaConfig::paper().with_credentials("test_key".to_string(), "test_secret".to_string())
     }
 
     #[test]
@@ -236,11 +233,11 @@ mod tests {
     async fn test_websocket_not_connected_error() {
         let config = test_config();
         let provider = AlpacaProvider::new(config);
-        
+
         let symbol = Symbol::new("AAPL").unwrap();
         let result = provider.get_quote(&symbol).await;
         assert!(result.is_err());
-        
+
         if let Err(BrokerError::ConnectionFailed(msg)) = result {
             assert!(msg.contains("WebSocket not connected"));
         } else {

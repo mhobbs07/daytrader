@@ -17,13 +17,13 @@ use std::path::PathBuf;
 pub struct AppConfig {
     /// Broker configuration
     pub broker: BrokerConfig,
-    
+
     /// Database configuration
     pub database: DatabaseConfig,
-    
+
     /// Logging configuration
     pub logging: LoggingConfig,
-    
+
     /// Risk management configuration
     pub risk: RiskConfig,
 }
@@ -90,10 +90,10 @@ impl AppConfig {
         let settings = config::Config::builder()
             .add_source(config::File::from(path.as_ref()))
             .build()?;
-        
+
         settings.try_deserialize()
     }
-    
+
     /// Load configuration from default location
     pub fn load_default() -> Result<Self, config::ConfigError> {
         Self::from_file("config/default.toml")

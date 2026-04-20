@@ -3,7 +3,7 @@
 //! This module provides database connection pooling, initialization, and
 //! configuration management for the trading platform's data persistence layer.
 
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::path::Path;
 use std::time::Duration;
 

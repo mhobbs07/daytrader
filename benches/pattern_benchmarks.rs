@@ -7,7 +7,7 @@
 //! - Concurrent detection performance
 //! - Different data sizes and complexities
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use daytrader::brokers::types::{Confidence, PatternName, Price};
 use daytrader::events::types::{Candle, SignalType};
 use daytrader::patterns::{
@@ -34,7 +34,11 @@ pub fn bench_hammer_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)).await);
+                    let _ = black_box(
+                        detector
+                            .detect(black_box(candles), black_box(&params))
+                            .await,
+                    );
                 }
             });
         });
@@ -53,7 +57,11 @@ pub fn bench_shooting_star_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)).await);
+                    let _ = black_box(
+                        detector
+                            .detect(black_box(candles), black_box(&params))
+                            .await,
+                    );
                 }
             });
         });
@@ -72,7 +80,11 @@ pub fn bench_doji_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)).await);
+                    let _ = black_box(
+                        detector
+                            .detect(black_box(candles), black_box(&params))
+                            .await,
+                    );
                 }
             });
         });
@@ -91,7 +103,11 @@ pub fn bench_bullish_engulfing_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)).await);
+                    let _ = black_box(
+                        detector
+                            .detect(black_box(candles), black_box(&params))
+                            .await,
+                    );
                 }
             });
         });
@@ -110,7 +126,11 @@ pub fn bench_bearish_engulfing_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)).await);
+                    let _ = black_box(
+                        detector
+                            .detect(black_box(candles), black_box(&params))
+                            .await,
+                    );
                 }
             });
         });
@@ -186,7 +206,11 @@ pub fn bench_data_size_scaling(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _size| {
             b.iter(|| {
                 rt.block_on(async {
-                    let _ = black_box(registry.detect_all(black_box(&test_candles), Some(&params)).await);
+                    let _ = black_box(
+                        registry
+                            .detect_all(black_box(&test_candles), Some(&params))
+                            .await,
+                    );
                 });
             });
         });
@@ -235,7 +259,11 @@ pub fn bench_detection_throughput(c: &mut Criterion) {
     c.bench_function("detection_throughput", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let _ = black_box(registry.detect_all(black_box(&test_candles), Some(&params)).await);
+                let _ = black_box(
+                    registry
+                        .detect_all(black_box(&test_candles), Some(&params))
+                        .await,
+                );
             });
         });
     });

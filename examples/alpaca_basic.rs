@@ -14,9 +14,7 @@
 //! ```
 
 use daytrader::brokers::alpaca::{AlpacaConfig, AlpacaProvider};
-use daytrader::brokers::{
-    Order, OrderExecutionProvider, OrderSide, Quantity, Symbol,
-};
+use daytrader::brokers::{Order, OrderExecutionProvider, OrderSide, Quantity, Symbol};
 use rust_decimal::Decimal;
 use std::env;
 
@@ -26,10 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     // Get credentials from environment
-    let api_key = env::var("ALPACA_API_KEY")
-        .expect("ALPACA_API_KEY environment variable not set");
-    let api_secret = env::var("ALPACA_API_SECRET")
-        .expect("ALPACA_API_SECRET environment variable not set");
+    let api_key = env::var("ALPACA_API_KEY").expect("ALPACA_API_KEY environment variable not set");
+    let api_secret =
+        env::var("ALPACA_API_SECRET").expect("ALPACA_API_SECRET environment variable not set");
 
     println!("🚀 Initializing Alpaca provider (Paper Trading)...");
 
@@ -84,12 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for order in open_orders {
             println!(
                 "  {} - {:?} {} {} @ ${:?} | Status: {:?}",
-                order.id,
-                order.side,
-                order.quantity,
-                order.symbol,
-                order.limit_price,
-                order.status
+                order.id, order.side, order.quantity, order.symbol, order.limit_price, order.status
             );
         }
     }
@@ -101,18 +93,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let symbol = Symbol::new("AAPL")?;
     let qty = Quantity::new(1)?;
     let order = Order::market(symbol.clone(), OrderSide::Buy, qty);
-    
+
     match provider.place_order(order).await {
         Ok(order_id) => {
             println!("  ✅ Order placed successfully: {}", order_id);
-            
+
             // Wait a moment for order to process
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            
+
             // Get order status
             let order_status = provider.get_order(&order_id).await?;
             println!("  Order status: {:?}", order_status.status);
-            
+
             // Cancel the order if it's still open
             if matches!(order_status.status, daytrader::brokers::OrderStatus::Accepted) {
                 println!("  Cancelling order...");

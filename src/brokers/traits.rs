@@ -3,12 +3,12 @@
 //! This module defines the core traits for broker integrations, enabling
 //! zero-cost abstraction through static dispatch with generics.
 
+use super::types::{OrderId, Price, Quantity, Symbol};
+use crate::utils::errors::BrokerError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use crate::utils::errors::BrokerError;
-use super::types::{Symbol, Price, Quantity, OrderId};
 
 // ============================================================================
 // Data Structures
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn test_candle_validation() {
         let symbol = Symbol::new("AAPL").unwrap();
-        
+
         // Valid candle
         let candle = Candle {
             symbol: symbol.clone(),
@@ -455,7 +455,7 @@ mod tests {
         };
         assert!(candle.validate().is_ok());
         assert!(candle.is_bullish());
-        
+
         // Invalid candle (high < low)
         let invalid = Candle {
             symbol: symbol.clone(),
@@ -473,11 +473,11 @@ mod tests {
     fn test_order_creation() {
         let symbol = Symbol::new("AAPL").unwrap();
         let qty = Quantity::new(100).unwrap();
-        
+
         let market_order = Order::market(symbol.clone(), OrderSide::Buy, qty);
         assert_eq!(market_order.order_type, OrderType::Market);
         assert!(market_order.limit_price.is_none());
-        
+
         let price = Price::new(Decimal::new(15000, 2)).unwrap();
         let limit_order = Order::limit(symbol, OrderSide::Sell, qty, price);
         assert_eq!(limit_order.order_type, OrderType::Limit);
@@ -496,7 +496,7 @@ mod tests {
             close: Price::new(Decimal::new(10100, 2)).unwrap(),
             volume: 1000,
         };
-        
+
         assert!(candle.is_bullish());
         assert!(!candle.is_bearish());
         assert_eq!(candle.body_size(), Decimal::new(100, 2));

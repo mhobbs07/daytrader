@@ -32,11 +32,11 @@
 //! ```
 
 use crate::config::RiskConfig;
-use crate::risk::types::{DollarAmount, RiskEvaluation, ViolationSeverity};
-#[cfg(feature = "database")]
-use crate::db::traits::PdtRepositoryTrait;
 #[cfg(feature = "mock")]
 use crate::db::mock::MockPdtRepository;
+#[cfg(feature = "database")]
+use crate::db::traits::PdtRepositoryTrait;
+use crate::risk::types::{DollarAmount, RiskEvaluation, ViolationSeverity};
 use chrono::{DateTime, Datelike, Utc, Weekday};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use std::collections::VecDeque;
@@ -115,7 +115,11 @@ impl PdtState {
     }
 
     /// Counts total day trades in the rolling window
-    pub fn total_day_trades_in_window(&self, window_days: u32, current_date: chrono::NaiveDate) -> u32 {
+    pub fn total_day_trades_in_window(
+        &self,
+        window_days: u32,
+        current_date: chrono::NaiveDate,
+    ) -> u32 {
         let cutoff_date = self.calculate_cutoff_date(current_date, window_days);
         self.day_trade_history
             .iter()
@@ -125,7 +129,11 @@ impl PdtState {
     }
 
     /// Calculates the cutoff date for the rolling window (business days back)
-    pub fn calculate_cutoff_date(&self, from_date: chrono::NaiveDate, business_days_back: u32) -> chrono::NaiveDate {
+    pub fn calculate_cutoff_date(
+        &self,
+        from_date: chrono::NaiveDate,
+        business_days_back: u32,
+    ) -> chrono::NaiveDate {
         let mut date = from_date;
         let mut days_counted = 0;
 
@@ -157,7 +165,8 @@ impl PdtState {
         }
 
         // Add new record for this date
-        self.day_trade_history.push_front(DayTradeRecord::new(date, 1));
+        self.day_trade_history
+            .push_front(DayTradeRecord::new(date, 1));
 
         // Keep only recent records (cleanup old ones beyond window)
         // We'll clean up during window calculations
@@ -230,7 +239,7 @@ impl PdtEnforcer {
         config: PdtConfig,
         initial_equity: Decimal,
         repository: Arc<dyn PdtRepositoryTrait>,
-        account_id: i64
+        account_id: i64,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let enforcer = Self {
             config,
@@ -275,13 +284,13 @@ impl PdtEnforcer {
     /// # });
     /// ```
     pub async fn count_day_trades(&self) -> u32 {
-        let state = self.state.read().await;
         let current_date = Utc::now().date_naive();
 
         // Clean up old records first
-        let mut state_mut = self.state.write().await;
-        state_mut.cleanup_old_records(self.config.rolling_window_days, current_date);
-        drop(state_mut);
+        {
+            let mut state = self.state.write().await;
+            state.cleanup_old_records(self.config.rolling_window_days, current_date);
+        }
 
         // Count trades in window
         let state = self.state.read().await;
@@ -315,15 +324,17 @@ impl PdtEnforcer {
     pub async fn check_pdt_eligibility(&self) -> Result<bool, String> {
         let state = self.state.read().await;
         let current_date = Utc::now().date_naive();
-        let day_trade_count = state.total_day_trades_in_window(self.config.rolling_window_days, current_date);
+        let day_trade_count =
+            state.total_day_trades_in_window(self.config.rolling_window_days, current_date);
 
         // If equity meets threshold, unlimited day trading allowed
         if state.meets_equity_threshold(self.config.min_equity_threshold) {
             return Ok(true);
         }
 
-        // Under equity threshold, limited to max_day_trades_under_threshold
-        if day_trade_count >= self.config.max_day_trades_under_threshold {
+        // Under equity threshold, limited to max_day_trades_under_threshold.
+        // Trading is allowed while count <= limit; violation occurs on the next trade.
+        if day_trade_count > self.config.max_day_trades_under_threshold {
             return Err(format!(
                 "PDT limit exceeded: {} day trades in 5 business days (limit: {})",
                 day_trade_count, self.config.max_day_trades_under_threshold
@@ -361,7 +372,9 @@ impl PdtEnforcer {
             Ok(true) => RiskEvaluation::Passed,
             Ok(false) => RiskEvaluation::Violated {
                 severity: ViolationSeverity::Moderate,
-                suggested_action: Some("Increase account equity to $25,000 for unrestricted day trading".to_string()),
+                suggested_action: Some(
+                    "Increase account equity to $25,000 for unrestricted day trading".to_string(),
+                ),
             },
             Err(message) => RiskEvaluation::Violated {
                 severity: ViolationSeverity::Critical,
@@ -397,7 +410,10 @@ impl PdtEnforcer {
     /// assert_eq!(count, 1);
     /// # });
     /// ```
-    pub async fn record_day_trade(&self, trade_date: chrono::NaiveDate) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn record_day_trade(
+        &self,
+        trade_date: chrono::NaiveDate,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update in-memory state
         {
             let mut state = self.state.write().await;
@@ -411,7 +427,10 @@ impl PdtEnforcer {
             let trade_record = crate::db::models::DayTradeRecord {
                 id: 0,
                 account_id: self.account_id,
-                trade_id: format!("simple_trade_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+                trade_id: format!(
+                    "simple_trade_{}",
+                    Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                ),
                 symbol: "UNKNOWN".to_string(),
                 quantity: 1,
                 open_time: trade_date.and_hms_opt(9, 30, 0).unwrap().and_utc(),
@@ -434,25 +453,30 @@ impl PdtEnforcer {
 
     /// Restores PDT state from database on startup
     #[cfg(any(feature = "database", feature = "mock"))]
-    async fn restore_state_from_database(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn restore_state_from_database(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref repository) = self.repository {
-            debug!("Restoring PDT state from database for account {}", self.account_id);
+            debug!(
+                "Restoring PDT state from database for account {}",
+                self.account_id
+            );
 
             // Get the latest tracking record to restore equity and counts
             if let Some(tracking) = repository.get_current_pdt_tracking(self.account_id).await? {
                 let mut state = self.state.write().await;
-                state.current_equity = Decimal::try_from(tracking.equity_value).unwrap_or(Decimal::ZERO);
+                state.current_equity =
+                    Decimal::try_from(tracking.equity_value).unwrap_or(Decimal::ZERO);
 
                 // Restore recent day trades for accurate window calculations
                 let current_date = Utc::now().date_naive();
-                let window_start = state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+                let window_start =
+                    state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
 
                 // Get day trades from database to restore in-memory state
-                let recent_trades = repository.get_day_trades_in_range(
-                    self.account_id,
-                    window_start,
-                    current_date
-                ).await?;
+                let recent_trades = repository
+                    .get_day_trades_in_range(self.account_id, window_start, current_date)
+                    .await?;
 
                 // Rebuild the in-memory VecDeque from database records
                 state.day_trade_history.clear();
@@ -464,12 +488,16 @@ impl PdtEnforcer {
                             continue;
                         }
                     }
-                    state.day_trade_history.push_front(DayTradeRecord::new(trade_date, 1));
+                    state
+                        .day_trade_history
+                        .push_front(DayTradeRecord::new(trade_date, 1));
                 }
 
-                info!("Restored PDT state: equity=${}, day trades in window={}",
-                      state.current_equity,
-                      state.total_day_trades_in_window(self.config.rolling_window_days, current_date));
+                info!(
+                    "Restored PDT state: equity=${}, day trades in window={}",
+                    state.current_equity,
+                    state.total_day_trades_in_window(self.config.rolling_window_days, current_date)
+                );
             }
         }
 
@@ -481,7 +509,10 @@ impl PdtEnforcer {
     /// # Arguments
     ///
     /// * `new_equity` - The new account equity value
-    pub async fn update_equity(&self, new_equity: Decimal) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn update_equity(
+        &self,
+        new_equity: Decimal,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let old_equity = {
             let mut state = self.state.write().await;
             let old_equity = state.current_equity;
@@ -506,17 +537,18 @@ impl PdtEnforcer {
         if let Some(ref repository) = self.repository {
             let state = self.state.read().await;
             let current_date = Utc::now().date_naive();
-            let window_start = state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+            let window_start =
+                state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
             let window_end = current_date;
 
             // Count day trades from database for accuracy
-            let day_trades_count = repository.count_day_trades_in_window(
-                self.account_id,
-                window_start,
-                window_end
-            ).await?;
+            let day_trades_count = repository
+                .count_day_trades_in_window(self.account_id, window_start, window_end)
+                .await?;
 
-            let today_trades = state.day_trade_history.front()
+            let today_trades = state
+                .day_trade_history
+                .front()
                 .filter(|record| record.date == current_date)
                 .map(|record| record.count as i32)
                 .unwrap_or(0);
@@ -530,10 +562,12 @@ impl PdtEnforcer {
                 rolling_window_end: window_end,
                 total_day_trades_window: day_trades_count,
                 equity_value: state.current_equity.to_f64().unwrap_or(0.0),
-                min_equity_threshold: Some(self.config.min_equity_threshold.to_f64().unwrap_or(25000.0)),
+                min_equity_threshold: Some(
+                    self.config.min_equity_threshold.to_f64().unwrap_or(25000.0),
+                ),
                 max_day_trades_allowed: Some(self.config.max_day_trades_under_threshold as i32),
-                is_restricted: !state.meets_equity_threshold(self.config.min_equity_threshold) &&
-                              day_trades_count >= self.config.max_day_trades_under_threshold as i32,
+                is_restricted: !state.meets_equity_threshold(self.config.min_equity_threshold)
+                    && day_trades_count >= self.config.max_day_trades_under_threshold as i32,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             };
@@ -612,8 +646,8 @@ mod tests {
         let today = Utc::now().date_naive();
 
         // Record some day trades
-        enforcer.record_day_trade(today).await;
-        enforcer.record_day_trade(today).await; // Second trade same day
+        enforcer.record_day_trade(today).await.unwrap();
+        enforcer.record_day_trade(today).await.unwrap(); // Second trade same day
 
         let count = enforcer.count_day_trades().await;
         assert_eq!(count, 2);
@@ -631,7 +665,7 @@ mod tests {
         // Record 3 day trades (at limit)
         let today = Utc::now().date_naive();
         for _ in 0..3 {
-            enforcer.record_day_trade(today).await;
+            enforcer.record_day_trade(today).await.unwrap();
         }
 
         // Should still be eligible (at limit)
@@ -639,7 +673,7 @@ mod tests {
         assert!(eligible);
 
         // Record one more trade (over limit)
-        enforcer.record_day_trade(today).await;
+        enforcer.record_day_trade(today).await.unwrap();
 
         // Should not be eligible
         let result = enforcer.check_pdt_eligibility().await;
@@ -655,7 +689,7 @@ mod tests {
         // Record many day trades - should still be eligible
         let today = Utc::now().date_naive();
         for _ in 0..10 {
-            enforcer.record_day_trade(today).await;
+            enforcer.record_day_trade(today).await.unwrap();
         }
 
         let eligible = enforcer.check_pdt_eligibility().await.unwrap();
@@ -674,7 +708,7 @@ mod tests {
         // Record 4 day trades (over limit for under-threshold account)
         let today = Utc::now().date_naive();
         for _ in 0..4 {
-            enforcer.record_day_trade(today).await;
+            enforcer.record_day_trade(today).await.unwrap();
         }
 
         // Should now violate
@@ -694,8 +728,8 @@ mod tests {
 
         // Record some trades
         let today = Utc::now().date_naive();
-        enforcer.record_day_trade(today).await;
-        enforcer.record_day_trade(today).await;
+        enforcer.record_day_trade(today).await.unwrap();
+        enforcer.record_day_trade(today).await.unwrap();
 
         let count_before = enforcer.count_day_trades().await;
         assert_eq!(count_before, 2);

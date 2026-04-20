@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-03-28
+Last Updated: 2026-04-19
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -90,6 +90,8 @@ Last Updated: 2026-03-28
 | B-028 | Fix systemStore: initialize on startup | 2026-03-28 | gt__toast__2b1b6675 | manual | Immediate refresh + error field added to SystemStore interface |
 | B-031 | Add ConnectionStatus indicator component | 2026-03-28 | gt__toast__2b1b6675 | manual | New ConnectionStatus.tsx listens for push events + polls systemStore |
 | B-035 | Expose actual risk config from RiskEngine | 2026-03-28 | gt__toast__2b1b6675 | manual | RiskEngine::get_config() added; get_risk_limits reads live config |
+| B-036 | Fix test compilation errors and async deadlocks | 2026-04-14 | fix/test-compilation | cargo test --lib (235/235) | Fixed 91 compile errors + 3 RwLock deadlocks; added .unwrap() to newtype constructors in tests; fixed include_str path |
+| B-037 | Fix 21 test failures from newtype refactor | 2026-04-19 | fix/test-compilation | cargo test --lib (235/235) | PDT off-by-one, zero-limits = unlimited, events/bus metrics order, MockBrokerAdapter unique ids, plus stale test assertions |
 
 ---
 

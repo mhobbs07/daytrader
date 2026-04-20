@@ -8,16 +8,16 @@
 
 use daytrader::brokers::mock::MockBroker;
 use daytrader::brokers::types::{OrderId, Price, Quantity, Symbol};
-use daytrader::risk::types::AccountId;
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
     Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, Position,
 };
 use daytrader::risk::RiskEngine;
+use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test risk evaluation with mock broker data
 #[tokio::test]
@@ -49,7 +49,10 @@ async fn test_risk_evaluation_with_mock_broker() {
         violations += 1;
     }
 
-    assert!(violations > 0, "Should detect risk violations with mock broker data");
+    assert!(
+        violations > 0,
+        "Should detect risk violations with mock broker data"
+    );
 }
 
 /// Test error scenarios with broker API failures
@@ -94,7 +97,10 @@ async fn test_broker_api_failure_scenarios() {
         events_received += 1;
     }
 
-    assert!(events_received >= 1, "Should handle broker API failures gracefully");
+    assert!(
+        events_received >= 1,
+        "Should handle broker API failures gracefully"
+    );
 }
 
 /// Test rate limiting under API constraints
@@ -117,7 +123,7 @@ async fn test_rate_limiting_scenarios() {
             &format!("rapid-order-{}", i),
             "AAPL",
             100,
-            Decimal::new(15000, 2)
+            Decimal::new(15000, 2),
         );
 
         event_bus.publish(MarketEvent::OrderPlaced {
@@ -137,7 +143,10 @@ async fn test_rate_limiting_scenarios() {
     }
 
     // Some violations expected due to rapid trading, but system should handle it
-    assert!(violations >= 0, "Should handle rate limiting scenarios gracefully");
+    assert!(
+        violations >= 0,
+        "Should handle rate limiting scenarios gracefully"
+    );
 }
 
 /// Test connection issues and risk behavior during connectivity problems
@@ -183,7 +192,10 @@ async fn test_connection_issues_risk_behavior() {
         events_processed += 1;
     }
 
-    assert!(events_processed > 0, "Should continue processing after connection issues");
+    assert!(
+        events_processed > 0,
+        "Should continue processing after connection issues"
+    );
 }
 
 /// Test risk evaluation with mock position data
@@ -206,7 +218,7 @@ async fn test_mock_position_data_risk_evaluation() {
         quantity: Quantity::new(1000).unwrap(),
         average_entry_price: Price::new(Decimal::new(20000, 2)).unwrap(), // $200.00
         current_price: Price::new(Decimal::new(15000, 2)).unwrap(),       // $150.00
-        unrealized_pl: Decimal::new(-50000, 2), // -$500.00 loss
+        unrealized_pl: Decimal::new(-50000, 2),                           // -$500.00 loss
         realized_pl: Decimal::ZERO,
         opened_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
@@ -246,7 +258,7 @@ async fn test_concurrent_mock_broker_operations() {
                         &format!("concurrent-order-{}-{}", i, j),
                         "AAPL",
                         100,
-                        Decimal::new(15000, 2)
+                        Decimal::new(15000, 2),
                     );
                     bus_clone.publish(MarketEvent::OrderPlaced {
                         order: Arc::clone(&order),
@@ -305,12 +317,24 @@ fn create_test_risk_config() -> RiskConfig {
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
         pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds {
-            min_win_rate_short: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
-            min_win_rate_medium: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
-            min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+            min_win_rate_short: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(600, 1),
+            )
+            .unwrap(),
+            min_win_rate_medium: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(600, 1),
+            )
+            .unwrap(),
+            min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(
+                600, 1,
+            ))
+            .unwrap(),
             max_consecutive_losses: daytrader::risk::types::Count::new(3).unwrap(),
             min_sample_size: daytrader::risk::types::Count::new(20).unwrap(),
-            auto_disable_threshold: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(400, 1)).unwrap(),
+            auto_disable_threshold: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(400, 1),
+            )
+            .unwrap(),
         },
     }
 }

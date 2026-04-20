@@ -11,6 +11,7 @@ use crate::patterns::signals::TradingSignal;
 use crate::positions::tracker::Position;
 use chrono::Utc;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -36,21 +37,13 @@ pub trait ExecutionStrategy: Send + Sync {
     ) -> Result<Quantity, ExecutionError>;
 
     /// Determines the order type to use
-    fn determine_order_type(
-        &self,
-        signal: &TradingSignal,
-        current_price: Price,
-    ) -> OrderType;
+    fn determine_order_type(&self, signal: &TradingSignal, current_price: Price) -> OrderType;
 
     /// Determines time in force for the order
     fn determine_time_in_force(&self, signal: &TradingSignal) -> TimeInForce;
 
     /// Calculates limit price if using limit orders
-    fn calculate_limit_price(
-        &self,
-        signal: &TradingSignal,
-        current_price: Price,
-    ) -> Option<Price>;
+    fn calculate_limit_price(&self, signal: &TradingSignal, current_price: Price) -> Option<Price>;
 
     /// Returns strategy name for logging
     fn name(&self) -> &str;
@@ -114,7 +107,7 @@ pub struct ConservativeConfig {
 impl Default for ConservativeConfig {
     fn default() -> Self {
         Self {
-            min_confidence: Decimal::new(75, 2), // 0.75
+            min_confidence: Decimal::new(75, 2),       // 0.75
             position_size_percent: Decimal::new(5, 2), // 0.05 = 5%
             max_positions: 5,
             use_market_orders: true,
@@ -178,9 +171,9 @@ impl ExecutionStrategy for ConservativeStrategy {
         let target_value = account.portfolio_value * self.config.position_size_percent;
 
         // Apply risk-based adjustment (slightly reduce for lower confidence)
-        let confidence_multiplier = if signal.confidence.value() >= Decimal::new(85, 2) {
+        let confidence_multiplier = if signal.confidence.value() >= 0.85 {
             Decimal::ONE
-        } else if signal.confidence.value() >= Decimal::new(75, 2) {
+        } else if signal.confidence.value() >= 0.75 {
             Decimal::new(90, 2) // 0.90 = 90%
         } else {
             Decimal::new(80, 2) // 0.80 = 80%
@@ -212,7 +205,8 @@ impl ExecutionStrategy for ConservativeStrategy {
             .to_u32()
             .ok_or_else(|| ExecutionError::PositionSizingError("Invalid quantity".to_string()))?;
 
-        Ok(Quantity::new(quantity_value))
+        Quantity::new(quantity_value)
+            .map_err(|e| ExecutionError::PositionSizingError(e.to_string()))
     }
 
     fn determine_order_type(&self, _signal: &TradingSignal, _current_price: Price) -> OrderType {
@@ -288,7 +282,7 @@ pub struct AggressiveConfig {
 impl Default for AggressiveConfig {
     fn default() -> Self {
         Self {
-            min_confidence: Decimal::new(70, 2), // 0.70
+            min_confidence: Decimal::new(70, 2),       // 0.70
             base_position_percent: Decimal::new(3, 2), // 0.03 = 3%
             confidence_multiplier: Decimal::new(2, 0), // 2.0
             max_position_percent: Decimal::new(10, 2), // 0.10 = 10%
@@ -352,17 +346,19 @@ impl ExecutionStrategy for AggressiveStrategy {
         risk_config: &RiskConfig,
     ) -> Result<Quantity, ExecutionError> {
         // Confidence-based sizing: higher confidence = larger position
-        let confidence = signal.confidence.value();
+        let confidence =
+            Decimal::from_f64_retain(signal.confidence.value()).unwrap_or(Decimal::ZERO);
         let confidence_factor = if confidence >= self.config.min_confidence {
-            (confidence - self.config.min_confidence)
-                / (Decimal::ONE - self.config.min_confidence)
+            (confidence - self.config.min_confidence) / (Decimal::ONE - self.config.min_confidence)
         } else {
             Decimal::ZERO
         };
 
         // Calculate position size percentage
         let size_percent = self.config.base_position_percent
-            + (confidence_factor * self.config.confidence_multiplier * self.config.base_position_percent);
+            + (confidence_factor
+                * self.config.confidence_multiplier
+                * self.config.base_position_percent);
 
         let size_percent = size_percent.min(self.config.max_position_percent);
 
@@ -393,7 +389,8 @@ impl ExecutionStrategy for AggressiveStrategy {
             .to_u32()
             .ok_or_else(|| ExecutionError::PositionSizingError("Invalid quantity".to_string()))?;
 
-        Ok(Quantity::new(quantity_value))
+        Quantity::new(quantity_value)
+            .map_err(|e| ExecutionError::PositionSizingError(e.to_string()))
     }
 
     fn determine_order_type(&self, _signal: &TradingSignal, _current_price: Price) -> OrderType {
@@ -408,11 +405,7 @@ impl ExecutionStrategy for AggressiveStrategy {
         TimeInForce::Day
     }
 
-    fn calculate_limit_price(
-        &self,
-        signal: &TradingSignal,
-        current_price: Price,
-    ) -> Option<Price> {
+    fn calculate_limit_price(&self, signal: &TradingSignal, current_price: Price) -> Option<Price> {
         if !self.config.use_limit_orders {
             return None;
         }

@@ -1,18 +1,21 @@
 use daytrader::{
-    brokers::{traits::MarketDataProvider, Symbol, Candle, Quote},
+    brokers::{Candle, Quote, Symbol, traits::MarketDataProvider},
+    db::{
+        Database,
+        repositories::{PdtRepository, PerformanceRepository},
+    },
     events::bus::EventBus,
-    patterns::PatternRegistry,
     events::types::PatternSignal,
+    patterns::PatternRegistry,
     risk::RiskEngine,
     risk::pdt::PdtEnforcer,
     risk::position_tracker::PositionTracker,
     utils::holidays::MarketHolidayCalendar,
-    db::{Database, repositories::{PdtRepository, PerformanceRepository}},
 };
+use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::collections::HashMap;
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 // Simplified cache implementations for thin slice
@@ -35,7 +38,15 @@ impl MarketDataCache {
 
     pub fn get_recent_candles(&self, symbol: &Symbol, count: usize) -> Result<Vec<Candle>, String> {
         if let Some(candles) = self.candles.get(symbol.as_str()) {
-            Ok(candles.iter().rev().take(count).cloned().collect::<Vec<_>>().into_iter().rev().collect())
+            Ok(candles
+                .iter()
+                .rev()
+                .take(count)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect())
         } else {
             Ok(Vec::new())
         }
@@ -46,7 +57,10 @@ impl MarketDataCache {
     }
 
     pub fn add_candle(&mut self, symbol: String, candle: Candle) {
-        self.candles.entry(symbol.clone()).or_insert_with(Vec::new).push(candle);
+        self.candles
+            .entry(symbol.clone())
+            .or_insert_with(Vec::new)
+            .push(candle);
         // Keep only last 100 candles per symbol
         if let Some(candles) = self.candles.get_mut(&symbol) {
             if candles.len() > 100 {
@@ -68,7 +82,12 @@ impl PatternCache {
     }
 
     pub fn get_patterns_for_symbol(&self, symbol: &str) -> Result<Vec<PatternSignal>, String> {
-        Ok(self.patterns.iter().filter(|p| p.symbol.as_str() == symbol).cloned().collect())
+        Ok(self
+            .patterns
+            .iter()
+            .filter(|p| p.symbol.as_str() == symbol)
+            .cloned()
+            .collect())
     }
 
     pub fn add_pattern(&mut self, signal: PatternSignal) {
@@ -172,17 +191,13 @@ impl AppState {
         config: daytrader::config::RiskConfig,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         use daytrader::risk::pdt::PdtConfig;
-        
+
         let db_pool = database.pool.clone();
-        
+
         // Create PDT enforcer with database support
         let pdt_config = PdtConfig::from_config(&config);
-        let pdt_enforcer = PdtEnforcer::new(
-            pdt_config,
-            initial_equity,
-            db_pool.clone(),
-            account_id,
-        ).await?;
+        let pdt_enforcer =
+            PdtEnforcer::new(pdt_config, initial_equity, db_pool.clone(), account_id).await?;
 
         // Initialize repositories
         let pdt_repository = Arc::new(PdtRepository::new(db_pool.clone()));

@@ -1,11 +1,11 @@
 //! Error recovery mechanisms with automatic retry logic and circuit breakers
 
+use crate::utils::error_context::{ContextualError, ErrorContext, ErrorSeverity};
 use std::future::Future;
 use std::time::Duration;
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use crate::utils::error_context::{ErrorContext, ErrorSeverity, ContextualError};
+use tokio_retry::{Retry, strategy::ExponentialBackoff};
 
 /// Circuit breaker states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,10 +212,11 @@ impl RetryExecutor {
         Fut: Future<Output = Result<T, E>>,
         E: std::fmt::Debug,
     {
-        let strategy = ExponentialBackoff::from_millis(self.config.initial_delay.as_millis() as u64)
-            .factor(self.config.multiplier as u64)
-            .max_delay(self.config.max_delay)
-            .take(self.config.max_attempts as usize);
+        let strategy =
+            ExponentialBackoff::from_millis(self.config.initial_delay.as_millis() as u64)
+                .factor(self.config.multiplier as u64)
+                .max_delay(self.config.max_delay)
+                .take(self.config.max_attempts as usize);
 
         Retry::spawn(strategy, f).await
     }
@@ -270,14 +271,12 @@ impl ContextualRetryExecutor {
                 .execute(operation_with_context)
                 .await
                 .map_err(|e| match e {
-                    CircuitBreakerError::CircuitOpen => {
-                        ContextualError::new(
-                            anyhow::anyhow!("Circuit breaker is open"),
-                            ErrorContext::new(&context.component, "circuit_breaker")
-                                .with_severity(ErrorSeverity::Warning)
-                                .with_metadata("correlation_id", &context.correlation_id.to_string())
-                        )
-                    }
+                    CircuitBreakerError::CircuitOpen => ContextualError::new(
+                        anyhow::anyhow!("Circuit breaker is open"),
+                        ErrorContext::new(&context.component, "circuit_breaker")
+                            .with_severity(ErrorSeverity::Warning)
+                            .with_metadata("correlation_id", &context.correlation_id.to_string()),
+                    ),
                     CircuitBreakerError::OperationFailed(error) => error,
                 })
         } else {

@@ -1,7 +1,7 @@
-use tauri::{AppHandle, Emitter};
 use daytrader::events::{bus::EventBus, types::MarketEvent};
 use std::sync::Arc;
 use std::thread;
+use tauri::{AppHandle, Emitter};
 
 /// Bridges Rust event bus to Tauri frontend events
 pub struct EventBridge {

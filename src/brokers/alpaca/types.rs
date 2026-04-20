@@ -203,14 +203,16 @@ impl AlpacaQuote {
         let symbol = Symbol::new(self.symbol)
             .map_err(|e| BrokerError::ApiError(format!("Invalid symbol: {}", e)))?;
 
-        let bid = Price::new(Decimal::from_f64_retain(self.bid_price).ok_or_else(|| {
-            BrokerError::ApiError("Invalid bid price".to_string())
-        })?)
+        let bid = Price::new(
+            Decimal::from_f64_retain(self.bid_price)
+                .ok_or_else(|| BrokerError::ApiError("Invalid bid price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid bid price: {}", e)))?;
 
-        let ask = Price::new(Decimal::from_f64_retain(self.ask_price).ok_or_else(|| {
-            BrokerError::ApiError("Invalid ask price".to_string())
-        })?)
+        let ask = Price::new(
+            Decimal::from_f64_retain(self.ask_price)
+                .ok_or_else(|| BrokerError::ApiError("Invalid ask price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid ask price: {}", e)))?;
 
         Ok(Quote {
@@ -250,24 +252,28 @@ impl AlpacaBar {
         let symbol = Symbol::new(self.symbol)
             .map_err(|e| BrokerError::ApiError(format!("Invalid symbol: {}", e)))?;
 
-        let open = Price::new(Decimal::from_f64_retain(self.open).ok_or_else(|| {
-            BrokerError::ApiError("Invalid open price".to_string())
-        })?)
+        let open = Price::new(
+            Decimal::from_f64_retain(self.open)
+                .ok_or_else(|| BrokerError::ApiError("Invalid open price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid open price: {}", e)))?;
 
-        let high = Price::new(Decimal::from_f64_retain(self.high).ok_or_else(|| {
-            BrokerError::ApiError("Invalid high price".to_string())
-        })?)
+        let high = Price::new(
+            Decimal::from_f64_retain(self.high)
+                .ok_or_else(|| BrokerError::ApiError("Invalid high price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid high price: {}", e)))?;
 
-        let low = Price::new(Decimal::from_f64_retain(self.low).ok_or_else(|| {
-            BrokerError::ApiError("Invalid low price".to_string())
-        })?)
+        let low = Price::new(
+            Decimal::from_f64_retain(self.low)
+                .ok_or_else(|| BrokerError::ApiError("Invalid low price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid low price: {}", e)))?;
 
-        let close = Price::new(Decimal::from_f64_retain(self.close).ok_or_else(|| {
-            BrokerError::ApiError("Invalid close price".to_string())
-        })?)
+        let close = Price::new(
+            Decimal::from_f64_retain(self.close)
+                .ok_or_else(|| BrokerError::ApiError("Invalid close price".to_string()))?,
+        )
         .map_err(|e| BrokerError::ApiError(format!("Invalid close price: {}", e)))?;
 
         Ok(Candle {
@@ -402,14 +408,8 @@ mod tests {
 
     #[test]
     fn test_parse_order_side() {
-        assert!(matches!(
-            parse_order_side("buy").unwrap(),
-            OrderSide::Buy
-        ));
-        assert!(matches!(
-            parse_order_side("sell").unwrap(),
-            OrderSide::Sell
-        ));
+        assert!(matches!(parse_order_side("buy").unwrap(), OrderSide::Buy));
+        assert!(matches!(parse_order_side("sell").unwrap(), OrderSide::Sell));
         assert!(parse_order_side("invalid").is_err());
     }
 

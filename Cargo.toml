@@ -93,6 +93,7 @@ tempfile = "3.8"
 proptest = "1.4"
 rand = "0.8"
 env_logger = "0.11"
+rust_decimal_macros = "1.35"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

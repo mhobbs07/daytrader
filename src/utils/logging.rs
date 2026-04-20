@@ -1,8 +1,8 @@
 //! Structured error logging with metadata and severity levels
 
+use crate::utils::error_context::{ContextualError, ERROR_REGISTRY, ErrorContext, ErrorSeverity};
 use std::collections::HashMap;
-use tracing::{error, warn, info, debug, Level};
-use crate::utils::error_context::{ErrorContext, ErrorSeverity, ContextualError, ERROR_REGISTRY};
+use tracing::{Level, debug, error, info, warn};
 
 /// Initialize structured logging with error context integration
 pub fn init_error_logging() -> anyhow::Result<()> {
@@ -16,7 +16,7 @@ pub fn init_error_logging() -> anyhow::Result<()> {
         .with(
             tracing_subscriber::fmt::layer()
                 .json()
-                .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+                .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339()),
         );
 
     subscriber.init();
@@ -30,11 +30,17 @@ pub async fn log_contextual_error(error: &ContextualError) {
 
     // Create structured log fields
     let mut fields = HashMap::new();
-    fields.insert("correlation_id".to_string(), error.context.correlation_id.to_string());
+    fields.insert(
+        "correlation_id".to_string(),
+        error.context.correlation_id.to_string(),
+    );
     fields.insert("component".to_string(), error.context.component.clone());
     fields.insert("operation".to_string(), error.context.operation.clone());
     fields.insert("severity".to_string(), error.context.severity.to_string());
-    fields.insert("timestamp".to_string(), error.context.timestamp.to_rfc3339());
+    fields.insert(
+        "timestamp".to_string(),
+        error.context.timestamp.to_rfc3339(),
+    );
 
     // Add metadata
     for (key, value) in &error.context.metadata {
@@ -43,7 +49,10 @@ pub async fn log_contextual_error(error: &ContextualError) {
 
     // Add call stack
     if !error.context.call_stack.is_empty() {
-        fields.insert("call_stack".to_string(), error.context.call_stack.join(" -> "));
+        fields.insert(
+            "call_stack".to_string(),
+            error.context.call_stack.join(" -> "),
+        );
     }
 
     // Log based on severity
@@ -180,9 +189,13 @@ impl ComponentLogger {
     }
 
     /// Log an error with context
-    pub async fn log_error(&self, operation: &str, error: impl Into<anyhow::Error>, severity: ErrorSeverity) {
-        let context = ErrorContext::new(&self.component, operation)
-            .with_severity(severity);
+    pub async fn log_error(
+        &self,
+        operation: &str,
+        error: impl Into<anyhow::Error>,
+        severity: ErrorSeverity,
+    ) {
+        let context = ErrorContext::new(&self.component, operation).with_severity(severity);
 
         let contextual_error = ContextualError::new(error.into(), context);
         log_contextual_error(&contextual_error).await;
@@ -190,8 +203,7 @@ impl ComponentLogger {
 
     /// Log a message with context
     pub async fn log_message(&self, operation: &str, message: &str, severity: ErrorSeverity) {
-        let context = ErrorContext::new(&self.component, operation)
-            .with_severity(severity);
+        let context = ErrorContext::new(&self.component, operation).with_severity(severity);
 
         log_error_context(&context, message).await;
     }
@@ -204,8 +216,7 @@ impl ComponentLogger {
         severity: ErrorSeverity,
         metadata: HashMap<String, String>,
     ) {
-        let mut context = ErrorContext::new(&self.component, operation)
-            .with_severity(severity);
+        let mut context = ErrorContext::new(&self.component, operation).with_severity(severity);
 
         for (key, value) in metadata {
             context = context.with_metadata(key, value);
@@ -253,15 +264,14 @@ pub mod performance {
     /// Helper macro for timing operations
     #[macro_export]
     macro_rules! time_operation {
-        ($operation:expr, $threshold_ms:expr, $code:block) => {
-            {
-                let start = std::time::Instant::now();
-                let result = $code;
-                tokio::spawn(async move {
-                    $crate::utils::logging::performance::log_duration($operation, start, $threshold_ms).await;
-                });
-                result
-            }
-        };
+        ($operation:expr, $threshold_ms:expr, $code:block) => {{
+            let start = std::time::Instant::now();
+            let result = $code;
+            tokio::spawn(async move {
+                $crate::utils::logging::performance::log_duration($operation, start, $threshold_ms)
+                    .await;
+            });
+            result
+        }};
     }
 }

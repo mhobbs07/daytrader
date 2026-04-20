@@ -30,7 +30,8 @@ async fn test_risk_state_persistence() {
             last_updated TEXT NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     let account_id = AccountId::new("test-account");
 
@@ -42,16 +43,20 @@ async fn test_risk_state_persistence() {
     ).unwrap();
 
     // Verify insertion
-    let mut stmt = conn.prepare("SELECT * FROM risk_states WHERE account_id = ?").unwrap();
-    let mut rows = stmt.query_map([&account_id.to_string()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, f64>(1)?,
-            row.get::<_, i32>(2)?,
-            row.get::<_, i32>(3)?,
-            row.get::<_, String>(4)?,
-        ))
-    }).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT * FROM risk_states WHERE account_id = ?")
+        .unwrap();
+    let mut rows = stmt
+        .query_map([&account_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, i32>(2)?,
+                row.get::<_, i32>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .unwrap();
 
     let row = rows.next().unwrap().unwrap();
     assert_eq!(row.0, account_id.to_string());
@@ -68,13 +73,15 @@ async fn test_risk_state_persistence() {
 
     // Verify update
     let mut stmt = conn.prepare("SELECT daily_pl, day_trade_count, is_trading_halted FROM risk_states WHERE account_id = ?").unwrap();
-    let mut rows = stmt.query_map([&account_id.to_string()], |row| {
-        Ok((
-            row.get::<_, f64>(0)?,
-            row.get::<_, i32>(1)?,
-            row.get::<_, i32>(2)?,
-        ))
-    }).unwrap();
+    let mut rows = stmt
+        .query_map([&account_id.to_string()], |row| {
+            Ok((
+                row.get::<_, f64>(0)?,
+                row.get::<_, i32>(1)?,
+                row.get::<_, i32>(2)?,
+            ))
+        })
+        .unwrap();
 
     let row = rows.next().unwrap().unwrap();
     assert_eq!(row.0, 500.0);
@@ -102,7 +109,8 @@ async fn test_concurrent_database_access() {
             timestamp TEXT NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     let conn_arc = Arc::new(Mutex::new(conn));
 
@@ -121,9 +129,10 @@ async fn test_concurrent_database_access() {
                         format!("rule-{}-{}", i, j),
                         "critical",
                         format!("Violation message {}-{}", i, j),
-                        "2023-12-15T10:00:00Z"
+                        "2023-12-15T10:00:00Z",
                     ),
-                ).unwrap();
+                )
+                .unwrap();
             }
         });
         handles.push(handle);
@@ -136,11 +145,9 @@ async fn test_concurrent_database_access() {
 
     // Verify all records were inserted
     let conn = conn_arc.lock().unwrap();
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM risk_violations",
-        [],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM risk_violations", [], |row| row.get(0))
+        .unwrap();
 
     assert_eq!(count, 50, "All concurrent inserts should succeed");
 }
@@ -160,7 +167,8 @@ async fn test_data_integrity() {
             balance REAL NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     conn.execute(
         "CREATE TABLE risk_states (
@@ -168,19 +176,22 @@ async fn test_data_integrity() {
             daily_pl REAL NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     // Insert account first
     conn.execute(
         "INSERT INTO accounts (id, balance) VALUES (?, ?)",
         ("account-1", 10000.0),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Insert risk state - should succeed
     conn.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-1", 0.0),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Try to insert risk state for non-existent account - should fail
     let result = conn.execute(
@@ -191,11 +202,13 @@ async fn test_data_integrity() {
     assert!(result.is_err(), "Should reject foreign key violation");
 
     // Verify valid data exists
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM risk_states WHERE account_id = ?",
-        ["account-1"],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM risk_states WHERE account_id = ?",
+            ["account-1"],
+            |row| row.get(0),
+        )
+        .unwrap();
 
     assert_eq!(count, 1);
 }
@@ -215,29 +228,36 @@ async fn test_database_schema_migration() {
             daily_pl REAL NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     // Insert some data
     conn.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-1", 100.0),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Simulate migration: add new column
     conn.execute(
         "ALTER TABLE risk_states ADD COLUMN day_trade_count INTEGER DEFAULT 0",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     // Verify migration worked and old data is preserved
-    let mut stmt = conn.prepare("SELECT account_id, daily_pl, day_trade_count FROM risk_states").unwrap();
-    let mut rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, f64>(1)?,
-            row.get::<_, i32>(2)?,
-        ))
-    }).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT account_id, daily_pl, day_trade_count FROM risk_states")
+        .unwrap();
+    let mut rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, i32>(2)?,
+            ))
+        })
+        .unwrap();
 
     let row = rows.next().unwrap().unwrap();
     assert_eq!(row.0, "account-1");
@@ -248,13 +268,16 @@ async fn test_database_schema_migration() {
     conn.execute(
         "INSERT INTO risk_states (account_id, daily_pl, day_trade_count) VALUES (?, ?, ?)",
         ("account-2", 200.0, 5),
-    ).unwrap();
+    )
+    .unwrap();
 
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM risk_states WHERE day_trade_count = ?",
-        [5],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM risk_states WHERE day_trade_count = ?",
+            [5],
+            |row| row.get(0),
+        )
+        .unwrap();
 
     assert_eq!(count, 1);
 }
@@ -274,26 +297,27 @@ async fn test_database_transaction_handling() {
             daily_pl REAL NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     // Test successful transaction
     let tx = conn.unchecked_transaction().unwrap();
     tx.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-1", 100.0),
-    ).unwrap();
+    )
+    .unwrap();
     tx.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-2", 200.0),
-    ).unwrap();
+    )
+    .unwrap();
     tx.commit().unwrap();
 
     // Verify both inserts succeeded
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM risk_states",
-        [],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM risk_states", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(count, 2);
 
     // Test failed transaction (simulate rollback)
@@ -301,15 +325,14 @@ async fn test_database_transaction_handling() {
     tx.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-3", 300.0),
-    ).unwrap();
+    )
+    .unwrap();
     // Don't commit - transaction should rollback
 
     // Verify transaction was rolled back
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM risk_states",
-        [],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM risk_states", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(count, 2, "Transaction should have rolled back");
 }
 
@@ -330,7 +353,8 @@ async fn test_database_connection_pooling() {
                 value TEXT
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         connections.push(conn);
     }
 
@@ -339,16 +363,15 @@ async fn test_database_connection_pooling() {
         conn.execute(
             "INSERT INTO test_table (value) VALUES (?)",
             [format!("value-{}", i)],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Verify all inserts worked
     let conn = &connections[0];
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM test_table",
-        [],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM test_table", [], |row| row.get(0))
+        .unwrap();
 
     assert_eq!(count, 5);
 }
@@ -368,12 +391,14 @@ async fn test_database_backup_recovery() {
             daily_pl REAL NOT NULL
         )",
         [],
-    ).unwrap();
+    )
+    .unwrap();
 
     conn.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-1", 1000.0),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Simulate backup by copying file
     let backup_path = format!("{}.backup", db_path);
@@ -383,18 +408,17 @@ async fn test_database_backup_recovery() {
     conn.execute(
         "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
         ("account-2", 2000.0),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Simulate recovery by restoring from backup
     std::fs::copy(&backup_path, db_path).unwrap();
 
     // Verify only backup data exists
     let conn_restored = Connection::open(db_path).unwrap();
-    let count: i32 = conn_restored.query_row(
-        "SELECT COUNT(*) FROM risk_states",
-        [],
-        |row| row.get(0)
-    ).unwrap();
+    let count: i32 = conn_restored
+        .query_row("SELECT COUNT(*) FROM risk_states", [], |row| row.get(0))
+        .unwrap();
 
     assert_eq!(count, 1, "Should only have backup data after recovery");
 

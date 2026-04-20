@@ -1,5 +1,5 @@
 //! Day Trading Platform
-//! 
+//!
 //! A comprehensive pattern-based day trading system with automated execution capabilities.
 
 #![forbid(unsafe_code)]

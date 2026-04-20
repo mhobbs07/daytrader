@@ -76,7 +76,9 @@
 use crate::brokers::types::{Confidence, PatternName, Price, Symbol};
 use crate::events::types::{Candle, MarketEvent, SignalType};
 use crate::patterns::indicators;
-use crate::patterns::types::{PatternContext, PatternError, PatternResult, TrendContext, VolumeConfirmation};
+use crate::patterns::types::{
+    PatternContext, PatternError, PatternResult, TrendContext, VolumeConfirmation,
+};
 use chrono::{DateTime, Utc};
 use rust_decimal::{Decimal, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -124,7 +126,12 @@ impl TradingSignal {
         market_context: MarketContext,
     ) -> Self {
         Self {
-            id: format!("{}_{}_{}", symbol.as_str(), signal_type.as_str(), Utc::now().timestamp()),
+            id: format!(
+                "{}_{}_{}",
+                symbol.as_str(),
+                signal_type.as_str(),
+                Utc::now().timestamp()
+            ),
             symbol,
             signal_type,
             confidence,
@@ -313,7 +320,11 @@ impl MarketContext {
         }
 
         // Volume confirmation bonus
-        if self.volume_confirmation.as_ref().map_or(false, |vc| vc.is_confirmed()) {
+        if self
+            .volume_confirmation
+            .as_ref()
+            .map_or(false, |vc| vc.is_confirmed())
+        {
             multiplier *= 1.05;
         }
 
@@ -521,8 +532,9 @@ impl MarketContextAnalyzer {
                     .unwrap_or(Decimal::ZERO);
 
                 if avg_price > Decimal::ZERO {
-                    let volatility = (latest_atr.to_f64().unwrap_or(0.0) / avg_price.to_f64().unwrap_or(1.0))
-                        .clamp(0.0, 1.0);
+                    let volatility = (latest_atr.to_f64().unwrap_or(0.0)
+                        / avg_price.to_f64().unwrap_or(1.0))
+                    .clamp(0.0, 1.0);
                     return volatility;
                 }
             }
@@ -544,8 +556,12 @@ impl MarketContextAnalyzer {
             let current = &candles[i];
             let prev = &candles[i - 1];
 
-            let move_up = (current.high.value() - prev.high.value()).to_f64().unwrap_or(0.0);
-            let move_down = (prev.low.value() - current.low.value()).to_f64().unwrap_or(0.0);
+            let move_up = (current.high.value() - prev.high.value())
+                .to_f64()
+                .unwrap_or(0.0);
+            let move_down = (prev.low.value() - current.low.value())
+                .to_f64()
+                .unwrap_or(0.0);
 
             if move_up > move_down && move_up > 0.0 {
                 plus_dm += move_up;
@@ -554,10 +570,21 @@ impl MarketContextAnalyzer {
             }
 
             let tr = [
-                (current.high.value() - current.low.value()).to_f64().unwrap_or(0.0),
-                (current.high.value() - prev.close.value()).abs().to_f64().unwrap_or(0.0),
-                (current.low.value() - prev.close.value()).abs().to_f64().unwrap_or(0.0),
-            ].iter().cloned().fold(0.0, f64::max);
+                (current.high.value() - current.low.value())
+                    .to_f64()
+                    .unwrap_or(0.0),
+                (current.high.value() - prev.close.value())
+                    .abs()
+                    .to_f64()
+                    .unwrap_or(0.0),
+                (current.low.value() - prev.close.value())
+                    .abs()
+                    .to_f64()
+                    .unwrap_or(0.0),
+            ]
+            .iter()
+            .cloned()
+            .fold(0.0, f64::max);
 
             tr_sum += tr;
         }
@@ -617,7 +644,9 @@ impl SignalComposer {
         }
 
         // Add market structure components
-        if let Some(structure_components) = self.generate_market_structure_components(market_context) {
+        if let Some(structure_components) =
+            self.generate_market_structure_components(market_context)
+        {
             components.extend(structure_components);
         }
 
@@ -639,7 +668,8 @@ impl SignalComposer {
         let confidence = components
             .iter()
             .map(|c| c.confidence * c.weight)
-            .sum::<f64>() / total_weight;
+            .sum::<f64>()
+            / total_weight;
 
         if confidence < self.config.min_confidence {
             return None;
@@ -674,7 +704,12 @@ impl SignalComposer {
 
     /// Converts a pattern result to a signal component
     fn pattern_to_component(&self, pattern: &PatternResult) -> Option<SignalComponent> {
-        let weight = self.config.component_weights.get("pattern").copied().unwrap_or(0.4);
+        let weight = self
+            .config
+            .component_weights
+            .get("pattern")
+            .copied()
+            .unwrap_or(0.4);
         let direction = match pattern.signal_type {
             SignalType::Buy => 1.0,
             SignalType::Sell => -1.0,
@@ -701,7 +736,12 @@ impl SignalComposer {
         // RSI component
         if let Ok(rsi_values) = indicators::rsi(&closes, 14) {
             if let Some(&rsi) = rsi_values.last() {
-                let weight = self.config.component_weights.get("indicator").copied().unwrap_or(0.3);
+                let weight = self
+                    .config
+                    .component_weights
+                    .get("indicator")
+                    .copied()
+                    .unwrap_or(0.3);
                 let (confidence, direction) = if rsi < 30.0 {
                     (0.8, 1.0) // Oversold - bullish
                 } else if rsi > 70.0 {
@@ -710,20 +750,28 @@ impl SignalComposer {
                     (0.5, 0.0) // Neutral
                 };
 
-                components.push(SignalComponent::new(
-                    SignalComponentType::Indicator,
-                    "rsi",
-                    confidence,
-                    weight * 0.4,
-                    direction,
-                ).add_data("rsi_value", rsi.to_string()));
+                components.push(
+                    SignalComponent::new(
+                        SignalComponentType::Indicator,
+                        "rsi",
+                        confidence,
+                        weight * 0.4,
+                        direction,
+                    )
+                    .add_data("rsi_value", rsi.to_string()),
+                );
             }
         }
 
         // MACD component
         if let Ok((macd_line, signal_line, _)) = indicators::macd(&closes, 12, 26, 9) {
             if let (Some(&macd), Some(&signal)) = (macd_line.last(), signal_line.last()) {
-                let weight = self.config.component_weights.get("indicator").copied().unwrap_or(0.3);
+                let weight = self
+                    .config
+                    .component_weights
+                    .get("indicator")
+                    .copied()
+                    .unwrap_or(0.3);
                 let direction = if macd > signal { 1.0 } else { -1.0 };
                 let confidence = 0.7; // MACD signals are generally reliable
 
@@ -741,9 +789,17 @@ impl SignalComposer {
     }
 
     /// Generates market structure-based signal components
-    fn generate_market_structure_components(&self, context: &MarketContext) -> Option<Vec<SignalComponent>> {
+    fn generate_market_structure_components(
+        &self,
+        context: &MarketContext,
+    ) -> Option<Vec<SignalComponent>> {
         let mut components = Vec::new();
-        let weight = self.config.component_weights.get("market_structure").copied().unwrap_or(0.1);
+        let weight = self
+            .config
+            .component_weights
+            .get("market_structure")
+            .copied()
+            .unwrap_or(0.1);
 
         // Trend component
         let trend_direction = if context.trend.is_bullish() {
@@ -766,13 +822,19 @@ impl SignalComposer {
 
         // Support/resistance component
         if !context.support_resistance_levels.is_empty() {
-            components.push(SignalComponent::new(
-                SignalComponentType::MarketStructure,
-                "key_levels",
-                0.6, // Moderate confidence for level-based signals
-                weight * 0.4,
-                0.0, // Neutral direction
-            ).add_data("level_count", context.support_resistance_levels.len().to_string()));
+            components.push(
+                SignalComponent::new(
+                    SignalComponentType::MarketStructure,
+                    "key_levels",
+                    0.6, // Moderate confidence for level-based signals
+                    weight * 0.4,
+                    0.0, // Neutral direction
+                )
+                .add_data(
+                    "level_count",
+                    context.support_resistance_levels.len().to_string(),
+                ),
+            );
         }
 
         Some(components)
@@ -836,7 +898,8 @@ impl SignalEngine {
         }
 
         // Use parallel processing for multiple symbols if available
-        self.generate_signals_parallel(pattern_results, candles).await
+        self.generate_signals_parallel(pattern_results, candles)
+            .await
     }
 
     /// Generates signals with parallel processing for better performance
@@ -854,14 +917,18 @@ impl SignalEngine {
             // In a full implementation, patterns would have symbol information
             // For now, assume all patterns are for the same symbol
             let symbol_key = "DEFAULT".to_string();
-            patterns_by_symbol.entry(symbol_key).or_insert_with(Vec::new).push(pattern);
+            patterns_by_symbol
+                .entry(symbol_key)
+                .or_insert_with(Vec::new)
+                .push(pattern);
         }
 
         // Process each symbol in parallel
         let mut signal_futures = Vec::new();
 
         for (symbol_str, patterns) in patterns_by_symbol {
-            let symbol = Symbol::new(&symbol_str).unwrap_or_else(|_| Symbol::new("UNKNOWN").unwrap());
+            let symbol =
+                Symbol::new(&symbol_str).unwrap_or_else(|_| Symbol::new("UNKNOWN").unwrap());
             let patterns_clone = patterns.iter().map(|&p| p.clone()).collect::<Vec<_>>();
             let candles_clone = candles.to_vec();
 
@@ -879,7 +946,8 @@ impl SignalEngine {
                     &context_analyzer,
                     &composer,
                     &risk_engine,
-                ).await
+                )
+                .await
             };
 
             signal_futures.push(future);
@@ -937,12 +1005,8 @@ impl SignalEngine {
         };
 
         // Compose initial signal from patterns and context
-        let mut signal = composer.compose_signal(
-            symbol.clone(),
-            patterns,
-            &market_context,
-            candles,
-        )?;
+        let mut signal =
+            composer.compose_signal(symbol.clone(), patterns, &market_context, candles)?;
 
         // Apply risk-adjusted filtering and position sizing if risk engine is available
         if let Some(risk_engine) = risk_engine {
@@ -973,7 +1037,11 @@ impl SignalEngine {
         // Compose initial signal from patterns and context
         let mut signal = self.composer.compose_signal(
             symbol.clone(),
-            patterns.iter().map(|&p| p.clone()).collect::<Vec<_>>().as_slice(),
+            patterns
+                .iter()
+                .map(|&p| p.clone())
+                .collect::<Vec<_>>()
+                .as_slice(),
             &market_context,
             candles,
         )?;
@@ -984,7 +1052,9 @@ impl SignalEngine {
             signal = self.apply_risk_filtering(signal, risk_engine).await?;
 
             // Apply signal-based position sizing
-            signal = self.apply_position_sizing(signal, risk_engine, candles).await;
+            signal = self
+                .apply_position_sizing(signal, risk_engine, candles)
+                .await;
         }
 
         Some(signal)
@@ -996,34 +1066,33 @@ impl SignalEngine {
         risk_engine: &Arc<crate::risk::engine::RiskEngine>,
     ) -> Option<TradingSignal> {
         // Get pattern name from signal components
-        let pattern_name = signal.components.first()
-            .and_then(|comp| {
-                if let SignalComponentType::Pattern = comp.component_type {
-                    Some(crate::brokers::types::PatternName::new(&comp.name))
-                } else {
-                    None
-                }
-            });
+        let pattern_name = signal.components.first().and_then(|comp| {
+            if let SignalComponentType::Pattern = comp.component_type {
+                Some(crate::brokers::types::PatternName::new(&comp.name))
+            } else {
+                None
+            }
+        });
 
         if let Some(pattern_name) = pattern_name {
             // Check if pattern is enabled and meets risk criteria
             let evaluator = risk_engine.get_pattern_risk_evaluator().read().await;
             let order_value = rust_decimal::Decimal::new(100000, 2); // Placeholder order value
 
-            let evaluation = evaluator.evaluate_pattern_trade(
-                &pattern_name,
-                signal.confidence.value(),
-                order_value,
-            );
+            let evaluation = evaluator
+                .evaluate_pattern_trade(&pattern_name, signal.confidence.value(), order_value)
+                .await;
 
             match evaluation {
                 crate::risk::types::RiskEvaluation::Passed => {
                     // Signal passes risk filtering, adjust confidence based on risk multipliers
-                    let risk_multiplier = evaluator.get_pattern_state(&pattern_name)
+                    let risk_multiplier = evaluator
+                        .get_pattern_state(&pattern_name)
                         .map(|state| state.current_risk_multiplier)
                         .unwrap_or(1.0);
 
-                    let adjusted_confidence = (signal.confidence.value() * risk_multiplier).min(1.0);
+                    let adjusted_confidence =
+                        (signal.confidence.value() * risk_multiplier).min(1.0);
                     signal.confidence = crate::brokers::types::Confidence::new(adjusted_confidence)
                         .unwrap_or(signal.confidence);
 
@@ -1031,7 +1100,10 @@ impl SignalEngine {
                 }
                 crate::risk::types::RiskEvaluation::Violated { .. } => {
                     // Signal violates risk rules, filter it out
-                    tracing::debug!("Signal filtered out due to risk violation: {}", pattern_name.as_str());
+                    tracing::debug!(
+                        "Signal filtered out due to risk violation: {}",
+                        pattern_name.as_str()
+                    );
                     None
                 }
             }
@@ -1048,34 +1120,33 @@ impl SignalEngine {
         risk_engine: &Arc<crate::risk::engine::RiskEngine>,
     ) -> Option<TradingSignal> {
         // Get pattern name from signal components
-        let pattern_name = signal.components.first()
-            .and_then(|comp| {
-                if let SignalComponentType::Pattern = comp.component_type {
-                    Some(crate::brokers::types::PatternName::new(&comp.name))
-                } else {
-                    None
-                }
-            });
+        let pattern_name = signal.components.first().and_then(|comp| {
+            if let SignalComponentType::Pattern = comp.component_type {
+                Some(crate::brokers::types::PatternName::new(&comp.name))
+            } else {
+                None
+            }
+        });
 
         if let Some(pattern_name) = pattern_name {
             // Check if pattern is enabled and meets risk criteria
             let evaluator = risk_engine.get_pattern_risk_evaluator().read().await;
             let order_value = rust_decimal::Decimal::new(100000, 2); // Placeholder order value
 
-            let evaluation = evaluator.evaluate_pattern_trade(
-                &pattern_name,
-                signal.confidence.value(),
-                order_value,
-            );
+            let evaluation = evaluator
+                .evaluate_pattern_trade(&pattern_name, signal.confidence.value(), order_value)
+                .await;
 
             match evaluation {
                 crate::risk::types::RiskEvaluation::Passed => {
                     // Signal passes risk filtering, adjust confidence based on risk multipliers
-                    let risk_multiplier = evaluator.get_pattern_state(&pattern_name)
+                    let risk_multiplier = evaluator
+                        .get_pattern_state(&pattern_name)
                         .map(|state| state.current_risk_multiplier)
                         .unwrap_or(1.0);
 
-                    let adjusted_confidence = (signal.confidence.value() * risk_multiplier).min(1.0);
+                    let adjusted_confidence =
+                        (signal.confidence.value() * risk_multiplier).min(1.0);
                     signal.confidence = crate::brokers::types::Confidence::new(adjusted_confidence)
                         .unwrap_or(signal.confidence);
 
@@ -1083,7 +1154,10 @@ impl SignalEngine {
                 }
                 crate::risk::types::RiskEvaluation::Violated { .. } => {
                     // Signal violates risk rules, filter it out
-                    tracing::debug!("Signal filtered out due to risk violation: {}", pattern_name.as_str());
+                    tracing::debug!(
+                        "Signal filtered out due to risk violation: {}",
+                        pattern_name.as_str()
+                    );
                     None
                 }
             }
@@ -1101,7 +1175,8 @@ impl SignalEngine {
         config: &SignalConfig,
     ) -> TradingSignal {
         // Get current price for position sizing calculation
-        let current_price = candles.last()
+        let current_price = candles
+            .last()
             .map(|c| c.close.value())
             .unwrap_or(rust_decimal::Decimal::ZERO);
 
@@ -1110,17 +1185,22 @@ impl SignalEngine {
         }
 
         // Calculate base position size from risk engine
-        let base_position_size = risk_engine.get_position_sizer().calculate_position_size(
-            &signal.symbol.as_str(),
-            current_price,
-            signal.confidence.value(),
-        ).await;
+        let base_position_size = risk_engine
+            .get_position_sizer()
+            .calculate_position_size(
+                &signal.symbol.as_str(),
+                current_price,
+                signal.confidence.value(),
+            )
+            .await;
 
         // Apply signal-specific adjustments
         let signal_multiplier = Self::calculate_signal_position_multiplier_static(&signal, config);
 
         // Calculate final position size
-        let final_position_size = base_position_size * rust_decimal::Decimal::from_f64_retain(signal_multiplier).unwrap_or(rust_decimal::Decimal::ONE);
+        let final_position_size = base_position_size
+            * rust_decimal::Decimal::from_f64_retain(signal_multiplier)
+                .unwrap_or(rust_decimal::Decimal::ONE);
 
         // Add position sizing metadata to signal
         signal
@@ -1137,7 +1217,8 @@ impl SignalEngine {
         candles: &[Candle],
     ) -> TradingSignal {
         // Get current price for position sizing calculation
-        let current_price = candles.last()
+        let current_price = candles
+            .last()
             .map(|c| c.close.value())
             .unwrap_or(rust_decimal::Decimal::ZERO);
 
@@ -1146,17 +1227,22 @@ impl SignalEngine {
         }
 
         // Calculate base position size from risk engine
-        let base_position_size = risk_engine.get_position_sizer().calculate_position_size(
-            &signal.symbol.as_str(),
-            current_price,
-            signal.confidence.value(),
-        ).await;
+        let base_position_size = risk_engine
+            .get_position_sizer()
+            .calculate_position_size(
+                &signal.symbol.as_str(),
+                current_price,
+                signal.confidence.value(),
+            )
+            .await;
 
         // Apply signal-specific adjustments
         let signal_multiplier = self.calculate_signal_position_multiplier(&signal);
 
         // Calculate final position size
-        let final_position_size = base_position_size * rust_decimal::Decimal::from_f64_retain(signal_multiplier).unwrap_or(rust_decimal::Decimal::ONE);
+        let final_position_size = base_position_size
+            * rust_decimal::Decimal::from_f64_retain(signal_multiplier)
+                .unwrap_or(rust_decimal::Decimal::ONE);
 
         // Add position sizing metadata to signal
         signal
@@ -1166,7 +1252,10 @@ impl SignalEngine {
     }
 
     /// Calculates position size multiplier based on signal characteristics (static version)
-    fn calculate_signal_position_multiplier_static(signal: &TradingSignal, _config: &SignalConfig) -> f64 {
+    fn calculate_signal_position_multiplier_static(
+        signal: &TradingSignal,
+        _config: &SignalConfig,
+    ) -> f64 {
         let mut multiplier = 1.0;
 
         // Confidence-based adjustment
@@ -1312,13 +1401,8 @@ mod tests {
         let price = Price::new(Decimal::new(15000, 2)).unwrap();
         let context = MarketContext::new(TrendContext::StrongUptrend { strength: 0.8 });
 
-        let signal = TradingSignal::new(
-            symbol.clone(),
-            SignalType::Buy,
-            confidence,
-            price,
-            context,
-        );
+        let signal =
+            TradingSignal::new(symbol.clone(), SignalType::Buy, confidence, price, context);
 
         assert_eq!(signal.symbol, symbol);
         assert_eq!(signal.signal_type, SignalType::Buy);
@@ -1328,18 +1412,13 @@ mod tests {
 
     #[test]
     fn test_signal_component() {
-        let component = SignalComponent::new(
-            SignalComponentType::Pattern,
-            "hammer",
-            0.9,
-            0.4,
-            1.0,
-        );
+        let component = SignalComponent::new(SignalComponentType::Pattern, "hammer", 0.9, 0.4, 1.0);
 
         assert_eq!(component.name, "hammer");
         assert_eq!(component.confidence, 0.9);
         assert_eq!(component.weight, 0.4);
-        assert_eq!(component.weighted_contribution(), 0.36);
+        // Epsilon compare for IEEE 754 float math (0.9 * 0.4 * 1.0 ≈ 0.36)
+        assert!((component.weighted_contribution() - 0.36).abs() < 1e-9);
     }
 
     #[test]

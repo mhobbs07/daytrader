@@ -6,10 +6,10 @@
 //! - Daily reset at exact market open time (9:30 AM ET)
 //! - Risk evaluation with partial order fills
 
+use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 use daytrader::risk::limits::{DailyLossLimits, DailyLossTracker};
 use daytrader::risk::types::{DollarAmount, Percentage};
 use rust_decimal::Decimal;
-use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 
 /// Test floating-point precision issues in P&L calculations
 #[tokio::test]
@@ -72,13 +72,19 @@ async fn test_rapid_pnl_changes() {
     for change in changes {
         let evaluation = tracker.update_daily_pnl(change).await;
 
-        if matches!(evaluation, daytrader::risk::types::RiskEvaluation::Violated { .. }) {
+        if matches!(
+            evaluation,
+            daytrader::risk::types::RiskEvaluation::Violated { .. }
+        ) {
             violation_triggered = true;
             break;
         }
     }
 
-    assert!(violation_triggered, "Should trigger violation with accumulated losses");
+    assert!(
+        violation_triggered,
+        "Should trigger violation with accumulated losses"
+    );
 
     // After violation, should be halted
     assert!(tracker.should_halt_trading().await);
@@ -123,7 +129,10 @@ async fn test_daily_reset_timing() {
     // One second after market open - should reset (at or after)
     let after_open = Utc.with_ymd_and_hms(2023, 12, 15, 14, 30, 1).unwrap();
     let should_reset_after = tracker.should_reset_daily(after_open).await;
-    assert!(should_reset_after, "Should reset after market open on new day");
+    assert!(
+        should_reset_after,
+        "Should reset after market open on new day"
+    );
 
     // Perform actual reset
     tracker.reset_daily_limits(Decimal::new(1000000, 2)).await;
@@ -202,7 +211,10 @@ async fn test_loss_limit_boundary_conditions() {
     let dollar_limit = Decimal::new(1000, 2); // Exactly $10.00
 
     // Just under limit should be allowed
-    let can_trade_under = tracker.check_daily_loss_limit(-dollar_limit + Decimal::new(1, 2)).await.unwrap();
+    let can_trade_under = tracker
+        .check_daily_loss_limit(-dollar_limit + Decimal::new(1, 2))
+        .await
+        .unwrap();
     assert!(can_trade_under);
 
     // Exactly at limit should be blocked
@@ -213,11 +225,17 @@ async fn test_loss_limit_boundary_conditions() {
     let percent_limit = Decimal::new(10000, 2); // $100.00
 
     // Just under percent limit should be allowed
-    let can_trade_percent_under = tracker.check_daily_loss_limit(-percent_limit + Decimal::new(1, 2)).await.unwrap();
+    let can_trade_percent_under = tracker
+        .check_daily_loss_limit(-percent_limit + Decimal::new(1, 2))
+        .await
+        .unwrap();
     assert!(can_trade_percent_under);
 
     // Exactly at percent limit should be blocked
-    let can_trade_percent_at = tracker.check_daily_loss_limit(-percent_limit).await.unwrap();
+    let can_trade_percent_at = tracker
+        .check_daily_loss_limit(-percent_limit)
+        .await
+        .unwrap();
     assert!(!can_trade_percent_at);
 }
 
@@ -233,11 +251,11 @@ async fn test_unrealized_pnl_tracking() {
 
     // Simulate position with changing unrealized P&L
     let unrealized_changes = vec![
-        Decimal::new(-5000, 2),  // -$50.00
-        Decimal::new(-2000, 2),  // Additional -$20.00
-        Decimal::new(8000, 2),   // +$80.00 (recovered some)
-        Decimal::new(-3000, 2),  // -$30.00
-        Decimal::new(15000, 2),  // +$150.00 (now in profit)
+        Decimal::new(-5000, 2), // -$50.00
+        Decimal::new(-2000, 2), // Additional -$20.00
+        Decimal::new(8000, 2),  // +$80.00 (recovered some)
+        Decimal::new(-3000, 2), // -$30.00
+        Decimal::new(15000, 2), // +$150.00 (now in profit)
     ];
 
     for change in unrealized_changes {
@@ -276,7 +294,10 @@ async fn test_mixed_realized_unrealized_pnl() {
     assert_eq!(state.total_pl(), Decimal::new(-15000, 2)); // -$150.00 total
 
     // Should still be allowed to trade (under $300 limit)
-    let can_trade = tracker.check_daily_loss_limit(Decimal::new(-5000, 2)).await.unwrap();
+    let can_trade = tracker
+        .check_daily_loss_limit(Decimal::new(-5000, 2))
+        .await
+        .unwrap();
     assert!(can_trade);
 
     // Add more losses to approach limit
@@ -286,11 +307,17 @@ async fn test_mixed_realized_unrealized_pnl() {
     assert_eq!(state.total_pl(), Decimal::new(-29000, 2)); // -$290.00 total
 
     // Should still be just under limit
-    let can_trade_still = tracker.check_daily_loss_limit(Decimal::new(-900, 2)).await.unwrap();
+    let can_trade_still = tracker
+        .check_daily_loss_limit(Decimal::new(-900, 2))
+        .await
+        .unwrap();
     assert!(can_trade_still);
 
     // One more dollar should push over limit
-    let can_trade_over = tracker.check_daily_loss_limit(Decimal::new(-1100, 2)).await.unwrap();
+    let can_trade_over = tracker
+        .check_daily_loss_limit(Decimal::new(-1100, 2))
+        .await
+        .unwrap();
     assert!(!can_trade_over);
 }
 
@@ -313,7 +340,9 @@ async fn test_concurrent_loss_tracking() {
             for j in 0..5 {
                 let pnl_change = Decimal::new(-100 * (i + j) as i64, 2);
                 let _ = tracker_clone.update_daily_pnl(pnl_change).await;
-                let _ = tracker_clone.check_daily_loss_limit(Decimal::new(-50, 0)).await;
+                let _ = tracker_clone
+                    .check_daily_loss_limit(Decimal::new(-50, 0))
+                    .await;
             }
         });
         handles.push(handle);

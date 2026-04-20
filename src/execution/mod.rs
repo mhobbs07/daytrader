@@ -51,8 +51,9 @@ pub mod rules;
 pub mod strategy;
 
 // Re-export primary types
-pub use engine::{ExecutionEngine, ExecutionConfig, ExecutionContext, ExecutionMetrics};
+pub use engine::{ExecutionConfig, ExecutionEngine, ExecutionMetrics};
 pub use rules::{EntryRule, ExitRule, RuleEngine, RuleEvaluation};
+pub use strategy::ExecutionContext;
 pub use strategy::{
     AggressiveConfig, AggressiveStrategy, ConservativeConfig, ConservativeStrategy,
     ExecutionStrategy,
@@ -275,8 +276,8 @@ impl PatternPerformance {
         };
 
         // Update average holding period
-        let total_duration = (self.avg_holding_period_secs * (self.total_trades - 1) as u64)
-            + holding_period_secs;
+        let total_duration =
+            (self.avg_holding_period_secs * (self.total_trades - 1) as u64) + holding_period_secs;
         self.avg_holding_period_secs = total_duration / self.total_trades as u64;
 
         self.last_updated = Utc::now();

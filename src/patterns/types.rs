@@ -173,11 +173,17 @@ impl VolumeConfirmation {
     /// Creates volume confirmation from volume ratio
     pub fn from_ratio(ratio: f64) -> Self {
         if ratio >= 1.5 {
-            Self::Confirmed { volume_ratio: ratio }
+            Self::Confirmed {
+                volume_ratio: ratio,
+            }
         } else if ratio >= 0.7 {
-            Self::Neutral { volume_ratio: ratio }
+            Self::Neutral {
+                volume_ratio: ratio,
+            }
         } else {
-            Self::Contradicted { volume_ratio: ratio }
+            Self::Contradicted {
+                volume_ratio: ratio,
+            }
         }
     }
 
@@ -220,7 +226,9 @@ impl TrendContext {
         match strength {
             s if s >= 0.7 => Self::StrongUptrend { strength: s },
             s if s >= 0.3 => Self::WeakUptrend { strength: s },
-            s if s >= -0.3 => Self::Sideways { volatility: s.abs() },
+            s if s >= -0.3 => Self::Sideways {
+                volatility: s.abs(),
+            },
             s if s >= -0.7 => Self::WeakDowntrend { strength: s.abs() },
             s => Self::StrongDowntrend { strength: s.abs() },
         }
@@ -233,7 +241,10 @@ impl TrendContext {
 
     /// Returns true if trend is bearish
     pub fn is_bearish(&self) -> bool {
-        matches!(self, Self::StrongDowntrend { .. } | Self::WeakDowntrend { .. })
+        matches!(
+            self,
+            Self::StrongDowntrend { .. } | Self::WeakDowntrend { .. }
+        )
     }
 
     /// Returns true if market is sideways
@@ -377,9 +388,14 @@ impl PatternStats {
     }
 
     /// Records a pattern detection
-    pub fn record_detection(&mut self, pattern_name: &str, confidence: f64, detection_time_ms: f64) {
+    pub fn record_detection(
+        &mut self,
+        pattern_name: &str,
+        confidence: f64,
+        detection_time_ms: f64,
+    ) {
         self.total_detections += 1;
-        
+
         if confidence >= 0.6 {
             self.successful_detections += 1;
         }
@@ -389,10 +405,14 @@ impl PatternStats {
         self.average_confidence = ((n - 1.0) * self.average_confidence + confidence) / n;
 
         // Update average detection time
-        self.avg_detection_time_ms = ((n - 1.0) * self.avg_detection_time_ms + detection_time_ms) / n;
+        self.avg_detection_time_ms =
+            ((n - 1.0) * self.avg_detection_time_ms + detection_time_ms) / n;
 
         // Update pattern-specific counts
-        *self.pattern_counts.entry(pattern_name.to_string()).or_insert(0) += 1;
+        *self
+            .pattern_counts
+            .entry(pattern_name.to_string())
+            .or_insert(0) += 1;
     }
 
     /// Returns success rate (0.0 to 1.0)
@@ -421,12 +441,7 @@ mod tests {
         let confidence = Confidence::new(0.85).unwrap();
         let price = Price::new(Decimal::new(15000, 2)).unwrap();
 
-        let result = PatternResult::new(
-            pattern_name.clone(),
-            SignalType::Buy,
-            confidence,
-            price,
-        );
+        let result = PatternResult::new(pattern_name.clone(), SignalType::Buy, confidence, price);
 
         assert_eq!(result.pattern_name, pattern_name);
         assert_eq!(result.signal_type, SignalType::Buy);
@@ -448,7 +463,10 @@ mod tests {
         assert_eq!(context.candles_used, 3);
         assert!(context.volume_confirmation.is_some());
         assert!(context.trend_context.is_some());
-        assert_eq!(context.metadata.get("test_key"), Some(&"test_value".to_string()));
+        assert_eq!(
+            context.metadata.get("test_key"),
+            Some(&"test_value".to_string())
+        );
     }
 
     #[test]
@@ -504,7 +522,7 @@ mod tests {
     #[test]
     fn test_pattern_stats() {
         let mut stats = PatternStats::new();
-        
+
         stats.record_detection("hammer", 0.8, 1.5);
         stats.record_detection("doji", 0.5, 2.0);
         stats.record_detection("hammer", 0.9, 1.2);

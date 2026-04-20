@@ -56,42 +56,37 @@
 //! - [`indicators`] - Technical indicator calculations (Phase 3B)
 //! - [`signals`] - Signal generation and composition (Phase 3C)
 
-pub mod types;
-pub mod traits;
-pub mod utils;
 pub mod registry;
+pub mod traits;
+pub mod types;
+pub mod utils;
 
 // Re-export commonly used types and traits
 pub use registry::{PatternRegistry, PatternRegistryBuilder, RegistryConfig};
-pub use traits::{PatternDetector, PatternDetectorFactory, PatternCategory};
+pub use traits::{PatternCategory, PatternDetector, PatternDetectorFactory};
 pub use types::{
-    PatternResult, PatternContext, PatternParams, PatternStats, PatternError,
-    VolumeConfirmation, TrendContext,
+    PatternContext, PatternError, PatternParams, PatternResult, PatternStats, TrendContext,
+    VolumeConfirmation,
 };
 
 // Pattern detection modules
-pub mod candlestick;  // Phase 3A-2: Basic candlestick patterns (Hammer, Shooting Star, Doji)
-pub mod engulfing;    // Phase 3A-2: Engulfing patterns (Bullish/Bearish Engulfing)
+pub mod candlestick; // Phase 3A-2: Basic candlestick patterns (Hammer, Shooting Star, Doji)
+pub mod engulfing; // Phase 3A-2: Engulfing patterns (Bullish/Bearish Engulfing)
+pub mod indicators; // Phase 3B: Technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, ATR)
 pub mod multi_candle; // Phase 3A-3: Multi-candle patterns (Morning/Evening Star, Three White Soldiers/Black Crows)
-pub mod indicators;   // Phase 3B: Technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, ATR)
-pub mod signals;      // Phase 3C: Signal generation engine with market context analysis
-pub mod streaming;   // Real-time signal generation streaming pipeline
+pub mod signals; // Phase 3C: Signal generation engine with market context analysis
+pub mod streaming; // Real-time signal generation streaming pipeline
 
 // Re-export pattern detectors for easy access
-pub use candlestick::{HammerDetector, ShootingStarDetector, DojiDetector};
-pub use engulfing::{BullishEngulfingDetector, BearishEngulfingDetector};
-pub use multi_candle::{MorningStarDetector, EveningStarDetector, ThreeWhiteSoldiersDetector, ThreeBlackCrowsDetector};
+pub use candlestick::{DojiDetector, HammerDetector, ShootingStarDetector};
+pub use engulfing::{BearishEngulfingDetector, BullishEngulfingDetector};
+pub use multi_candle::{
+    EveningStarDetector, MorningStarDetector, ThreeBlackCrowsDetector, ThreeWhiteSoldiersDetector,
+};
 
 // Re-export signal generation components
 pub use signals::{
-    SignalEngine, SignalConfig, TradingSignal, MarketContext, SignalComponent,
-    SignalComponentType, MarketContextAnalyzer, SignalComposer,
+    MarketContext, MarketContextAnalyzer, SignalComponent, SignalComponentType, SignalComposer,
+    SignalConfig, SignalEngine, TradingSignal,
 };
-pub use streaming::{SignalStreamingPipeline, StreamingConfig, PipelineStats, StreamingError};
-
-
-
-
-
-
-
+pub use streaming::{PipelineStats, SignalStreamingPipeline, StreamingConfig, StreamingError};

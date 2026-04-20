@@ -7,6 +7,7 @@ use crate::brokers::types::OrderId;
 use crate::events::bus::EventBus;
 use crate::events::types::MarketEvent;
 use crate::orders::types::{FillInfo, ManagedOrder, OrderError};
+use chrono::DateTime;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -70,7 +71,7 @@ impl OrderTracker {
     /// ```
     pub async fn track_order(&self, order: ManagedOrder) {
         let order_id = order.id.clone();
-        
+
         info!(
             order_id = %order_id,
             symbol = %order.symbol,
@@ -82,8 +83,47 @@ impl OrderTracker {
         self.active_orders.insert(order_id.clone(), order.clone());
 
         // Publish OrderPlaced event
+        let event_order = crate::events::types::Order {
+            id: order.id.clone(),
+            symbol: order.symbol.clone(),
+            side: match order.side {
+                crate::brokers::traits::OrderSide::Buy => crate::events::types::OrderSide::Buy,
+                crate::brokers::traits::OrderSide::Sell => crate::events::types::OrderSide::Sell,
+            },
+            order_type: match order.order_type {
+                crate::brokers::traits::OrderType::Limit => crate::events::types::OrderType::Limit,
+                _ => crate::events::types::OrderType::Market,
+            },
+            quantity: order.quantity,
+            price: order.limit_price,
+            status: match order.status {
+                crate::brokers::traits::OrderStatus::Pending => {
+                    crate::events::types::OrderStatus::Pending
+                }
+                crate::brokers::traits::OrderStatus::Accepted => {
+                    crate::events::types::OrderStatus::Submitted
+                }
+                crate::brokers::traits::OrderStatus::PartiallyFilled => {
+                    crate::events::types::OrderStatus::PartiallyFilled
+                }
+                crate::brokers::traits::OrderStatus::Filled => {
+                    crate::events::types::OrderStatus::Filled
+                }
+                crate::brokers::traits::OrderStatus::Cancelled => {
+                    crate::events::types::OrderStatus::Cancelled
+                }
+                crate::brokers::traits::OrderStatus::Rejected => {
+                    crate::events::types::OrderStatus::Rejected
+                }
+                crate::brokers::traits::OrderStatus::Expired => {
+                    crate::events::types::OrderStatus::Cancelled
+                }
+            },
+            created_at: order.created_at,
+            updated_at: order.updated_at,
+        };
         self.event_bus.publish(MarketEvent::OrderPlaced {
-            order: Arc::new(order.to_broker_order()),
+            order: Arc::new(event_order),
         });
     }
 
@@ -102,7 +142,8 @@ impl OrderTracker {
         fill_info: Option<FillInfo>,
     ) -> Result<(), OrderError> {
         // Get mutable reference to order
-        let mut order = self.active_orders
+        let mut order = self
+            .active_orders
             .get_mut(order_id)
             .ok_or_else(|| OrderError::NotFound(order_id.clone()))?;
 
@@ -215,17 +256,15 @@ impl OrderTracker {
     /// Returns orders that are in terminal states.
     pub async fn get_archived_orders(&self) -> Vec<ManagedOrder> {
         let archived = self.archived_orders.read().await;
-        archived
-            .iter()
-            .map(|entry| entry.value().clone())
-            .collect()
+        archived.iter().map(|entry| entry.value().clone()).collect()
     }
 
     /// Archives an order (moves from active to archived)
     ///
     /// Called when an order reaches a terminal state.
     async fn archive_order(&self, order_id: &OrderId) -> Result<(), OrderError> {
-        let order = self.active_orders
+        let order = self
+            .active_orders
             .remove(order_id)
             .ok_or_else(|| OrderError::NotFound(order_id.clone()))?
             .1;
@@ -251,7 +290,8 @@ impl OrderTracker {
         broker_order_id: String,
         submitted_at: DateTime<chrono::Utc>,
     ) -> Result<(), OrderError> {
-        let mut order = self.active_orders
+        let mut order = self
+            .active_orders
             .get_mut(order_id)
             .ok_or_else(|| OrderError::NotFound(order_id.clone()))?;
 
@@ -277,7 +317,8 @@ impl OrderTracker {
         order_id: &OrderId,
         error_message: String,
     ) -> Result<(), OrderError> {
-        let mut order = self.active_orders
+        let mut order = self
+            .active_orders
             .get_mut(order_id)
             .ok_or_else(|| OrderError::NotFound(order_id.clone()))?;
 
@@ -289,7 +330,8 @@ impl OrderTracker {
 
     /// Marks order validation as passed
     pub fn mark_validation_passed(&self, order_id: &OrderId) -> Result<(), OrderError> {
-        let mut order = self.active_orders
+        let mut order = self
+            .active_orders
             .get_mut(order_id)
             .ok_or_else(|| OrderError::NotFound(order_id.clone()))?;
 
@@ -366,12 +408,19 @@ mod tests {
 
         // Update to accepted
         tracker
-            .update_order_status(&order_id, crate::brokers::traits::OrderStatus::Accepted, None)
+            .update_order_status(
+                &order_id,
+                crate::brokers::traits::OrderStatus::Accepted,
+                None,
+            )
             .await
             .unwrap();
 
         let updated = tracker.get_order(&order_id).await.unwrap();
-        assert_eq!(updated.status, crate::brokers::traits::OrderStatus::Accepted);
+        assert_eq!(
+            updated.status,
+            crate::brokers::traits::OrderStatus::Accepted
+        );
     }
 
     #[tokio::test]
@@ -393,7 +442,11 @@ mod tests {
         };
 
         tracker
-            .update_order_status(&order_id, crate::brokers::traits::OrderStatus::Filled, Some(fill))
+            .update_order_status(
+                &order_id,
+                crate::brokers::traits::OrderStatus::Filled,
+                Some(fill),
+            )
             .await
             .unwrap();
 
@@ -403,7 +456,10 @@ mod tests {
 
         // Should still be retrievable
         let filled_order = tracker.get_order(&order_id).await.unwrap();
-        assert_eq!(filled_order.status, crate::brokers::traits::OrderStatus::Filled);
+        assert_eq!(
+            filled_order.status,
+            crate::brokers::traits::OrderStatus::Filled
+        );
         assert_eq!(filled_order.filled_quantity, 100);
     }
 
@@ -455,7 +511,11 @@ mod tests {
 
         // Cancel order
         tracker
-            .update_order_status(&order_id, crate::brokers::traits::OrderStatus::Cancelled, None)
+            .update_order_status(
+                &order_id,
+                crate::brokers::traits::OrderStatus::Cancelled,
+                None,
+            )
             .await
             .unwrap();
 
@@ -464,7 +524,10 @@ mod tests {
         assert_eq!(tracker.archived_count().await, 1);
 
         let cancelled_order = tracker.get_order(&order_id).await.unwrap();
-        assert_eq!(cancelled_order.status, crate::brokers::traits::OrderStatus::Cancelled);
+        assert_eq!(
+            cancelled_order.status,
+            crate::brokers::traits::OrderStatus::Cancelled
+        );
     }
 
     #[tokio::test]
@@ -486,7 +549,10 @@ mod tests {
 
         let updated = tracker.get_order(&order_id).await.unwrap();
         assert_eq!(updated.broker_order_id, Some(broker_id.to_string()));
-        assert_eq!(updated.status, crate::brokers::traits::OrderStatus::Accepted);
+        assert_eq!(
+            updated.status,
+            crate::brokers::traits::OrderStatus::Accepted
+        );
         assert!(updated.submitted_at.is_some());
     }
 

@@ -1,6 +1,9 @@
 //! Day Trading Platform - Main Entry Point
 
-use daytrader::{Result, utils::{init_error_logging, init_metrics_collection}};
+use daytrader::{
+    Result,
+    utils::{init_error_logging, init_metrics_collection},
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
