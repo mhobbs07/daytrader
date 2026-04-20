@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
+let systemIntervalId: number | null = null;
+
 interface SystemStatus {
   broker_connected: boolean;
   event_bus_active: boolean;
@@ -14,6 +16,7 @@ interface SystemStore {
   status: SystemStatus | null;
   error: string | null;
   refreshStatus: () => Promise<void>;
+  dispose: () => void;
 }
 
 export const useSystemStore = create<SystemStore>((set) => ({
@@ -28,10 +31,16 @@ export const useSystemStore = create<SystemStore>((set) => ({
       set({ error: err instanceof Error ? err.message : 'Failed to fetch system status' });
     }
   },
+
+  dispose: () => {
+    if (systemIntervalId !== null) {
+      clearInterval(systemIntervalId);
+      systemIntervalId = null;
+    }
+  },
 }));
 
-// Fetch immediately on module load, then poll every 5 seconds
 useSystemStore.getState().refreshStatus();
-setInterval(() => {
+systemIntervalId = window.setInterval(() => {
   useSystemStore.getState().refreshStatus();
 }, 5000);

@@ -29,6 +29,8 @@ interface RiskViolation {
   suggestedAction?: string;
 }
 
+let riskIntervalId: number | null = null;
+
 interface RiskStore {
   riskState: RiskState | null;
   riskLimits: RiskLimits | null;
@@ -41,6 +43,7 @@ interface RiskStore {
   fetchRiskLimits: () => Promise<void>;
   fetchRecentViolations: () => Promise<void>;
   refreshAll: () => Promise<void>;
+  dispose: () => void;
 }
 
 export const useRiskStore = create<RiskStore>((set, get) => ({
@@ -97,9 +100,15 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
       fetchRecentViolations()
     ]);
   },
+
+  dispose: () => {
+    if (riskIntervalId !== null) {
+      clearInterval(riskIntervalId);
+      riskIntervalId = null;
+    }
+  },
 }));
 
-// Auto-refresh risk data every 30 seconds
-setInterval(() => {
+riskIntervalId = window.setInterval(() => {
   useRiskStore.getState().refreshAll();
 }, 30000);
