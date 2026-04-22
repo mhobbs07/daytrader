@@ -11,37 +11,49 @@ use rust_decimal::Decimal;
 #[tokio::test]
 async fn test_pdt_enforcer_mock_integration() {
     let config = create_test_risk_config();
-    let initial_equity = Decimal::new(2500000, 2); // $25,000.00 (PDT threshold)
+    let initial_equity = Decimal::new(2000000, 2); // $20,000.00 (below PDT threshold → max 3 day trades)
 
     // Create PDT enforcer with mock database
     let pdt_config = PdtConfig::from_config(&config);
-    let enforcer = PdtEnforcer::new_without_db(pdt_config, initial_equity);
+    let enforcer = PdtEnforcer::new(pdt_config, initial_equity);
 
     // Record some day trades
     let today = chrono::Utc::now().date_naive();
-    enforcer.record_day_trade(today).await.unwrap();
-    enforcer.record_day_trade(today).await.unwrap();
+    enforcer
+        .record_day_trade(today)
+        .await
+        .expect("record day trade 1");
+    enforcer
+        .record_day_trade(today)
+        .await
+        .expect("record day trade 2");
 
     // Verify day trade count
     let count = enforcer.count_day_trades().await;
     assert_eq!(count, 2);
 
     // Check PDT eligibility
-    let eligible = enforcer.check_pdt_eligibility().await.unwrap();
+    let eligible: bool = enforcer.check_pdt_eligibility().await.unwrap();
     assert!(eligible); // Under limit
 
     // Record one more trade (at limit for PDT)
-    enforcer.record_day_trade(today).await.unwrap();
+    enforcer
+        .record_day_trade(today)
+        .await
+        .expect("record day trade 3");
     let count_after = enforcer.count_day_trades().await;
     assert_eq!(count_after, 3);
 
     // Should still be eligible (at limit)
-    let eligible_after = enforcer.check_pdt_eligibility().await.unwrap();
+    let eligible_after: bool = enforcer.check_pdt_eligibility().await.unwrap();
     assert!(eligible_after);
 
     // Record fourth trade (over limit)
-    enforcer.record_day_trade(today).await.unwrap();
-    let result = enforcer.check_pdt_eligibility().await;
+    enforcer
+        .record_day_trade(today)
+        .await
+        .expect("record day trade 4");
+    let result: Result<bool, String> = enforcer.check_pdt_eligibility().await;
     assert!(result.is_err()); // Should be blocked
 }
 

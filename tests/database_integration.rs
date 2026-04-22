@@ -321,13 +321,15 @@ async fn test_database_transaction_handling() {
     assert_eq!(count, 2);
 
     // Test failed transaction (simulate rollback)
-    let tx = conn.unchecked_transaction().unwrap();
-    tx.execute(
-        "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
-        ("account-3", 300.0),
-    )
-    .unwrap();
-    // Don't commit - transaction should rollback
+    {
+        let tx = conn.unchecked_transaction().unwrap();
+        tx.execute(
+            "INSERT INTO risk_states (account_id, daily_pl) VALUES (?, ?)",
+            ("account-3", 300.0),
+        )
+        .unwrap();
+        // Drop without committing — rusqlite rolls back on Drop
+    }
 
     // Verify transaction was rolled back
     let count: i32 = conn

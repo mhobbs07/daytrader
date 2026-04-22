@@ -770,7 +770,9 @@ mod tests {
         let pattern_name = PatternName::new("hammer");
 
         // Initially enabled (state gets created on first access)
-        evaluator.update_pattern_status(&pattern_name, 0.65, 25).await;
+        evaluator
+            .update_pattern_status(&pattern_name, 0.65, 25)
+            .await;
         assert!(
             evaluator
                 .get_pattern_state(&pattern_name)
@@ -779,7 +781,9 @@ mod tests {
         );
 
         // Disable due to poor performance
-        evaluator.update_pattern_status(&pattern_name, 0.35, 25).await;
+        evaluator
+            .update_pattern_status(&pattern_name, 0.35, 25)
+            .await;
         assert!(
             !evaluator
                 .get_pattern_state(&pattern_name)
@@ -788,7 +792,9 @@ mod tests {
         );
 
         // Re-enable with good performance
-        evaluator.update_pattern_status(&pattern_name, 0.65, 25).await;
+        evaluator
+            .update_pattern_status(&pattern_name, 0.65, 25)
+            .await;
         assert!(
             evaluator
                 .get_pattern_state(&pattern_name)
@@ -926,7 +932,9 @@ mod tests {
             Arc::clone(&tracker),
         );
         // Seed the evaluator's pattern_states so the performance updater has something to iterate
-        evaluator.update_pattern_status(&pattern_name, 0.65, 10).await;
+        evaluator
+            .update_pattern_status(&pattern_name, 0.65, 10)
+            .await;
 
         // Initially should have lower risk multiplier due to good performance
         evaluator.update_performance_based_multipliers().await;
@@ -976,7 +984,9 @@ mod tests {
             Arc::clone(&tracker),
         );
         // Seed the evaluator's pattern_states so the performance updater has something to iterate
-        evaluator.update_pattern_status(&pattern_name, 0.5, 10).await;
+        evaluator
+            .update_pattern_status(&pattern_name, 0.5, 10)
+            .await;
 
         // Should disable pattern due to poor performance
         evaluator

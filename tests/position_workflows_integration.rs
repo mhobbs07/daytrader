@@ -31,11 +31,25 @@ async fn create_test_db() -> SqlitePool {
         .await
         .expect("Failed to create test database");
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
+    // Load schema from the canonical schema.sql file
+    let schema = include_str!("../src/db/schema.sql");
+    sqlx::raw_sql(schema)
+        .execute(&pool)
         .await
-        .expect("Failed to run migrations");
+        .expect("Failed to apply schema");
+
+    // Insert test accounts (ids 1-3) since positions have a FK to accounts
+    for account_id in 1i64..=3 {
+        let account_number = format!("TEST-{:03}", account_id);
+        sqlx::query!(
+            "INSERT OR IGNORE INTO accounts (id, broker, account_number, account_type) VALUES (?, 'test', ?, 'paper')",
+            account_id,
+            account_number
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to insert test account");
+    }
 
     pool
 }
@@ -43,8 +57,8 @@ async fn create_test_db() -> SqlitePool {
 /// Helper to create a test fill info
 fn create_fill_info(quantity: u32, price: Decimal, commission: Decimal) -> FillInfo {
     FillInfo {
-        filled_quantity: Quantity::new(quantity),
-        filled_price: Price::new(price),
+        filled_quantity: Quantity::new(quantity).unwrap(),
+        filled_price: Price::new(price).unwrap(),
         commission,
         timestamp: Utc::now(),
     }
@@ -58,10 +72,10 @@ fn create_test_order(
     pattern_name: Option<&str>,
 ) -> ManagedOrder {
     let request = OrderRequest::builder()
-        .symbol(Symbol::new(symbol))
+        .symbol(Symbol::new(symbol).unwrap())
         .side(side)
         .order_type(daytrader::brokers::traits::OrderType::Market)
-        .quantity(Quantity::new(quantity))
+        .quantity(Quantity::new(quantity).unwrap())
         .time_in_force(daytrader::brokers::traits::TimeInForce::Day)
         .build()
         .unwrap();
@@ -89,10 +103,10 @@ async fn test_open_long_position_from_buy_order() {
 
     // Create a position directly (simulating what tracker would do)
     let position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -127,10 +141,10 @@ async fn test_position_quantity_and_average_price_update() {
 
     // Initial position: 100 shares @ $150
     let mut position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -142,11 +156,12 @@ async fn test_position_quantity_and_average_price_update() {
     let new_avg = calculator.calculate_avg_entry(
         position.avg_entry_price,
         position.quantity.value(),
-        Price::new(dec!(155.00)),
+        Price::new(dec!(155.00)).unwrap(),
         50,
     );
 
-    position.quantity = Quantity::new(150);
+    let new_avg = new_avg.unwrap();
+    position.quantity = Quantity::new(150).unwrap();
     position.avg_entry_price = new_avg;
     position.cost_basis = new_avg.value() * Decimal::from(150);
     position.entry_orders.push(OrderId::new("order-2"));
@@ -174,10 +189,10 @@ async fn test_close_position_with_realized_pnl() {
 
     // Create position: 100 shares @ $150
     let mut position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -186,7 +201,7 @@ async fn test_close_position_with_realized_pnl() {
     repo.save_position(&position, 1).await.unwrap();
 
     // Close at $160 (profit of $10/share = $1000 total)
-    let exit_price = Price::new(dec!(160.00));
+    let exit_price = Price::new(dec!(160.00)).unwrap();
     let realized_pl = calculator.calculate_realized_pl(
         position.avg_entry_price,
         exit_price,
@@ -240,14 +255,20 @@ fn test_unrealized_pnl_profit() {
     // Position: 100 shares @ $150, current price $155
     let cost_basis = dec!(15000.00); // 100 * 150
     let quantity = 100;
-    let current_price = Price::new(dec!(155.00));
+    let current_price = Price::new(dec!(155.00)).unwrap();
 
     let unrealized_pl = calculator.calculate_unrealized_pl(cost_basis, quantity, current_price);
     assert_eq!(unrealized_pl, dec!(500.00)); // (155 - 150) * 100
 
     let unrealized_pl_pct =
         calculator.calculate_unrealized_pl_percent(cost_basis, quantity, current_price);
-    assert_eq!(unrealized_pl_pct, dec!(3.333333333333333333333333333)); // (500 / 15000) * 100
+    // Use rounded comparison to avoid Decimal precision differences in repeating fractions
+    let expected = dec!(3.3333333);
+    assert!(
+        (unrealized_pl_pct - expected).abs() < dec!(0.0001),
+        "Expected ~3.333%, got {}",
+        unrealized_pl_pct
+    ); // (500 / 15000) * 100 ≈ 3.333%
 }
 
 #[test]
@@ -257,14 +278,20 @@ fn test_unrealized_pnl_loss() {
     // Position: 100 shares @ $150, current price $145
     let cost_basis = dec!(15000.00);
     let quantity = 100;
-    let current_price = Price::new(dec!(145.00));
+    let current_price = Price::new(dec!(145.00)).unwrap();
 
     let unrealized_pl = calculator.calculate_unrealized_pl(cost_basis, quantity, current_price);
     assert_eq!(unrealized_pl, dec!(-500.00)); // (145 - 150) * 100
 
     let unrealized_pl_pct =
         calculator.calculate_unrealized_pl_percent(cost_basis, quantity, current_price);
-    assert_eq!(unrealized_pl_pct, dec!(-3.333333333333333333333333333)); // (-500 / 15000) * 100
+    // Use rounded comparison to avoid Decimal precision differences in repeating fractions
+    let expected = dec!(-3.3333333);
+    assert!(
+        (unrealized_pl_pct - expected).abs() < dec!(0.0001),
+        "Expected ~-3.333%, got {}",
+        unrealized_pl_pct
+    ); // (-500 / 15000) * 100 ≈ -3.333%
 }
 
 #[test]
@@ -274,9 +301,9 @@ fn test_realized_pnl_with_commission() {
         tax_lot_method: TaxLotMethod::FIFO,
     });
 
-    let entry_price = Price::new(dec!(150.00));
-    let exit_price = Price::new(dec!(160.00));
-    let quantity = Quantity::new(100);
+    let entry_price = Price::new(dec!(150.00)).unwrap();
+    let exit_price = Price::new(dec!(160.00)).unwrap();
+    let quantity = Quantity::new(100).unwrap();
     let commission = dec!(2.00);
 
     let realized_pl =
@@ -292,9 +319,9 @@ fn test_realized_pnl_without_commission() {
         tax_lot_method: TaxLotMethod::FIFO,
     });
 
-    let entry_price = Price::new(dec!(150.00));
-    let exit_price = Price::new(dec!(160.00));
-    let quantity = Quantity::new(100);
+    let entry_price = Price::new(dec!(150.00)).unwrap();
+    let exit_price = Price::new(dec!(160.00)).unwrap();
+    let quantity = Quantity::new(100).unwrap();
     let commission = dec!(2.00);
 
     let realized_pl =
@@ -308,16 +335,16 @@ fn test_portfolio_pnl_aggregation() {
     let calculator = PnLCalculator::with_defaults();
 
     let positions = vec![
-        (dec!(10000.00), 100, Price::new(dec!(105.00))), // +500 unrealized
-        (dec!(20000.00), 200, Price::new(dec!(95.00))),  // -1000 unrealized
-        (dec!(15000.00), 150, Price::new(dec!(102.00))), // +300 unrealized
+        (dec!(10000.00), 100, Price::new(dec!(105.00)).unwrap()), // +500 unrealized
+        (dec!(20000.00), 200, Price::new(dec!(95.00)).unwrap()),  // -1000 unrealized
+        (dec!(15000.00), 150, Price::new(dec!(102.00)).unwrap()), // +300 unrealized
     ];
 
     let portfolio_pl = calculator.calculate_portfolio_pl(positions.into_iter());
 
     assert_eq!(portfolio_pl.total_cost, dec!(45000.00));
-    assert_eq!(portfolio_pl.total_value, dec!(44700.00)); // 10500 + 19000 + 15300
-    assert_eq!(portfolio_pl.unrealized_pl, dec!(-300.00));
+    assert_eq!(portfolio_pl.total_value, dec!(44800.00)); // 10500 + 19000 + 15300
+    assert_eq!(portfolio_pl.unrealized_pl, dec!(-200.00)); // +500 - 1000 + 300 = -200
     assert_eq!(portfolio_pl.position_count, 3);
 }
 
@@ -332,10 +359,10 @@ async fn test_position_with_pattern_metadata() {
 
     // Create position from pattern signal
     let position = Position::new(
-        Symbol::new("TSLA"),
+        Symbol::new("TSLA").unwrap(),
         PositionSide::Long,
-        Quantity::new(50),
-        Price::new(dec!(250.00)),
+        Quantity::new(50).unwrap(),
+        Price::new(dec!(250.00)).unwrap(),
         OrderId::new("order-1"),
         Some(PatternName::new("Hammer")),
         Some(dec!(0.85)),
@@ -364,10 +391,10 @@ async fn test_get_positions_by_pattern() {
     let symbols = vec!["AAPL", "GOOGL", "MSFT"];
     for symbol in &symbols {
         let position = Position::new(
-            Symbol::new(symbol),
+            Symbol::new(*symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(dec!(150.00)),
+            Quantity::new(100).unwrap(),
+            Price::new(dec!(150.00)).unwrap(),
             OrderId::new(format!("order-{}", symbol)),
             Some(PatternName::new("Hammer")),
             Some(dec!(0.80)),
@@ -394,10 +421,10 @@ async fn test_pattern_position_history_filtering() {
 
     // Create and close a pattern position
     let position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         Some(PatternName::new("BullishEngulfing")),
         Some(dec!(0.90)),
@@ -410,7 +437,7 @@ async fn test_pattern_position_history_filtering() {
         &position,
         1,
         &CloseReason::TakeProfit,
-        Price::new(dec!(160.00)),
+        Price::new(dec!(160.00)).unwrap(),
     )
     .await
     .unwrap();
@@ -442,10 +469,10 @@ async fn test_multiple_positions_per_account() {
     let symbols = vec!["AAPL", "GOOGL", "TSLA", "MSFT", "AMZN"];
     for (i, symbol) in symbols.iter().enumerate() {
         let position = Position::new(
-            Symbol::new(symbol),
+            Symbol::new(*symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new((100 + i as u32 * 10)),
-            Price::new(dec!(150.00) + Decimal::from(i * 10)),
+            Quantity::new((100 + i as u32 * 10)).unwrap(),
+            Price::new(dec!(150.00) + Decimal::from(i * 10)).unwrap(),
             OrderId::new(format!("order-{}", symbol)),
             None,
             None,
@@ -474,10 +501,10 @@ async fn test_multiple_positions_same_symbol_different_accounts() {
     // Create same symbol position for different accounts
     for account_id in 1..=3 {
         let position = Position::new(
-            Symbol::new("AAPL"),
+            Symbol::new("AAPL").unwrap(),
             PositionSide::Long,
-            Quantity::new(100 * account_id as u32),
-            Price::new(dec!(150.00)),
+            Quantity::new(100 * account_id as u32).unwrap(),
+            Price::new(dec!(150.00)).unwrap(),
             OrderId::new(format!("order-acc-{}", account_id)),
             None,
             None,
@@ -508,10 +535,10 @@ async fn test_position_aggregation_and_filtering() {
 
     for symbol in &pattern_symbols {
         let position = Position::new(
-            Symbol::new(symbol),
+            Symbol::new(*symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(dec!(150.00)),
+            Quantity::new(100).unwrap(),
+            Price::new(dec!(150.00)).unwrap(),
             OrderId::new(format!("order-{}", symbol)),
             Some(PatternName::new("Hammer")),
             Some(dec!(0.80)),
@@ -521,10 +548,10 @@ async fn test_position_aggregation_and_filtering() {
 
     for symbol in &non_pattern_symbols {
         let position = Position::new(
-            Symbol::new(symbol),
+            Symbol::new(*symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(dec!(150.00)),
+            Quantity::new(100).unwrap(),
+            Price::new(dec!(150.00)).unwrap(),
             OrderId::new(format!("order-{}", symbol)),
             None,
             None,
@@ -570,10 +597,10 @@ async fn test_position_performance_analytics() {
 
     for (symbol, entry, exit, _is_win) in test_cases {
         let mut position = Position::new(
-            Symbol::new(symbol),
+            Symbol::new(symbol).unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(entry),
+            Quantity::new(100).unwrap(),
+            Price::new(entry).unwrap(),
             OrderId::new(format!("order-{}", symbol)),
             None,
             None,
@@ -582,17 +609,22 @@ async fn test_position_performance_analytics() {
         // Calculate realized P&L
         let calculator = PnLCalculator::with_defaults();
         let realized_pl = calculator.calculate_realized_pl(
-            Price::new(entry),
-            Price::new(exit),
-            Quantity::new(100),
+            Price::new(entry).unwrap(),
+            Price::new(exit).unwrap(),
+            Quantity::new(100).unwrap(),
             dec!(0.00),
         );
         position.realized_pl = realized_pl;
 
         repo.save_position(&position, 1).await.unwrap();
-        repo.close_position(&position, 1, &CloseReason::Manual, Price::new(exit))
-            .await
-            .unwrap();
+        repo.close_position(
+            &position,
+            1,
+            &CloseReason::Manual,
+            Price::new(exit).unwrap(),
+        )
+        .await
+        .unwrap();
     }
 
     // Get performance analytics
@@ -617,10 +649,10 @@ async fn test_position_history_by_symbol() {
     // Create and close multiple positions for same symbol
     for i in 1..=3 {
         let mut position = Position::new(
-            Symbol::new("AAPL"),
+            Symbol::new("AAPL").unwrap(),
             PositionSide::Long,
-            Quantity::new(100),
-            Price::new(dec!(150.00) + Decimal::from(i)),
+            Quantity::new(100).unwrap(),
+            Price::new(dec!(150.00) + Decimal::from(i)).unwrap(),
             OrderId::new(format!("order-{}", i)),
             None,
             None,
@@ -629,9 +661,14 @@ async fn test_position_history_by_symbol() {
         position.realized_pl = Decimal::from(i * 100);
 
         repo.save_position(&position, 1).await.unwrap();
-        repo.close_position(&position, 1, &CloseReason::Manual, Price::new(dec!(160.00)))
-            .await
-            .unwrap();
+        repo.close_position(
+            &position,
+            1,
+            &CloseReason::Manual,
+            Price::new(dec!(160.00)).unwrap(),
+        )
+        .await
+        .unwrap();
     }
 
     // Get history for symbol
@@ -658,10 +695,10 @@ async fn test_partial_position_close() {
 
     // Create position: 100 shares @ $150
     let mut position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -672,13 +709,13 @@ async fn test_partial_position_close() {
     // Sell 50 shares @ $160
     let partial_realized = calculator.calculate_realized_pl(
         position.avg_entry_price,
-        Price::new(dec!(160.00)),
-        Quantity::new(50),
+        Price::new(dec!(160.00)).unwrap(),
+        Quantity::new(50).unwrap(),
         dec!(0.00),
     );
 
     // Update position: 50 shares remaining
-    position.quantity = Quantity::new(50);
+    position.quantity = Quantity::new(50).unwrap();
     position.realized_pl = partial_realized;
     position.cost_basis = position.avg_entry_price.value() * Decimal::from(50);
     position.exit_orders.push(OrderId::new("order-2"));
@@ -694,19 +731,19 @@ async fn test_partial_position_close() {
     // Close remaining 50 shares @ $165
     let final_realized = calculator.calculate_realized_pl(
         position.avg_entry_price,
-        Price::new(dec!(165.00)),
-        Quantity::new(50),
+        Price::new(dec!(165.00)).unwrap(),
+        Quantity::new(50).unwrap(),
         dec!(0.00),
     );
 
-    position.quantity = Quantity::new(50);
+    position.quantity = Quantity::new(50).unwrap();
     position.realized_pl += final_realized;
 
     repo.close_position(
         &position,
         1,
         &CloseReason::TakeProfit,
-        Price::new(dec!(165.00)),
+        Price::new(dec!(165.00)).unwrap(),
     )
     .await
     .unwrap();
@@ -742,7 +779,7 @@ async fn test_position_with_zero_unrealized_pl() {
     // Position at cost (no P&L)
     let cost_basis = dec!(15000.00);
     let quantity = 100;
-    let current_price = Price::new(dec!(150.00)); // Same as entry
+    let current_price = Price::new(dec!(150.00)).unwrap(); // Same as entry
 
     let unrealized_pl = calculator.calculate_unrealized_pl(cost_basis, quantity, current_price);
     assert_eq!(unrealized_pl, dec!(0.00));
@@ -759,10 +796,10 @@ async fn test_position_delete_without_archiving() {
 
     // Create position
     let position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -791,10 +828,10 @@ async fn test_position_delete_without_archiving() {
 #[test]
 fn test_position_holding_period() {
     let position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -826,10 +863,10 @@ fn test_close_reason_variants() {
 fn test_position_is_pattern_trade_detection() {
     // Non-pattern position
     let position1 = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -838,10 +875,10 @@ fn test_position_is_pattern_trade_detection() {
 
     // Pattern position
     let position2 = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         Some(PatternName::new("Hammer")),
         Some(dec!(0.85)),
@@ -856,10 +893,10 @@ async fn test_concurrent_position_updates() {
 
     // Create initial position
     let position = Position::new(
-        Symbol::new("AAPL"),
+        Symbol::new("AAPL").unwrap(),
         PositionSide::Long,
-        Quantity::new(100),
-        Price::new(dec!(150.00)),
+        Quantity::new(100).unwrap(),
+        Price::new(dec!(150.00)).unwrap(),
         OrderId::new("order-1"),
         None,
         None,
@@ -874,7 +911,7 @@ async fn test_concurrent_position_updates() {
         let mut pos_clone = position.clone();
 
         let handle = tokio::spawn(async move {
-            pos_clone.current_price = Price::new(dec!(150.00) + Decimal::from(i));
+            pos_clone.current_price = Price::new(dec!(150.00) + Decimal::from(i)).unwrap();
             pos_clone.market_value = pos_clone.current_price.value() * Decimal::from(100);
             pos_clone.updated_at = Utc::now();
 

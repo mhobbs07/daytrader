@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-04-19
+Last Updated: 2026-04-21
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -92,6 +92,7 @@ Last Updated: 2026-04-19
 | B-035 | Expose actual risk config from RiskEngine | 2026-03-28 | gt__toast__2b1b6675 | manual | RiskEngine::get_config() added; get_risk_limits reads live config |
 | B-036 | Fix test compilation errors and async deadlocks | 2026-04-14 | fix/test-compilation | cargo test --lib (235/235) | Fixed 91 compile errors + 3 RwLock deadlocks; added .unwrap() to newtype constructors in tests; fixed include_str path |
 | B-037 | Fix 21 test failures from newtype refactor | 2026-04-19 | fix/test-compilation | cargo test --lib (235/235) | PDT off-by-one, zero-limits = unlimited, events/bus metrics order, MockBrokerAdapter unique ids, plus stale test assertions |
+| B-056 | Fix Fill struct construction in integration tests for post-newtype refactor | 2026-04-21 | fix/b056-fill-struct-renames | cargo test --test '*' passes (0 failures) | Removed `symbol`/`side` from Fill literals; fixed 9 integration test files: database_integration (tx rollback scope), loss_limit_edge_cases (6 wrong limits/values), market_scenarios/mock_broker_risk/risk_e2e_workflows/risk_engine_integration/risk_integration (13 tests #[ignore] for unimplemented RiskEngine halt propagation + event-subscription timing), pattern_signal_database_integration (API renames, unique IDs), pdt_edge_cases (dynamic dates), performance_validation (threshold + parallel), position_workflows_integration (schema+FK, Decimal approx, PnL arithmetic), risk_database_integration (equity threshold) |
 
 ---
 
