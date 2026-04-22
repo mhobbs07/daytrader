@@ -99,7 +99,9 @@ impl MinConfidenceRule {
 
 impl EntryRule for MinConfidenceRule {
     fn evaluate(&self, signal: &TradingSignal, _context: &EntryContext) -> RuleEvaluation {
-        if signal.confidence.value() >= self.min_confidence {
+        if Decimal::from_f64_retain(signal.confidence.value()).unwrap_or(Decimal::ZERO)
+            >= self.min_confidence
+        {
             RuleEvaluation::Pass
         } else {
             RuleEvaluation::Fail(format!(
@@ -241,8 +243,18 @@ impl PatternPerformanceRule {
 
 impl EntryRule for PatternPerformanceRule {
     fn evaluate(&self, signal: &TradingSignal, context: &EntryContext) -> RuleEvaluation {
-        // Check if we have stats for this pattern
-        let pattern_name = match &signal.pattern_name {
+        // Extract pattern name from signal components
+        let pattern_name = signal.components.first().and_then(|comp| {
+            if matches!(
+                comp.component_type,
+                crate::patterns::signals::SignalComponentType::Pattern
+            ) {
+                Some(PatternName::new(&comp.name))
+            } else {
+                None
+            }
+        });
+        let pattern_name = match &pattern_name {
             Some(name) => name,
             None => return RuleEvaluation::Pass, // No pattern, skip this rule
         };
@@ -329,10 +341,7 @@ impl ExitRule for StopLossRule {
         };
 
         if loss_percent < -self.stop_loss_percent {
-            RuleEvaluation::Fail(format!(
-                "Stop loss triggered: {:.2}% loss",
-                loss_percent
-            ))
+            RuleEvaluation::Fail(format!("Stop loss triggered: {:.2}% loss", loss_percent))
         } else {
             RuleEvaluation::Pass
         }
@@ -546,7 +555,9 @@ mod tests {
                 trading_halted: false,
             },
             pattern_stats: HashMap::new(),
-            current_time: Utc::now(),
+            // Fixed time inside market hours (14:30 UTC = 9:30 ET) so tests pass 24/7
+            current_time: chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 14, 30, 0)
+                .unwrap(),
         }
     }
 
@@ -570,7 +581,7 @@ mod tests {
         context.current_positions.push(Position::new(
             Symbol::new("MSFT").unwrap(),
             crate::positions::tracker::PositionSide::Long,
-            Quantity::new(100),
+            Quantity::new(100).unwrap(),
             Price::new(Decimal::new(30000, 2)).unwrap(),
             crate::brokers::types::OrderId::new("order1"),
             None,
@@ -579,7 +590,7 @@ mod tests {
         context.current_positions.push(Position::new(
             Symbol::new("GOOGL").unwrap(),
             crate::positions::tracker::PositionSide::Long,
-            Quantity::new(50),
+            Quantity::new(50).unwrap(),
             Price::new(Decimal::new(140000, 2)).unwrap(),
             crate::brokers::types::OrderId::new("order2"),
             None,
@@ -600,7 +611,7 @@ mod tests {
         context.current_positions.push(Position::new(
             Symbol::new("AAPL").unwrap(),
             crate::positions::tracker::PositionSide::Long,
-            Quantity::new(100),
+            Quantity::new(100).unwrap(),
             Price::new(Decimal::new(15000, 2)).unwrap(),
             crate::brokers::types::OrderId::new("order1"),
             None,

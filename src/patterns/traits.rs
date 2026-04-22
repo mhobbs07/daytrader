@@ -265,7 +265,8 @@ pub trait MonitoredPatternDetector: PatternDetector {
 
     /// Records a detection attempt with timing
     fn record_detection(&mut self, pattern_name: &str, confidence: f64, detection_time_ms: f64) {
-        self.stats_mut().record_detection(pattern_name, confidence, detection_time_ms);
+        self.stats_mut()
+            .record_detection(pattern_name, confidence, detection_time_ms);
     }
 }
 
@@ -301,7 +302,7 @@ pub mod utils {
         if range == Decimal::ZERO {
             return 0.0;
         }
-        
+
         let body_size = candle.body_size();
         (body_size / range).to_string().parse().unwrap_or(0.0)
     }
@@ -361,7 +362,7 @@ pub mod utils {
 
         let current_volume = candles[0].volume as f64;
         let avg_volume = average_volume(&candles[1..]);
-        
+
         if avg_volume == 0.0 {
             1.0
         } else {
@@ -376,7 +377,8 @@ pub mod utils {
         for i in 1..candles.len() {
             if candles[i].timestamp > candles[i - 1].timestamp {
                 return Err(PatternError::DataQuality {
-                    issue: "Candles must be in reverse chronological order (newest first)".to_string(),
+                    issue: "Candles must be in reverse chronological order (newest first)"
+                        .to_string(),
                 });
             }
         }
@@ -482,10 +484,10 @@ mod tests {
     #[test]
     fn test_utils_shadow_ratios() {
         let candle = create_test_candle(10000, 11000, 9000, 10500, 1000);
-        
+
         let upper_ratio = utils::upper_shadow_ratio(&candle);
         let lower_ratio = utils::lower_shadow_ratio(&candle);
-        
+
         // Upper shadow: 11000 - 10500 = 500, range = 2000, ratio = 0.25
         assert!((upper_ratio - 0.25).abs() < 0.01);
         // Lower shadow: 10000 - 9000 = 1000, range = 2000, ratio = 0.5
@@ -518,10 +520,14 @@ mod tests {
 
     #[test]
     fn test_utils_validation() {
-        let candles = vec![
-            create_test_candle(10000, 11000, 9000, 10500, 1000),
-            create_test_candle(10000, 11000, 9000, 10500, 1000),
-        ];
+        // Ensure distinct, strictly-ascending timestamps (Utc::now() can return the same instant twice)
+        // validate_candle_order expects reverse-chronological (newest first)
+        let base = Utc::now();
+        let mut c_newer = create_test_candle(10000, 11000, 9000, 10500, 1000);
+        let mut c_older = create_test_candle(10000, 11000, 9000, 10500, 1000);
+        c_newer.timestamp = base;
+        c_older.timestamp = base - chrono::Duration::seconds(1);
+        let candles = vec![c_newer, c_older];
 
         assert!(utils::validate_candle_order(&candles).is_ok());
         assert!(utils::ensure_min_candles(&candles, 2).is_ok());

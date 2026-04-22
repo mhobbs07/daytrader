@@ -39,6 +39,10 @@ pub struct PatternStats {
     pub avg_profit_per_trade: f64,
     pub consecutive_losses: i32,
     pub is_enabled: bool,
+    pub max_trades_per_day: Option<i32>,
+    pub stop_after_consecutive_losses: Option<i32>,
+    pub required_win_rate: Option<f64>,
+    pub min_sample_size: Option<i32>,
     pub avg_confidence: f64,
     pub confidence_weighted_win_rate: f64,
     pub last_updated: DateTime<Utc>,
@@ -243,7 +247,9 @@ impl From<crate::patterns::signals::TradingSignal> for PatternSignal {
         Self {
             id: 0, // Will be set by database
             symbol: signal.symbol.as_str().to_string(),
-            pattern_name: signal.components.first()
+            pattern_name: signal
+                .components
+                .first()
                 .map(|c| c.name.clone())
                 .unwrap_or_else(|| "unknown".to_string()),
             signal_type: signal.signal_type.as_str().to_string(),
@@ -272,6 +278,10 @@ impl From<crate::risk::pattern_stats::PatternStats> for PatternStats {
             avg_profit_per_trade: stats.avg_profit_per_trade.to_f64().unwrap_or(0.0),
             consecutive_losses: stats.consecutive_losses as i32,
             is_enabled: stats.is_enabled,
+            max_trades_per_day: None,
+            stop_after_consecutive_losses: None,
+            required_win_rate: None,
+            min_sample_size: None,
             avg_confidence: stats.avg_confidence,
             confidence_weighted_win_rate: stats.confidence_weighted_win_rate,
             last_updated: stats.last_updated,
@@ -329,7 +339,7 @@ pub struct TradingSignalRow {
     pub trend_strength: Option<f64>,
     pub volatility: Option<f64>,
     pub market_strength: Option<f64>,
-    pub components: String, // JSON
+    pub components: String,       // JSON
     pub metadata: Option<String>, // JSON
     pub acted_upon: bool,
     pub outcome: Option<String>,
@@ -366,19 +376,18 @@ pub struct IndicatorValueRow {
 impl From<&crate::patterns::signals::TradingSignal> for TradingSignalRow {
     fn from(signal: &crate::patterns::signals::TradingSignal) -> Self {
         use crate::patterns::signals::SignalComponent;
-        
+
         // Serialize components to JSON
-        let components_json = serde_json::to_string(&signal.components)
-            .unwrap_or_else(|_| "[]".to_string());
-        
+        let components_json =
+            serde_json::to_string(&signal.components).unwrap_or_else(|_| "[]".to_string());
+
         // Serialize metadata to JSON
         let metadata_json = if signal.metadata.is_empty() {
             None
         } else {
-            Some(serde_json::to_string(&signal.metadata)
-                .unwrap_or_else(|_| "{}".to_string()))
+            Some(serde_json::to_string(&signal.metadata).unwrap_or_else(|_| "{}".to_string()))
         };
-        
+
         // Extract trend information from market context
         let (trend_type, trend_strength) = match &signal.market_context.trend {
             crate::patterns::types::TrendContext::StrongUptrend { strength } => {
@@ -397,7 +406,7 @@ impl From<&crate::patterns::signals::TradingSignal> for TradingSignalRow {
                 (Some("sideways".to_string()), Some(0.0))
             }
         };
-        
+
         Self {
             id: signal.id.clone(),
             symbol: signal.symbol.as_str().to_string(),
@@ -426,30 +435,30 @@ impl TradingSignalRow {
         use crate::patterns::signals::{MarketContext, SignalComponent};
         use crate::patterns::types::TrendContext;
         use std::collections::HashMap;
-        
+
         // Parse symbol
-        let symbol = Symbol::new(&self.symbol)
-            .map_err(|e| format!("Invalid symbol: {}", e))?;
-        
+        let symbol = Symbol::new(&self.symbol).map_err(|e| format!("Invalid symbol: {}", e))?;
+
         // Parse signal type
         let signal_type = match self.signal_type.as_str() {
             "buy" => SignalType::Buy,
             "sell" => SignalType::Sell,
             _ => return Err(format!("Invalid signal type: {}", self.signal_type)),
         };
-        
+
         // Parse confidence
-        let confidence = Confidence::new(self.confidence)
-            .map_err(|e| format!("Invalid confidence: {}", e))?;
-        
+        let confidence =
+            Confidence::new(self.confidence).map_err(|e| format!("Invalid confidence: {}", e))?;
+
         // Parse price
-        let price_level = Price::new(Decimal::from_f64(self.price_level).unwrap_or(Decimal::ZERO))
-            .map_err(|e| format!("Invalid price: {}", e))?;
-        
+        let price_level =
+            Price::new(Decimal::from_f64_retain(self.price_level).unwrap_or(Decimal::ZERO))
+                .map_err(|e| format!("Invalid price: {}", e))?;
+
         // Parse components from JSON
         let components: Vec<SignalComponent> = serde_json::from_str(&self.components)
             .map_err(|e| format!("Failed to parse components: {}", e))?;
-        
+
         // Parse metadata from JSON
         let metadata: HashMap<String, String> = if let Some(ref meta_json) = self.metadata {
             serde_json::from_str(meta_json)
@@ -457,7 +466,7 @@ impl TradingSignalRow {
         } else {
             HashMap::new()
         };
-        
+
         // Reconstruct trend context
         let trend = match self.trend_type.as_deref() {
             Some("strong_uptrend") => TrendContext::StrongUptrend {
@@ -474,12 +483,12 @@ impl TradingSignalRow {
             },
             _ => TrendContext::Sideways { volatility: 0.5 },
         };
-        
+
         // Create market context
         let mut market_context = MarketContext::new(trend);
         market_context.volatility = self.volatility.unwrap_or(0.5);
         market_context.market_strength = self.market_strength.unwrap_or(0.5);
-        
+
         // Create signal
         let mut signal = crate::patterns::signals::TradingSignal::new(
             symbol,
@@ -488,12 +497,12 @@ impl TradingSignalRow {
             price_level,
             market_context,
         );
-        
+
         signal.id = self.id.clone();
         signal.generated_at = self.generated_at;
         signal.components = components.into();
         signal.metadata = metadata;
-        
+
         Ok(signal)
     }
 }

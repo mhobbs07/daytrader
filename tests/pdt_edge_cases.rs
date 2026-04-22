@@ -6,9 +6,9 @@
 //! - Exact $25,000 equity threshold boundaries
 //! - Day trade timing at market open/close boundaries
 
+use chrono::{NaiveDate, Weekday};
 use daytrader::risk::pdt::{PdtConfig, PdtEnforcer, PdtState};
 use rust_decimal::Decimal;
-use chrono::{NaiveDate, Weekday};
 
 /// Test 5-business-day window transitions and edge cases
 #[tokio::test]

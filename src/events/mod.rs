@@ -143,8 +143,8 @@ pub mod types;
 // Re-export commonly used types for convenience
 pub use bus::EventBus;
 pub use types::{
-    Candle, Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType,
-    PatternSignal, Position, Quote, RiskViolation, RiskViolationType, SignalType,
+    Candle, Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, PatternSignal, Position,
+    Quote, RiskViolation, RiskViolationType, SignalType,
 };
 
 // Re-export broker types that are used in events

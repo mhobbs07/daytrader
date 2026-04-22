@@ -3,14 +3,14 @@
 //! This module provides comprehensive benchmarks to measure and optimize
 //! the performance of pattern detection, signal generation, and risk integration.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use daytrader::patterns::signals::{SignalEngine, SignalConfig};
-use daytrader::patterns::types::PatternResult;
-use daytrader::patterns::indicators;
+use chrono::{DateTime, Duration, Utc};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use daytrader::brokers::types::{Confidence, PatternName, Price, Symbol};
 use daytrader::events::types::{Candle, SignalType};
-use daytrader::brokers::types::{Confidence, PatternName, Symbol, Price};
+use daytrader::patterns::indicators;
+use daytrader::patterns::signals::{SignalConfig, SignalEngine};
+use daytrader::patterns::types::PatternResult;
 use rust_decimal::Decimal;
-use chrono::{DateTime, Utc, Duration};
 use std::sync::Arc;
 
 /// Generate sample candle data for benchmarking
@@ -48,7 +48,11 @@ fn generate_sample_patterns(count: usize) -> Vec<PatternResult> {
         patterns.push(PatternResult {
             pattern_name: PatternName::new(pattern_name).unwrap(),
             confidence: Confidence::new(confidence.clamp(0.0, 1.0)).unwrap(),
-            signal_type: if confidence > 0.5 { SignalType::Buy } else { SignalType::Sell },
+            signal_type: if confidence > 0.5 {
+                SignalType::Buy
+            } else {
+                SignalType::Sell
+            },
             timestamp: Utc::now(),
             metadata: std::collections::HashMap::new(),
         });
@@ -66,9 +70,8 @@ fn bench_signal_generation(c: &mut Criterion) {
 
     c.bench_function("signal_generation_50_patterns", |b| {
         b.iter(|| {
-            let result = black_box(
-                engine.generate_signals(black_box(&patterns), black_box(&candles))
-            );
+            let result =
+                black_box(engine.generate_signals(black_box(&patterns), black_box(&candles)));
             result.unwrap()
         })
     });
@@ -83,9 +86,8 @@ fn bench_parallel_signal_generation(c: &mut Criterion) {
 
     c.bench_function("parallel_signal_generation_200_patterns", |b| {
         b.iter(|| {
-            let result = black_box(
-                engine.generate_signals(black_box(&patterns), black_box(&candles))
-            );
+            let result =
+                black_box(engine.generate_signals(black_box(&patterns), black_box(&candles)));
             result.unwrap()
         })
     });
@@ -109,20 +111,21 @@ fn bench_indicator_calculations(c: &mut Criterion) {
     let closes: Vec<Decimal> = candles.iter().map(|c| c.close.value()).collect();
 
     c.bench_function("rsi_calculation", |b| {
-        b.iter(|| {
-            black_box(indicators::rsi(black_box(&closes), black_box(14)))
-        })
+        b.iter(|| black_box(indicators::rsi(black_box(&closes), black_box(14))))
     });
 
     c.bench_function("sma_calculation", |b| {
-        b.iter(|| {
-            black_box(indicators::sma(black_box(&closes), black_box(20)))
-        })
+        b.iter(|| black_box(indicators::sma(black_box(&closes), black_box(20))))
     });
 
     c.bench_function("macd_calculation", |b| {
         b.iter(|| {
-            black_box(indicators::macd(black_box(&closes), black_box(12), black_box(26), black_box(9)))
+            black_box(indicators::macd(
+                black_box(&closes),
+                black_box(12),
+                black_box(26),
+                black_box(9),
+            ))
         })
     });
 }

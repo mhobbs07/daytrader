@@ -1,5 +1,5 @@
 //! Broker abstraction layer
-//! 
+//!
 //! This module provides a trait-based abstraction for broker APIs,
 //! enabling flexibility to switch between different brokers (Alpaca, IBKR, etc.)
 //! without changing business logic.
@@ -48,9 +48,8 @@ pub mod types;
 pub use alpaca::{AlpacaConfig, AlpacaProvider};
 pub use mock::MockBroker;
 pub use traits::{
-    MarketDataProvider, OrderExecutionProvider,
-    Quote, Candle, Position, Order, Account,
-    OrderSide, OrderType, OrderStatus, TimeInForce, Timeframe,
+    Account, Candle, MarketDataProvider, Order, OrderExecutionProvider, OrderSide, OrderStatus,
+    OrderType, Position, Quote, TimeInForce, Timeframe,
 };
 
 pub use types::{

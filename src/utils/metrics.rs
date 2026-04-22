@@ -1,12 +1,14 @@
 //! Error metrics and monitoring dashboard
 
+use crate::utils::error_context::{
+    ERROR_REGISTRY, ErrorMetrics as ContextErrorMetrics, ErrorSeverity,
+};
+use metrics::{counter, gauge, histogram};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
-use metrics::{counter, gauge, histogram};
-use crate::utils::error_context::{ErrorMetrics as ContextErrorMetrics, ErrorSeverity, ERROR_REGISTRY};
-use serde::{Deserialize, Serialize};
+use tokio::time::{Duration, interval};
 
 /// Individual performance metric measurement
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -76,13 +78,14 @@ impl ErrorMetricsCollector {
         states.insert(component.to_string(), state.to_string());
 
         // Record to metrics crate
-        gauge!("daytrader_circuit_breaker_state", "component" => component.to_string())
-            .set(match state {
+        gauge!("daytrader_circuit_breaker_state", "component" => component.to_string()).set(
+            match state {
                 "closed" => 0.0,
                 "open" => 1.0,
                 "half_open" => 0.5,
                 _ => -1.0,
-            });
+            },
+        );
     }
 
     /// Record recovery attempt
@@ -116,7 +119,10 @@ impl ErrorMetricsCollector {
     }
 
     /// Record a performance metric
-    pub async fn record_performance_metric(&self, metric: PerformanceMetric) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn record_performance_metric(
+        &self,
+        metric: PerformanceMetric,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Record the metric to the histogram
         histogram!("daytrader_performance_metric", "name" => metric.name.clone())
             .record(metric.execution_time_ns as f64);
@@ -124,7 +130,10 @@ impl ErrorMetricsCollector {
     }
 
     /// Get recent performance metrics
-    pub async fn get_recent_metrics(&self, _limit: usize) -> Result<Vec<PerformanceMetric>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_recent_metrics(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<PerformanceMetric>, Box<dyn std::error::Error + Send + Sync>> {
         // Simplified implementation - in production this would query from storage
         Ok(Vec::new())
     }
@@ -156,9 +165,11 @@ impl ErrorMetricsCollector {
 
                 // Update global gauges
                 gauge!("daytrader_total_errors").set(snapshot.context_metrics.total_errors as f64);
-                gauge!("daytrader_critical_errors").set(snapshot.context_metrics.critical_count as f64);
+                gauge!("daytrader_critical_errors")
+                    .set(snapshot.context_metrics.critical_count as f64);
                 gauge!("daytrader_error_errors").set(snapshot.context_metrics.error_count as f64);
-                gauge!("daytrader_warning_errors").set(snapshot.context_metrics.warning_count as f64);
+                gauge!("daytrader_warning_errors")
+                    .set(snapshot.context_metrics.warning_count as f64);
 
                 // Log summary if needed
                 if snapshot.context_metrics.critical_count > 0 {
@@ -242,7 +253,8 @@ impl ErrorMonitoringDashboard {
 
         // Components with high error rates
         for (component_severity, count) in &snapshot.error_counts {
-            if *count > 10 { // Threshold for problematic
+            if *count > 10 {
+                // Threshold for problematic
                 if let Some(component) = component_severity.split('_').next() {
                     if !problematic.contains(&component.to_string()) {
                         problematic.push(component.to_string());
@@ -266,23 +278,34 @@ impl ErrorMonitoringDashboard {
 
         // Check for critical errors
         if snapshot.context_metrics.critical_count > 0 {
-            recommendations.push("Immediate attention required: Critical errors detected".to_string());
+            recommendations
+                .push("Immediate attention required: Critical errors detected".to_string());
         }
 
         // Check circuit breaker states
-        let open_circuits: Vec<_> = snapshot.circuit_breaker_states.iter()
+        let open_circuits: Vec<_> = snapshot
+            .circuit_breaker_states
+            .iter()
             .filter(|(_, state)| *state == "open")
             .map(|(comp, _)| comp.clone())
             .collect();
 
         if !open_circuits.is_empty() {
-            recommendations.push(format!("Circuit breakers open for components: {}", open_circuits.join(", ")));
+            recommendations.push(format!(
+                "Circuit breakers open for components: {}",
+                open_circuits.join(", ")
+            ));
         }
 
         // Check recovery success rates
         for (component, rate) in &snapshot.recovery_success_rates {
-            if *rate < 0.5 { // Less than 50% success rate
-                recommendations.push(format!("Low recovery success rate for {}: {:.1}%", component, rate * 100.0));
+            if *rate < 0.5 {
+                // Less than 50% success rate
+                recommendations.push(format!(
+                    "Low recovery success rate for {}: {:.1}%",
+                    component,
+                    rate * 100.0
+                ));
             }
         }
 
@@ -316,10 +339,22 @@ pub async fn init_metrics_collection() {
     collector.start_collection_task().await;
 
     // Register metrics with the metrics crate
-    metrics::describe_counter!("daytrader_errors_total", "Total number of errors by component and severity");
-    metrics::describe_gauge!("daytrader_circuit_breaker_state", "Circuit breaker state (0=closed, 1=open, 0.5=half-open)");
-    metrics::describe_counter!("daytrader_recovery_attempts_total", "Total recovery attempts by component and success");
-    metrics::describe_histogram!("daytrader_recovery_success_rate", "Recovery success rate by component");
+    metrics::describe_counter!(
+        "daytrader_errors_total",
+        "Total number of errors by component and severity"
+    );
+    metrics::describe_gauge!(
+        "daytrader_circuit_breaker_state",
+        "Circuit breaker state (0=closed, 1=open, 0.5=half-open)"
+    );
+    metrics::describe_counter!(
+        "daytrader_recovery_attempts_total",
+        "Total recovery attempts by component and success"
+    );
+    metrics::describe_histogram!(
+        "daytrader_recovery_success_rate",
+        "Recovery success rate by component"
+    );
     metrics::describe_gauge!("daytrader_total_errors", "Total error count");
     metrics::describe_gauge!("daytrader_critical_errors", "Critical error count");
     metrics::describe_gauge!("daytrader_error_errors", "Error severity count");
@@ -331,7 +366,9 @@ pub async fn init_metrics_collection() {
 macro_rules! record_error {
     ($component:expr, $severity:expr) => {
         tokio::spawn(async move {
-            $crate::utils::metrics::METRICS_COLLECTOR.record_error($component, $severity).await;
+            $crate::utils::metrics::METRICS_COLLECTOR
+                .record_error($component, $severity)
+                .await;
         });
     };
 }
@@ -340,7 +377,9 @@ macro_rules! record_error {
 macro_rules! record_circuit_breaker_state {
     ($component:expr, $state:expr) => {
         tokio::spawn(async move {
-            $crate::utils::metrics::METRICS_COLLECTOR.record_circuit_breaker_state($component, $state).await;
+            $crate::utils::metrics::METRICS_COLLECTOR
+                .record_circuit_breaker_state($component, $state)
+                .await;
         });
     };
 }
@@ -349,7 +388,9 @@ macro_rules! record_circuit_breaker_state {
 macro_rules! record_recovery_attempt {
     ($component:expr, $success:expr) => {
         tokio::spawn(async move {
-            $crate::utils::metrics::METRICS_COLLECTOR.record_recovery_attempt($component, $success).await;
+            $crate::utils::metrics::METRICS_COLLECTOR
+                .record_recovery_attempt($component, $success)
+                .await;
         });
     };
 }

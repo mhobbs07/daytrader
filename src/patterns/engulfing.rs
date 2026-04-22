@@ -12,13 +12,12 @@ use crate::brokers::types::{Confidence, PatternName, Price};
 use crate::events::types::{Candle, SignalType};
 use crate::patterns::traits::PatternDetector;
 use crate::patterns::types::{
-    PatternContext, PatternError, PatternParams, PatternResult,
-    VolumeConfirmation, TrendContext
+    PatternContext, PatternError, PatternParams, PatternResult, TrendContext, VolumeConfirmation,
 };
 use crate::patterns::utils::{
-    calculate_engulfing_confidence, calculate_gap_ratio, calculate_volume_ratio,
+    ShadowRatios, calculate_engulfing_confidence, calculate_gap_ratio, calculate_volume_ratio,
     create_volume_confirmation, validate_bearish_engulfing, validate_bullish_engulfing,
-    validate_minimum_data, ShadowRatios
+    validate_minimum_data,
 };
 use rust_decimal::Decimal;
 use std::fmt::Debug;
@@ -51,19 +50,23 @@ impl PatternDetector for BullishEngulfingDetector {
         2
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         validate_minimum_data(candles, 2)?;
 
-        let first = &candles[1];  // Previous candle
+        let first = &candles[1]; // Previous candle
         let second = &candles[0]; // Current candle
-        
+
         if !validate_bullish_engulfing(first, second) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(2);
-        
+
         // Add volume confirmation
         if candles.len() > 2 {
             let volume_ratio = calculate_volume_ratio(second, &candles[2..]);
@@ -72,7 +75,10 @@ impl PatternDetector for BullishEngulfingDetector {
 
         // Add pattern-specific metadata
         let engulfing_ratio = if first.body_size() > Decimal::ZERO {
-            (second.body_size() / first.body_size()).to_string().parse::<f64>().unwrap_or(0.0)
+            (second.body_size() / first.body_size())
+                .to_string()
+                .parse::<f64>()
+                .unwrap_or(0.0)
         } else {
             0.0
         };
@@ -82,8 +88,9 @@ impl PatternDetector for BullishEngulfingDetector {
         let gap_ratio = calculate_gap_ratio(first, second);
 
         let shadow_ratios = ShadowRatios::from_candle(second).unwrap();
-        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
-        
+        let confidence =
+            calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -128,19 +135,23 @@ impl PatternDetector for BearishEngulfingDetector {
         2
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         validate_minimum_data(candles, 2)?;
 
-        let first = &candles[1];  // Previous candle
+        let first = &candles[1]; // Previous candle
         let second = &candles[0]; // Current candle
-        
+
         if !validate_bearish_engulfing(first, second) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(2);
-        
+
         // Add volume confirmation
         if candles.len() > 2 {
             let volume_ratio = calculate_volume_ratio(second, &candles[2..]);
@@ -149,7 +160,10 @@ impl PatternDetector for BearishEngulfingDetector {
 
         // Add pattern-specific metadata
         let engulfing_ratio = if first.body_size() > Decimal::ZERO {
-            (second.body_size() / first.body_size()).to_string().parse::<f64>().unwrap_or(0.0)
+            (second.body_size() / first.body_size())
+                .to_string()
+                .parse::<f64>()
+                .unwrap_or(0.0)
         } else {
             0.0
         };
@@ -159,8 +173,9 @@ impl PatternDetector for BearishEngulfingDetector {
         let gap_ratio = calculate_gap_ratio(first, second);
 
         let shadow_ratios = ShadowRatios::from_candle(second).unwrap();
-        let confidence = calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
-        
+        let confidence =
+            calculate_engulfing_confidence(engulfing_ratio, gap_ratio, &shadow_ratios, &context)?;
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }

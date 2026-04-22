@@ -7,16 +7,16 @@
 //! - Thread-safe concurrent risk evaluations
 
 use daytrader::brokers::types::{OrderId, Price, Quantity, Symbol};
-use daytrader::risk::types::AccountId;
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
     Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, Position,
 };
 use daytrader::risk::RiskEngine;
+use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test PDT edge cases with day trade counting at window boundaries
 #[tokio::test]
@@ -67,11 +67,17 @@ async fn test_pdt_edge_cases() {
     // Should detect PDT violation
     let mut pdt_violations = 0;
     while let Ok(MarketEvent::RiskViolation { violation }) = violation_receiver.try_recv() {
-        if matches!(violation.violation_type, daytrader::events::types::RiskViolationType::PdtLimit) {
+        if matches!(
+            violation.violation_type,
+            daytrader::events::types::RiskViolationType::PdtLimit
+        ) {
             pdt_violations += 1;
         }
     }
-    assert_eq!(pdt_violations, 1, "Should block 4th day trade under PDT rule");
+    assert_eq!(
+        pdt_violations, 1,
+        "Should block 4th day trade under PDT rule"
+    );
 }
 
 /// Test loss limit scenarios with various P&L situations and halt conditions
@@ -162,11 +168,11 @@ async fn test_position_sizing_multiple_positions() {
 
     // Create multiple positions approaching limits
     let positions = vec![
-        ("AAPL", 1000, Decimal::new(15000, 2)),    // $15,000 position
-        ("GOOGL", 50, Decimal::new(250000, 2)),    // $12,500 position
-        ("MSFT", 500, Decimal::new(30000, 2)),     // $15,000 position
-        ("TSLA", 200, Decimal::new(20000, 2)),     // $4,000 position
-        ("NVDA", 100, Decimal::new(40000, 2)),     // $4,000 position
+        ("AAPL", 1000, Decimal::new(15000, 2)), // $15,000 position
+        ("GOOGL", 50, Decimal::new(250000, 2)), // $12,500 position
+        ("MSFT", 500, Decimal::new(30000, 2)),  // $15,000 position
+        ("TSLA", 200, Decimal::new(20000, 2)),  // $4,000 position
+        ("NVDA", 100, Decimal::new(40000, 2)),  // $4,000 position
     ];
 
     let mut total_portfolio_value = Decimal::ZERO;
@@ -190,10 +196,14 @@ async fn test_position_sizing_multiple_positions() {
         sleep(Duration::from_millis(5)).await;
     }
 
-    println!("Total portfolio value: ${}", total_portfolio_value / Decimal::new(100, 2));
+    println!(
+        "Total portfolio value: ${}",
+        total_portfolio_value / Decimal::new(100, 2)
+    );
 
     // Attempt to add a position that would exceed limits
-    let large_order = create_test_order("large-position-order", "AMZN", 1000, Decimal::new(15000, 2));
+    let large_order =
+        create_test_order("large-position-order", "AMZN", 1000, Decimal::new(15000, 2));
     event_bus.publish(MarketEvent::OrderPlaced {
         order: Arc::clone(&large_order),
     });
@@ -203,12 +213,18 @@ async fn test_position_sizing_multiple_positions() {
     // Should detect position size violation
     let mut position_violations = 0;
     while let Ok(MarketEvent::RiskViolation { violation }) = violation_receiver.try_recv() {
-        if matches!(violation.violation_type, daytrader::events::types::RiskViolationType::PositionSizeLimit) {
+        if matches!(
+            violation.violation_type,
+            daytrader::events::types::RiskViolationType::PositionSizeLimit
+        ) {
             position_violations += 1;
         }
     }
 
-    assert!(position_violations > 0, "Should detect position size limit violation");
+    assert!(
+        position_violations > 0,
+        "Should detect position size limit violation"
+    );
 }
 
 /// Test thread-safe concurrent risk evaluations under high load
@@ -232,7 +248,12 @@ async fn test_concurrent_operations() {
     let bus1 = Arc::clone(&event_bus);
     handles.push(tokio::spawn(async move {
         for i in 0..20 {
-            let order = create_test_order(&format!("rapid-order-{}", i), "AAPL", 100, Decimal::new(15000, 2));
+            let order = create_test_order(
+                &format!("rapid-order-{}", i),
+                "AAPL",
+                100,
+                Decimal::new(15000, 2),
+            );
             bus1.publish(MarketEvent::OrderPlaced {
                 order: Arc::clone(&order),
             });
@@ -294,11 +315,17 @@ async fn test_concurrent_operations() {
         violation_count += 1;
     }
 
-    println!("Concurrent operations completed, detected {} violations", violation_count);
+    println!(
+        "Concurrent operations completed, detected {} violations",
+        violation_count
+    );
 
     // System should handle concurrent load without panicking
     // (exact violation count depends on specific rule evaluations)
-    assert!(violation_count >= 0, "Should handle concurrent operations gracefully");
+    assert!(
+        violation_count >= 0,
+        "Should handle concurrent operations gracefully"
+    );
 
     // Verify engine is still functional
     let state = engine.get_risk_state().await;
@@ -358,14 +385,17 @@ async fn test_rapid_pnl_changes() {
         }
     }
 
-    assert!(halt_detected, "Should halt trading when loss limit is exceeded");
+    assert!(
+        halt_detected,
+        "Should halt trading when loss limit is exceeded"
+    );
     assert!(!engine.is_trading_allowed().await);
 }
 
 /// Helper function to create PDT-focused risk configuration
 fn create_strict_pdt_config() -> RiskConfig {
-    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
-    
+    use daytrader::risk::types::{Count, PatternPerformanceThresholds, Percentage};
+
     RiskConfig {
         max_daily_loss_dollars: 1000.0,
         max_daily_loss_percent: 5.0,
@@ -397,8 +427,8 @@ fn create_strict_pdt_config() -> RiskConfig {
 
 /// Helper function to create loss limit focused configuration
 fn create_loss_limit_config() -> RiskConfig {
-    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
-    
+    use daytrader::risk::types::{Count, PatternPerformanceThresholds, Percentage};
+
     RiskConfig {
         max_daily_loss_dollars: 500.0, // Very low limit for testing
         max_daily_loss_percent: 1.0,
@@ -430,14 +460,14 @@ fn create_loss_limit_config() -> RiskConfig {
 
 /// Helper function to create position sizing focused configuration
 fn create_position_sizing_config() -> RiskConfig {
-    use daytrader::risk::types::{PatternPerformanceThresholds, Percentage, Count};
-    
+    use daytrader::risk::types::{Count, PatternPerformanceThresholds, Percentage};
+
     RiskConfig {
         max_daily_loss_dollars: 5000.0,
         max_daily_loss_percent: 10.0,
         halt_trading_on_limit: true,
         max_position_size_dollars: 5000.0, // Low limit for testing
-        max_position_size_percent: 5.0,     // Low percentage for testing
+        max_position_size_percent: 5.0,    // Low percentage for testing
         max_concurrent_positions: 5,
         enforce_pdt_rule: false,
         pdt_min_equity: 25000.0,
@@ -482,12 +512,24 @@ fn create_test_risk_config() -> RiskConfig {
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
         pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds {
-            min_win_rate_short: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
-            min_win_rate_medium: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
-            min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(500, 1)).unwrap(),
+            min_win_rate_short: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(500, 1),
+            )
+            .unwrap(),
+            min_win_rate_medium: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(500, 1),
+            )
+            .unwrap(),
+            min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(
+                500, 1,
+            ))
+            .unwrap(),
             max_consecutive_losses: daytrader::risk::types::Count::new(5).unwrap(),
             min_sample_size: daytrader::risk::types::Count::new(10).unwrap(),
-            auto_disable_threshold: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(300, 1)).unwrap(),
+            auto_disable_threshold: daytrader::risk::types::Percentage::new(
+                rust_decimal::Decimal::new(300, 1),
+            )
+            .unwrap(),
         },
     }
 }

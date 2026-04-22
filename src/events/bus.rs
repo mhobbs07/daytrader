@@ -101,8 +101,8 @@
 
 use crate::events::types::MarketEvent;
 use dashmap::DashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::broadcast;
 use tracing::debug;
 
@@ -127,6 +127,7 @@ use tracing::debug;
 pub struct EventBus {
     sender: broadcast::Sender<MarketEvent>,
     metrics: Arc<EventBusMetrics>,
+    capacity: usize,
 }
 
 /// Metrics for monitoring event bus performance
@@ -136,9 +137,9 @@ pub struct EventBus {
 struct EventBusMetrics {
     events_published: AtomicU64,
     events_dropped: AtomicU64,
-    event_volumes: Arc<DashMap<String, AtomicU64>>,  // Volume by event type
-    total_latency_ns: AtomicU64,  // Cumulative latency in nanoseconds
-    latency_count: AtomicU64,  // Number of latency measurements
+    event_volumes: Arc<DashMap<String, AtomicU64>>, // Volume by event type
+    total_latency_ns: AtomicU64,                    // Cumulative latency in nanoseconds
+    latency_count: AtomicU64,                       // Number of latency measurements
 }
 
 impl EventBusMetrics {
@@ -193,7 +194,8 @@ impl EventBusMetrics {
     /// Records processing latency for an event
     #[inline]
     fn record_latency(&self, latency_ns: u64) {
-        self.total_latency_ns.fetch_add(latency_ns, Ordering::Relaxed);
+        self.total_latency_ns
+            .fetch_add(latency_ns, Ordering::Relaxed);
         self.latency_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -230,6 +232,7 @@ impl EventBus {
         Self {
             sender,
             metrics: Arc::new(EventBusMetrics::new()),
+            capacity,
         }
     }
 
@@ -285,15 +288,16 @@ impl EventBus {
             MarketEvent::SignalGenerated { .. } => "SignalGenerated",
             MarketEvent::EmergencyLiquidation { .. } => "EmergencyLiquidation",
         };
-    
+
+        self.metrics.increment_published();
+        self.metrics.increment_volume(event_type);
+
         match self.sender.send(event) {
             Ok(subscriber_count) => {
-                self.metrics.increment_published();
-                self.metrics.increment_volume(event_type);
-    
+
                 let latency_ns = start.elapsed().as_nanos() as u64;
                 self.metrics.record_latency(latency_ns);
-    
+
                 debug!(
                     subscriber_count = subscriber_count,
                     latency_ns = latency_ns,
@@ -410,7 +414,7 @@ impl EventBus {
     pub fn events_dropped(&self) -> u64 {
         self.metrics.get_dropped()
     }
-    
+
     /// Returns the volume of events by type
     pub fn get_event_volumes(&self) -> Vec<(String, u64)> {
         self.metrics
@@ -419,17 +423,17 @@ impl EventBus {
             .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
             .collect()
     }
-    
+
     /// Returns the average processing latency in nanoseconds
     pub fn get_average_latency_ns(&self) -> f64 {
         self.metrics.get_average_latency_ns()
     }
-
 }
 
 impl std::fmt::Debug for EventBus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventBus")
+            .field("capacity", &self.capacity)
             .field("subscriber_count", &self.subscriber_count())
             .field("events_published", &self.events_published())
             .field("events_dropped", &self.events_dropped())
@@ -444,7 +448,7 @@ mod tests {
     use crate::events::types::{PatternSignal, SignalType};
     use chrono::Utc;
     use rust_decimal::Decimal;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     #[tokio::test]
     async fn test_event_bus_basic() {

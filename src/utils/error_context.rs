@@ -1,12 +1,12 @@
 //! Enhanced error context system with correlation IDs, tracing, and context accumulation
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
 
 /// Severity levels for error logging
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ impl ErrorContext {
     pub fn with_correlation_id(
         correlation_id: CorrelationId,
         component: impl Into<String>,
-        operation: impl Into<String>
+        operation: impl Into<String>,
     ) -> Self {
         Self {
             correlation_id,
@@ -134,7 +134,8 @@ impl ErrorContext {
     /// Chain context from another error context
     pub fn chain_from(mut self, other: &ErrorContext) -> Self {
         self.call_stack.extend(other.call_stack.clone());
-        self.call_stack.push(format!("{}::{}", other.component, other.operation));
+        self.call_stack
+            .push(format!("{}::{}", other.component, other.operation));
         self.metadata.extend(other.metadata.clone());
         self
     }
@@ -165,14 +166,22 @@ impl ContextualError {
     }
 
     /// Create from existing error with additional context
-    pub fn with_context(error: impl Into<anyhow::Error>, component: impl Into<String>, operation: impl Into<String>) -> Self {
+    pub fn with_context(
+        error: impl Into<anyhow::Error>,
+        component: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> Self {
         Self::new(error, ErrorContext::new(component, operation))
     }
 }
 
 impl fmt::Display for ContextualError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}::{} - {}", self.context.correlation_id, self.context.component, self.context.operation, self.error)
+        write!(
+            f,
+            "[{}] {}::{} - {}",
+            self.context.correlation_id, self.context.component, self.context.operation, self.error
+        )
     }
 }
 
@@ -199,7 +208,8 @@ impl ErrorContextRegistry {
     /// Register an error context
     pub async fn register_error(&self, context: ErrorContext) {
         let mut errors = self.errors.write().await;
-        errors.entry(context.correlation_id.clone())
+        errors
+            .entry(context.correlation_id.clone())
             .or_insert_with(Vec::new)
             .push(context);
     }
@@ -227,7 +237,10 @@ impl ErrorContextRegistry {
                 }
 
                 // Count by component
-                *metrics.errors_by_component.entry(context.component.clone()).or_insert(0) += 1;
+                *metrics
+                    .errors_by_component
+                    .entry(context.component.clone())
+                    .or_insert(0) += 1;
             }
         }
 

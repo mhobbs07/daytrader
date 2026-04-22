@@ -31,10 +31,11 @@
 
 use crate::brokers::types::Symbol;
 use crate::db::repositories::SignalRepository;
-use crate::events::{EventBus, MarketEvent, filters};
-use crate::patterns::signals::SignalEngine;
-use crate::patterns::registry::PatternRegistry;
 use crate::events::types::{Candle, PatternSignal, SignalType};
+use crate::events::{EventBus, MarketEvent, filters};
+use crate::patterns::registry::PatternRegistry;
+use crate::patterns::signals::SignalEngine;
+use crate::patterns::types::PatternResult;
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -42,7 +43,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 /// Cache for recent candles per symbol
 ///
@@ -73,10 +74,13 @@ impl CandleCache {
     ///
     /// If the cache exceeds the maximum size, the oldest candle is removed.
     pub fn add_candle(&mut self, symbol: &str, candle: Candle) {
-        let deque = self.candles.entry(symbol.to_string()).or_insert_with(VecDeque::new);
-        
+        let deque = self
+            .candles
+            .entry(symbol.to_string())
+            .or_insert_with(VecDeque::new);
+
         deque.push_back(candle);
-        
+
         // Remove oldest candle if we exceed the limit
         if deque.len() > self.max_candles_per_symbol {
             deque.pop_front();
@@ -89,14 +93,7 @@ impl CandleCache {
     pub fn get_recent_candles(&self, symbol: &str, count: usize) -> Vec<Candle> {
         self.candles
             .get(symbol)
-            .map(|deque| {
-                deque.iter()
-                    .rev()
-                    .take(count)
-                    .rev()
-                    .cloned()
-                    .collect()
-            })
+            .map(|deque| deque.iter().rev().take(count).rev().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -152,7 +149,8 @@ impl PatternPipelineMetrics {
     /// Records a candle being processed
     pub fn record_candle_processed(&self, duration: Duration) {
         self.candles_processed.fetch_add(1, Ordering::Relaxed);
-        self.total_processing_time_ns.fetch_add(duration.as_nanos() as u64, Ordering::Relaxed);
+        self.total_processing_time_ns
+            .fetch_add(duration.as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// Records a pattern detection
@@ -179,14 +177,18 @@ impl PatternPipelineMetrics {
     pub fn get_statistics(&self) -> PipelineStatistics {
         let candles = self.candles_processed.load(Ordering::Relaxed);
         let total_time_ns = self.total_processing_time_ns.load(Ordering::Relaxed);
-        
+
         PipelineStatistics {
             candles_processed: candles,
             patterns_detected: self.patterns_detected.load(Ordering::Relaxed),
             signals_generated: self.signals_generated.load(Ordering::Relaxed),
             database_writes: self.database_writes.load(Ordering::Relaxed),
             processing_errors: self.processing_errors.load(Ordering::Relaxed),
-            avg_processing_time_ns: if candles > 0 { total_time_ns / candles } else { 0 },
+            avg_processing_time_ns: if candles > 0 {
+                total_time_ns / candles
+            } else {
+                0
+            },
         }
     }
 }
@@ -273,7 +275,8 @@ impl PatternStreamingPipeline {
                 signal_repository,
                 candle_cache,
                 metrics,
-            ).await;
+            )
+            .await;
         });
 
         self.task_handle = Some(handle);
@@ -318,10 +321,16 @@ impl PatternStreamingPipeline {
                 &signal_repository,
                 &event_bus,
                 &candle_cache,
-            ).await {
+            )
+            .await
+            {
                 Ok(_) => {
                     metrics.record_candle_processed(start_time.elapsed());
-                    debug!("Processed candle for {} in {:?}", symbol.as_str(), start_time.elapsed());
+                    debug!(
+                        "Processed candle for {} in {:?}",
+                        symbol.as_str(),
+                        start_time.elapsed()
+                    );
                 }
                 Err(e) => {
                     metrics.record_error();
@@ -357,7 +366,10 @@ impl PatternStreamingPipeline {
 
         // Need at least a few candles for pattern detection
         if cached_candles.len() < 3 {
-            debug!("Not enough candles for pattern detection: {} (need 3+)", cached_candles.len());
+            debug!(
+                "Not enough candles for pattern detection: {} (need 3+)",
+                cached_candles.len()
+            );
             return Ok(());
         }
 
@@ -390,8 +402,11 @@ impl PatternStreamingPipeline {
         // Step 5: Generate signals from patterns
         if !pattern_results.is_empty() {
             let mut engine = signal_engine.write().await;
-            
-            match engine.generate_signals(&pattern_results, &cached_candles).await {
+
+            match engine
+                .generate_signals(&pattern_results, &cached_candles)
+                .await
+            {
                 Ok(signals) => {
                     for signal in signals {
                         // Step 6: Publish SignalGenerated events
@@ -412,7 +427,10 @@ impl PatternStreamingPipeline {
                         tokio::spawn(async move {
                             match repo.store_signal(&signal_clone).await {
                                 Ok(_) => {
-                                    debug!("Persisted signal for {} to database", signal_clone.symbol.as_str());
+                                    debug!(
+                                        "Persisted signal for {} to database",
+                                        signal_clone.symbol.as_str()
+                                    );
                                 }
                                 Err(e) => {
                                     error!("Failed to persist signal to database: {:?}", e);
@@ -506,7 +524,8 @@ impl SignalStreamingPipeline {
     ) {
         // Subscribe to market data and pattern events
         let mut market_stream = filters::filter_candles(filters::to_stream(event_bus.subscribe()));
-        let mut pattern_stream = filters::filter_patterns(filters::to_stream(event_bus.subscribe()));
+        let mut pattern_stream =
+            filters::filter_patterns(filters::to_stream(event_bus.subscribe()));
 
         // Buffer for accumulating data
         let mut candle_buffer = Vec::new();
@@ -571,11 +590,17 @@ impl SignalStreamingPipeline {
     async fn process_batch(
         signal_engine: &Arc<RwLock<SignalEngine>>,
         event_bus: &EventBus,
-        candle_buffer: &[(crate::brokers::types::Symbol, Arc<crate::events::types::Candle>)],
+        candle_buffer: &[(
+            crate::brokers::types::Symbol,
+            Arc<crate::events::types::Candle>,
+        )],
         pattern_buffer: &[crate::events::types::PatternSignal],
     ) {
         // Convert candle buffer to slice of candles
-        let candles: Vec<_> = candle_buffer.iter().map(|(_, candle)| (**candle).clone()).collect();
+        let candles: Vec<_> = candle_buffer
+            .iter()
+            .map(|(_, candle)| (**candle).clone())
+            .collect();
 
         // Convert PatternSignals to PatternResults for signal generation
         let pattern_results: Vec<crate::patterns::types::PatternResult> = pattern_buffer
@@ -679,9 +704,9 @@ pub enum StreamingError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brokers::types::{Confidence, Price, Symbol};
     use crate::events::EventBus;
-    use crate::brokers::types::{Symbol, Confidence, Price};
-    use crate::events::types::{Candle};
+    use crate::events::types::Candle;
     use rust_decimal::Decimal;
     use std::time::Duration;
 
@@ -695,7 +720,7 @@ mod tests {
     #[test]
     fn test_candle_cache_add_and_retrieve() {
         let mut cache = CandleCache::new(100);
-        
+
         let candle = Candle {
             symbol: Symbol::new("AAPL").unwrap(),
             timestamp: chrono::Utc::now(),
@@ -707,10 +732,10 @@ mod tests {
         };
 
         cache.add_candle("AAPL", candle);
-        
+
         assert_eq!(cache.symbol_count(), 1);
         assert_eq!(cache.total_candles(), 1);
-        
+
         let retrieved = cache.get_all_candles("AAPL");
         assert_eq!(retrieved.len(), 1);
     }
@@ -718,7 +743,7 @@ mod tests {
     #[test]
     fn test_candle_cache_max_size() {
         let mut cache = CandleCache::new(5);
-        
+
         // Add more candles than max
         for i in 0..10 {
             let candle = Candle {
@@ -736,7 +761,7 @@ mod tests {
         // Should only keep the last 5
         let candles = cache.get_all_candles("AAPL");
         assert_eq!(candles.len(), 5);
-        
+
         // First candle should have open price of 105 (candle 5)
         assert_eq!(candles[0].open.value(), Decimal::new(105, 0));
     }
@@ -744,7 +769,7 @@ mod tests {
     #[test]
     fn test_candle_cache_get_recent() {
         let mut cache = CandleCache::new(100);
-        
+
         // Add 10 candles
         for i in 0..10 {
             let candle = Candle {
@@ -762,7 +787,7 @@ mod tests {
         // Get last 3 candles
         let recent = cache.get_recent_candles("AAPL", 3);
         assert_eq!(recent.len(), 3);
-        
+
         // Should be candles 7, 8, 9
         assert_eq!(recent[0].open.value(), Decimal::new(107, 0));
         assert_eq!(recent[2].open.value(), Decimal::new(109, 0));
@@ -771,14 +796,14 @@ mod tests {
     #[test]
     fn test_pipeline_metrics() {
         let metrics = PatternPipelineMetrics::new();
-        
+
         metrics.record_candle_processed(Duration::from_millis(10));
         metrics.record_pattern_detected();
         metrics.record_signal_generated();
         metrics.record_error();
 
         let stats = metrics.get_statistics();
-        
+
         assert_eq!(stats.candles_processed, 1);
         assert_eq!(stats.patterns_detected, 1);
         assert_eq!(stats.signals_generated, 1);
@@ -827,7 +852,10 @@ mod tests {
         let pipeline = SignalStreamingPipeline::new(event_bus, config);
 
         assert!(pipeline.start().await.is_ok());
-        assert!(matches!(pipeline.start().await, Err(StreamingError::AlreadyRunning)));
+        assert!(matches!(
+            pipeline.start().await,
+            Err(StreamingError::AlreadyRunning)
+        ));
     }
 
     #[tokio::test]
@@ -836,7 +864,10 @@ mod tests {
         let config = StreamingConfig::default();
         let pipeline = SignalStreamingPipeline::new(event_bus, config);
 
-        assert!(matches!(pipeline.stop().await, Err(StreamingError::NotRunning)));
+        assert!(matches!(
+            pipeline.stop().await,
+            Err(StreamingError::NotRunning)
+        ));
     }
 }
 
@@ -928,9 +959,7 @@ impl ParallelPatternProcessor {
             .map(|(symbol, candles)| {
                 let registry = self.pattern_registry.clone();
                 async move {
-                    let results = registry
-                        .detect_all(&candles, None)
-                        .await;
+                    let results = registry.detect_all(&candles, None).await;
                     (symbol, results)
                 }
             })
@@ -961,9 +990,7 @@ impl ParallelPatternProcessor {
                 let registry = self.pattern_registry.clone();
                 let params = params.clone();
                 async move {
-                    let results = registry
-                        .detect_all(&candles, Some(&params))
-                        .await;
+                    let results = registry.detect_all(&candles, Some(&params)).await;
                     (symbol, results)
                 }
             })
@@ -981,7 +1008,9 @@ impl ParallelPatternProcessor {
 #[cfg(test)]
 mod parallel_tests {
     use super::*;
+    use crate::brokers::types::Price;
     use crate::patterns::types::PatternParams;
+    use rust_decimal::Decimal;
 
     fn create_test_candle(symbol: Symbol) -> Candle {
         Candle {
@@ -999,7 +1028,7 @@ mod parallel_tests {
     async fn test_parallel_processor_creation() {
         let registry = Arc::new(PatternRegistry::new());
         let processor = ParallelPatternProcessor::new(registry, 4);
-        
+
         assert_eq!(processor.worker_count(), 4);
     }
 
@@ -1007,7 +1036,7 @@ mod parallel_tests {
     async fn test_parallel_processing_multiple_symbols() {
         let registry = Arc::new(PatternRegistry::new());
         let processor = ParallelPatternProcessor::new(registry, 4);
-        
+
         // Create test data for multiple symbols
         let mut symbol_candles = Vec::new();
         for i in 0..10 {
@@ -1015,9 +1044,9 @@ mod parallel_tests {
             let candles = vec![create_test_candle(symbol.clone())];
             symbol_candles.push((symbol, candles));
         }
-        
+
         let results = processor.process_symbols_parallel(symbol_candles).await;
-        
+
         assert_eq!(results.len(), 10);
     }
 
@@ -1025,14 +1054,16 @@ mod parallel_tests {
     async fn test_parallel_processing_with_params() {
         let registry = Arc::new(PatternRegistry::new());
         let processor = ParallelPatternProcessor::new(registry, 4);
-        
+
         let symbol = Symbol::new("AAPL").unwrap();
         let candles = vec![create_test_candle(symbol.clone())];
         let symbol_candles = vec![(symbol, candles)];
-        
+
         let params = PatternParams::new().with_min_confidence(0.7);
-        let results = processor.process_symbols_with_params(symbol_candles, params).await;
-        
+        let results = processor
+            .process_symbols_with_params(symbol_candles, params)
+            .await;
+
         assert_eq!(results.len(), 1);
     }
 
@@ -1040,7 +1071,7 @@ mod parallel_tests {
     async fn test_default_worker_count() {
         let registry = Arc::new(PatternRegistry::new());
         let processor = ParallelPatternProcessor::with_default_workers(registry);
-        
+
         // Should match number of CPUs
         assert!(processor.worker_count() > 0);
     }

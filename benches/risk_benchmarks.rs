@@ -6,18 +6,16 @@
 //! - Memory usage patterns
 //! - Event processing throughput
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use daytrader::brokers::types::{OrderId, Quantity, Symbol};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
-use daytrader::events::types::{
-    MarketEvent, Order, OrderSide, OrderStatus, OrderType,
-};
-use daytrader::risk::types::AccountId;
-use daytrader::risk::rules::TradeContext;
+use daytrader::events::types::{MarketEvent, Order, OrderSide, OrderStatus, OrderType};
 use daytrader::risk::limits::DailyLossTracker;
 use daytrader::risk::pdt::PdtEnforcer;
 use daytrader::risk::rules::RiskRuleEngine;
+use daytrader::risk::rules::TradeContext;
+use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -39,7 +37,11 @@ pub fn bench_rule_evaluation_speed(c: &mut Criterion) {
     c.bench_function("rule_evaluation_speed", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let _ = black_box(rule_engine.evaluate_violations_only(black_box(context.clone())).await);
+                let _ = black_box(
+                    rule_engine
+                        .evaluate_violations_only(black_box(context.clone()))
+                        .await,
+                );
             });
         });
     });
@@ -127,7 +129,7 @@ fn bench_event_processing_throughput(c: &mut Criterion) {
         config.clone(),
         Arc::clone(&event_bus),
         account_id.clone(),
-        initial_equity
+        initial_equity,
     );
 
     c.bench_function("event_processing_throughput", |b| {
@@ -138,7 +140,7 @@ fn bench_event_processing_throughput(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    initial_equity
+                    initial_equity,
                 );
                 let bus = Arc::clone(&event_bus);
 
@@ -170,7 +172,7 @@ fn bench_pdt_evaluation(c: &mut Criterion) {
     let config = create_benchmark_risk_config();
     let enforcer = PdtEnforcer::new(
         daytrader::risk::pdt::PdtConfig::from_config(&config),
-        Decimal::new(5000000, 2)
+        Decimal::new(5000000, 2),
     );
 
     c.bench_function("pdt_rule_evaluation", |b| {
@@ -203,7 +205,7 @@ fn bench_position_sizing(c: &mut Criterion) {
     let config = create_benchmark_risk_config();
     let sizer = daytrader::risk::position_sizing::PositionSizer::from_config(
         &config,
-        Decimal::new(10000000, 2)
+        Decimal::new(10000000, 2),
     );
 
     c.bench_function("position_sizing_calculations", |b| {
@@ -230,7 +232,7 @@ fn bench_full_risk_workflow(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    initial_equity
+                    initial_equity,
                 );
 
                 // Subscribe to violations
@@ -353,7 +355,7 @@ fn bench_risk_engine_startup(c: &mut Criterion) {
                     config,
                     Arc::clone(&event_bus),
                     account_id,
-                    Decimal::new(10000000, 2)
+                    Decimal::new(10000000, 2),
                 );
 
                 let _ = black_box(engine.start().await);
@@ -376,7 +378,7 @@ fn bench_position_tracking_high_frequency(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    Decimal::new(10000000, 2)
+                    Decimal::new(10000000, 2),
                 );
                 engine.start().await.unwrap();
 
@@ -413,14 +415,15 @@ fn bench_pdt_large_history(c: &mut Criterion) {
                 let config = create_benchmark_risk_config();
                 let enforcer = PdtEnforcer::new(
                     daytrader::risk::pdt::PdtConfig::from_config(&config),
-                    Decimal::new(5000000, 2)
+                    Decimal::new(5000000, 2),
                 );
 
                 // Simulate large day trade history
                 let base_date = chrono::Utc::now().date_naive();
                 for i in 0..100 {
                     let trade_date = base_date - chrono::Duration::days(i);
-                    for _ in 0..3 { // Multiple trades per day
+                    for _ in 0..3 {
+                        // Multiple trades per day
                         enforcer.record_day_trade(trade_date).await.unwrap();
                     }
                 }
@@ -446,18 +449,22 @@ fn bench_complex_portfolio_risk(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    Decimal::new(10000000, 2)
+                    Decimal::new(10000000, 2),
                 );
                 engine.start().await.unwrap();
 
                 // Create complex portfolio with many positions
-                let symbols = ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "AMZN", "META", "NFLX"];
+                let symbols = [
+                    "AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "AMZN", "META", "NFLX",
+                ];
                 for (i, symbol) in symbols.iter().enumerate() {
                     let position = daytrader::events::types::Position {
                         symbol: Symbol::new(symbol).unwrap(),
                         quantity: Quantity::new(100 * (i + 1) as u32).unwrap(),
-                        average_entry_price: Price::new(Decimal::new(10000 + i as i64 * 1000, 2)).unwrap(),
-                        current_price: Price::new(Decimal::new(10500 + i as i64 * 1000, 2)).unwrap(),
+                        average_entry_price: Price::new(Decimal::new(10000 + i as i64 * 1000, 2))
+                            .unwrap(),
+                        current_price: Price::new(Decimal::new(10500 + i as i64 * 1000, 2))
+                            .unwrap(),
                         unrealized_pl: Decimal::new(500 * (i + 1) as i64, 2),
                         realized_pl: Decimal::ZERO,
                         opened_at: chrono::Utc::now(),
@@ -491,7 +498,7 @@ fn bench_emergency_liquidation_decisions(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    Decimal::new(10000000, 2)
+                    Decimal::new(10000000, 2),
                 );
                 engine.start().await.unwrap();
 
@@ -535,7 +542,7 @@ fn bench_pattern_risk_evaluation(c: &mut Criterion) {
                     config.clone(),
                     Arc::clone(&event_bus),
                     account_id.clone(),
-                    Decimal::new(10000000, 2)
+                    Decimal::new(10000000, 2),
                 );
                 engine.start().await.unwrap();
 
@@ -581,7 +588,8 @@ fn create_benchmark_risk_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 
@@ -605,7 +613,8 @@ fn create_emergency_benchmark_config() -> RiskConfig {
         emergency_liquidate_threshold: 1000.0, // Lower threshold for emergency testing
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 

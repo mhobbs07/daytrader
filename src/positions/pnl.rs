@@ -180,7 +180,7 @@ impl PnLCalculator {
         existing_quantity: u32,
         new_fill_price: Price,
         new_fill_quantity: u32,
-    ) -> Price {
+    ) -> Result<Price, PerformanceError> {
         let existing_cost = existing_avg_price.value() * Decimal::from(existing_quantity);
         let new_cost = new_fill_price.value() * Decimal::from(new_fill_quantity);
         let total_cost = existing_cost + new_cost;
@@ -188,6 +188,7 @@ impl PnLCalculator {
         let total_quantity = existing_quantity + new_fill_quantity;
 
         Price::new(total_cost / Decimal::from(total_quantity))
+            .map_err(|e| PerformanceError::CalculationError(e.to_string()))
     }
 
     /// Calculate portfolio-level P&L from multiple positions
@@ -197,10 +198,7 @@ impl PnLCalculator {
     ///
     /// # Returns
     /// Portfolio P&L summary
-    pub fn calculate_portfolio_pl<'a, I>(
-        &self,
-        positions: I,
-    ) -> PortfolioPnL
+    pub fn calculate_portfolio_pl<'a, I>(&self, positions: I) -> PortfolioPnL
     where
         I: Iterator<Item = (Decimal, u32, Price)>,
     {
@@ -270,7 +268,7 @@ mod tests {
         let calc = create_calculator();
         let cost_basis = dec!(1000.00);
         let quantity = 10;
-        let current_price = Price::new(dec!(105.00));
+        let current_price = Price::new(dec!(105.00)).unwrap();
 
         let pl = calc.calculate_unrealized_pl(cost_basis, quantity, current_price);
         assert_eq!(pl, dec!(50.00)); // (105 * 10) - 1000 = 50
@@ -281,7 +279,7 @@ mod tests {
         let calc = create_calculator();
         let cost_basis = dec!(1000.00);
         let quantity = 10;
-        let current_price = Price::new(dec!(95.00));
+        let current_price = Price::new(dec!(95.00)).unwrap();
 
         let pl = calc.calculate_unrealized_pl(cost_basis, quantity, current_price);
         assert_eq!(pl, dec!(-50.00)); // (95 * 10) - 1000 = -50
@@ -292,7 +290,7 @@ mod tests {
         let calc = create_calculator();
         let cost_basis = dec!(1000.00);
         let quantity = 10;
-        let current_price = Price::new(dec!(110.00));
+        let current_price = Price::new(dec!(110.00)).unwrap();
 
         let pl_pct = calc.calculate_unrealized_pl_percent(cost_basis, quantity, current_price);
         assert_eq!(pl_pct, dec!(10.00)); // ((1100 - 1000) / 1000) * 100 = 10%
@@ -301,9 +299,9 @@ mod tests {
     #[test]
     fn test_realized_pl_with_commission() {
         let calc = create_calculator();
-        let entry_price = Price::new(dec!(100.00));
-        let exit_price = Price::new(dec!(110.00));
-        let quantity = Quantity::new(10);
+        let entry_price = Price::new(dec!(100.00)).unwrap();
+        let exit_price = Price::new(dec!(110.00)).unwrap();
+        let quantity = Quantity::new(10).unwrap();
         let commissions = dec!(2.00);
 
         let pl = calc.calculate_realized_pl(entry_price, exit_price, quantity, commissions);
@@ -317,9 +315,9 @@ mod tests {
             tax_lot_method: TaxLotMethod::FIFO,
         };
         let calc = PnLCalculator::new(config);
-        let entry_price = Price::new(dec!(100.00));
-        let exit_price = Price::new(dec!(110.00));
-        let quantity = Quantity::new(10);
+        let entry_price = Price::new(dec!(100.00)).unwrap();
+        let exit_price = Price::new(dec!(110.00)).unwrap();
+        let quantity = Quantity::new(10).unwrap();
         let commissions = dec!(2.00);
 
         let pl = calc.calculate_realized_pl(entry_price, exit_price, quantity, commissions);
@@ -329,12 +327,14 @@ mod tests {
     #[test]
     fn test_average_entry_calculation() {
         let calc = create_calculator();
-        let existing_avg = Price::new(dec!(100.00));
+        let existing_avg = Price::new(dec!(100.00)).unwrap();
         let existing_qty = 10;
-        let new_price = Price::new(dec!(110.00));
+        let new_price = Price::new(dec!(110.00)).unwrap();
         let new_qty = 5;
 
-        let new_avg = calc.calculate_avg_entry(existing_avg, existing_qty, new_price, new_qty);
+        let new_avg = calc
+            .calculate_avg_entry(existing_avg, existing_qty, new_price, new_qty)
+            .unwrap();
         // (100 * 10 + 110 * 5) / 15 = (1000 + 550) / 15 = 103.33...
         assert!(new_avg.value() > dec!(103.33) && new_avg.value() < dec!(103.34));
     }
@@ -343,16 +343,16 @@ mod tests {
     fn test_portfolio_pl() {
         let calc = create_calculator();
         let positions = vec![
-            (dec!(1000.00), 10, Price::new(dec!(105.00))), // +50 unrealized
-            (dec!(2000.00), 20, Price::new(dec!(95.00))),  // -100 unrealized
-            (dec!(1500.00), 15, Price::new(dec!(102.00))), // +30 unrealized
+            (dec!(1000.00), 10u32, Price::new(dec!(105.00)).unwrap()), // +50 unrealized
+            (dec!(2000.00), 20u32, Price::new(dec!(95.00)).unwrap()),  // -100 unrealized
+            (dec!(1500.00), 15u32, Price::new(dec!(102.00)).unwrap()), // +30 unrealized
         ];
 
         let portfolio_pl = calc.calculate_portfolio_pl(positions.into_iter());
 
         assert_eq!(portfolio_pl.total_cost, dec!(4500.00));
-        assert_eq!(portfolio_pl.total_value, dec!(4380.00)); // 1050 + 1900 + 1530
-        assert_eq!(portfolio_pl.unrealized_pl, dec!(-120.00));
+        assert_eq!(portfolio_pl.total_value, dec!(4480.00)); // 1050 + 1900 + 1530
+        assert_eq!(portfolio_pl.unrealized_pl, dec!(-20.00));
         assert_eq!(portfolio_pl.position_count, 3);
     }
 
@@ -360,7 +360,7 @@ mod tests {
     fn test_market_value_calculation() {
         let calc = create_calculator();
         let quantity = 50;
-        let price = Price::new(dec!(123.45));
+        let price = Price::new(dec!(123.45)).unwrap();
 
         let value = calc.calculate_market_value(quantity, price);
         assert_eq!(value, dec!(6172.50));
@@ -371,7 +371,7 @@ mod tests {
         let calc = create_calculator();
         let cost_basis = Decimal::ZERO;
         let quantity = 10;
-        let current_price = Price::new(dec!(100.00));
+        let current_price = Price::new(dec!(100.00)).unwrap();
 
         let pl_pct = calc.calculate_unrealized_pl_percent(cost_basis, quantity, current_price);
         assert_eq!(pl_pct, Decimal::ZERO);

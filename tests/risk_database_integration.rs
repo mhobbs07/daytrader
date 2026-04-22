@@ -65,6 +65,7 @@ fn create_test_risk_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }

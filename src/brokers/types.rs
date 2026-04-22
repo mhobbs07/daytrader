@@ -524,7 +524,7 @@ mod tests {
         assert!(Symbol::new("aapl").is_ok()); // Should normalize to uppercase
         assert!(Symbol::new("").is_err());
         assert!(Symbol::new("TOOLONGSYMBOL").is_err());
-        
+
         let symbol = Symbol::new("aapl").unwrap();
         assert_eq!(symbol.as_str(), "AAPL");
     }
@@ -534,7 +534,7 @@ mod tests {
         assert!(Price::new(Decimal::new(15050, 2)).is_ok());
         assert!(Price::new(Decimal::ZERO).is_err());
         assert!(Price::new(Decimal::new(-100, 0)).is_err());
-        
+
         let price = Price::new(Decimal::new(15050, 2)).unwrap();
         assert_eq!(price.value(), Decimal::new(15050, 2));
     }
@@ -544,7 +544,7 @@ mod tests {
         assert!(Quantity::new(100).is_ok());
         assert!(Quantity::new(1).is_ok());
         assert!(Quantity::new(0).is_err());
-        
+
         let qty = Quantity::new(100).unwrap();
         assert_eq!(qty.value(), 100);
     }
@@ -556,7 +556,7 @@ mod tests {
         assert!(Confidence::new(1.0).is_ok());
         assert!(Confidence::new(-0.1).is_err());
         assert!(Confidence::new(1.1).is_err());
-        
+
         let conf = Confidence::new(0.75).unwrap();
         assert_eq!(conf.value(), 0.75);
         assert_eq!(conf.as_percentage(), 75.0);

@@ -43,7 +43,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-
 /// Market event enum containing all possible events in the system
 ///
 /// This is the primary event type distributed through the event bus.
@@ -63,10 +62,7 @@ pub enum MarketEvent {
     ///
     /// Published when a new candle is received from the market data feed.
     /// Uses Arc to avoid cloning large candle data.
-    NewCandle {
-        symbol: Symbol,
-        candle: Arc<Candle>,
-    },
+    NewCandle { symbol: Symbol, candle: Arc<Candle> },
 
     /// Quote (bid/ask) update received
     ///
@@ -87,7 +83,9 @@ pub enum MarketEvent {
     ///
     /// Published when the signal engine generates a composite trading signal
     /// from multiple pattern and indicator inputs.
-    SignalGenerated { signal: crate::patterns::TradingSignal },
+    SignalGenerated {
+        signal: crate::patterns::TradingSignal,
+    },
 
     // ========================================
     // Order Events

@@ -7,7 +7,9 @@ use crate::brokers::traits::{OrderSide, OrderType};
 use crate::brokers::types::{OrderId, PatternName, Price};
 use crate::events::{EventBus, MarketEvent};
 use crate::execution::strategy::{ExecutionContext, ExecutionStrategy};
-use crate::execution::{AutomationDecision, ExecutionError, ExecutionEvent, PatternPerformance, PerformanceThresholds};
+use crate::execution::{
+    AutomationDecision, ExecutionError, ExecutionEvent, PatternPerformance, PerformanceThresholds,
+};
 use crate::orders::engine::OrderEngine;
 use crate::orders::types::OrderRequest;
 use crate::patterns::signals::TradingSignal;
@@ -16,11 +18,12 @@ use crate::risk::engine::RiskEngine;
 use chrono::Utc;
 use dashmap::DashMap;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 // ============================================================================
 // Execution Engine
@@ -122,8 +125,8 @@ pub struct ExecutionConfig {
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self {
-            auto_execution_enabled: false, // Start disabled for safety
-            min_auto_confidence: Decimal::new(75, 2), // 0.75
+            auto_execution_enabled: false,             // Start disabled for safety
+            min_auto_confidence: Decimal::new(75, 2),  // 0.75
             manual_confirm_below: Decimal::new(65, 2), // 0.65
             pattern_auto_enabled: HashMap::new(),
             max_orders_per_day: 20,
@@ -175,7 +178,8 @@ impl ExecutionMetrics {
 
     /// Records execution time
     pub fn record_exec_time(&self, duration_ms: u64) {
-        self.total_exec_time_ms.fetch_add(duration_ms, Ordering::SeqCst);
+        self.total_exec_time_ms
+            .fetch_add(duration_ms, Ordering::SeqCst);
         self.total_signals.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -232,10 +236,7 @@ impl ExecutionEngine {
             pattern_automation.insert(pattern_name.clone(), *enabled);
 
             // Initialize performance tracking
-            pattern_performance.insert(
-                pattern_name.clone(),
-                PatternPerformance::new(pattern_name),
-            );
+            pattern_performance.insert(pattern_name.clone(), PatternPerformance::new(pattern_name));
         }
 
         Ok(Self {
@@ -292,7 +293,10 @@ impl ExecutionEngine {
     }
 
     /// Handles an incoming trading signal
-    async fn handle_signal(&self, signal: TradingSignal) -> Result<Option<OrderId>, ExecutionError> {
+    async fn handle_signal(
+        &self,
+        signal: TradingSignal,
+    ) -> Result<Option<OrderId>, ExecutionError> {
         tracing::debug!(
             "Processing signal: {} {} (confidence: {:.2})",
             signal.symbol.as_str(),
@@ -302,14 +306,18 @@ impl ExecutionEngine {
 
         // 1. Check if automation is globally enabled
         if !self.is_automation_enabled() {
-            self.publish_manual_review_event(&signal, "Global automation disabled").await;
+            self.publish_manual_review_event(&signal, "Global automation disabled")
+                .await;
             self.metrics.increment_manual_review();
             return Ok(None);
         }
 
         // 2. Check signal confidence threshold
-        if signal.confidence.value() < self.config.min_auto_confidence {
-            self.publish_manual_review_event(&signal, "Confidence below auto threshold").await;
+        if Decimal::from_f64_retain(signal.confidence.value()).unwrap_or(Decimal::ZERO)
+            < self.config.min_auto_confidence
+        {
+            self.publish_manual_review_event(&signal, "Confidence below auto threshold")
+                .await;
             self.metrics.increment_manual_review();
             return Ok(None);
         }
@@ -317,7 +325,8 @@ impl ExecutionEngine {
         // 3. Check pattern-specific automation
         if let Some(pattern_name) = self.extract_pattern_name(&signal) {
             if !self.is_pattern_auto_enabled(&pattern_name) {
-                self.publish_manual_review_event(&signal, "Pattern automation disabled").await;
+                self.publish_manual_review_event(&signal, "Pattern automation disabled")
+                    .await;
                 self.metrics.increment_manual_review();
                 return Ok(None);
             }
@@ -341,11 +350,9 @@ impl ExecutionEngine {
 
         // 6. Calculate position size
         let account = context.account.clone();
-        let quantity = self.strategy.calculate_position_size(
-            &signal,
-            &account,
-            &self.risk_engine.config,
-        )?;
+        let quantity =
+            self.strategy
+                .calculate_position_size(&signal, &account, self.risk_engine.config())?;
 
         if quantity.value() == 0 {
             tracing::warn!("Position size calculated as 0, skipping execution");
@@ -354,10 +361,13 @@ impl ExecutionEngine {
         }
 
         // 7. Determine order type and parameters
-        let order_type = self.strategy.determine_order_type(&signal, signal.price_level);
+        let order_type = self
+            .strategy
+            .determine_order_type(&signal, signal.price_level);
         let time_in_force = self.strategy.determine_time_in_force(&signal);
         let limit_price = if matches!(order_type, OrderType::Limit) {
-            self.strategy.calculate_limit_price(&signal, signal.price_level)
+            self.strategy
+                .calculate_limit_price(&signal, signal.price_level)
         } else {
             None
         };
@@ -377,7 +387,7 @@ impl ExecutionEngine {
             time_in_force,
             pattern_name: self.extract_pattern_name(&signal),
             signal_id: Some(signal.id.clone()),
-            signal_confidence: Some(signal.confidence.value()),
+            signal_confidence: Decimal::from_f64_retain(signal.confidence.value()),
         };
 
         // 9. Place order through order engine
@@ -400,7 +410,7 @@ impl ExecutionEngine {
 
     /// Builds execution context for strategy evaluation
     async fn build_execution_context(&self) -> Result<ExecutionContext, ExecutionError> {
-        let account = self.order_engine.broker.get_account().await?;
+        let account = self.order_engine.broker().get_account().await?;
         let current_positions = self.position_tracker.get_all_positions().await?;
         let daily_metrics = self.get_daily_metrics().await;
 
@@ -446,7 +456,10 @@ impl ExecutionEngine {
     /// Extracts pattern name from signal
     fn extract_pattern_name(&self, signal: &TradingSignal) -> Option<PatternName> {
         signal.components.first().and_then(|comp| {
-            if matches!(comp.component_type, crate::patterns::signals::SignalComponentType::Pattern) {
+            if matches!(
+                comp.component_type,
+                crate::patterns::signals::SignalComponentType::Pattern
+            ) {
                 Some(PatternName::new(&comp.name))
             } else {
                 None
@@ -553,10 +566,7 @@ impl ExecutionEngine {
     }
 
     /// Evaluates whether to enable/disable pattern automation based on performance
-    async fn evaluate_pattern_automation(
-        &self,
-        perf: &PatternPerformance,
-    ) -> AutomationDecision {
+    async fn evaluate_pattern_automation(&self, perf: &PatternPerformance) -> AutomationDecision {
         let thresholds = &self.config.performance_thresholds;
 
         // Not enough data yet
@@ -572,10 +582,7 @@ impl ExecutionEngine {
         // Check consecutive losses
         if perf.consecutive_losses >= thresholds.max_consecutive_losses {
             return AutomationDecision::Disable {
-                reason: format!(
-                    "Too many consecutive losses: {}",
-                    perf.consecutive_losses
-                ),
+                reason: format!("Too many consecutive losses: {}", perf.consecutive_losses),
             };
         }
 
@@ -595,8 +602,7 @@ impl ExecutionEngine {
             return AutomationDecision::Disable {
                 reason: format!(
                     "Average profit too low: ${:.2} (min: ${:.2})",
-                    perf.avg_profit_per_trade,
-                    thresholds.min_avg_profit
+                    perf.avg_profit_per_trade, thresholds.min_avg_profit
                 ),
             };
         }
@@ -612,8 +618,13 @@ impl ExecutionEngine {
     }
 
     /// Gets pattern performance
-    pub fn get_pattern_performance(&self, pattern_name: &PatternName) -> Option<PatternPerformance> {
-        self.pattern_performance.get(pattern_name).map(|p| p.clone())
+    pub fn get_pattern_performance(
+        &self,
+        pattern_name: &PatternName,
+    ) -> Option<PatternPerformance> {
+        self.pattern_performance
+            .get(pattern_name)
+            .map(|p| p.clone())
     }
 
     /// Gets all pattern performances
@@ -639,7 +650,9 @@ impl ExecutionEngine {
         let _ = self.event_bus.publish(MarketEvent::PatternDetected {
             signal: crate::events::types::PatternSignal {
                 symbol: signal.symbol.clone(),
-                pattern_name: pattern_name.clone().unwrap_or_else(|| PatternName::new("unknown")),
+                pattern_name: pattern_name
+                    .clone()
+                    .unwrap_or_else(|| PatternName::new("unknown")),
                 signal_type: signal.signal_type.clone(),
                 confidence: signal.confidence,
                 detected_at: signal.generated_at,
@@ -660,7 +673,9 @@ impl ExecutionEngine {
         let _ = self.event_bus.publish(MarketEvent::PatternDetected {
             signal: crate::events::types::PatternSignal {
                 symbol: signal.symbol.clone(),
-                pattern_name: pattern_name.clone().unwrap_or_else(|| PatternName::new("unknown")),
+                pattern_name: pattern_name
+                    .clone()
+                    .unwrap_or_else(|| PatternName::new("unknown")),
                 signal_type: signal.signal_type.clone(),
                 confidence: signal.confidence,
                 detected_at: signal.generated_at,
@@ -670,11 +685,7 @@ impl ExecutionEngine {
     }
 
     async fn publish_rejected_event(&self, signal: &TradingSignal, reason: &str) {
-        tracing::debug!(
-            "Signal rejected: {} - {}",
-            signal.symbol.as_str(),
-            reason
-        );
+        tracing::debug!("Signal rejected: {} - {}", signal.symbol.as_str(), reason);
     }
 
     // Helper method to clone Arc references

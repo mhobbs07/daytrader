@@ -3,17 +3,17 @@
 //! Tests complete trading scenarios from pattern detection through
 //! risk evaluation, order execution, and emergency liquidation.
 
-use daytrader::brokers::types::{OrderId, Price, Quantity, Symbol, PatternName, Confidence};
+use daytrader::brokers::types::{Confidence, OrderId, PatternName, Price, Quantity, Symbol};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
-    Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, Position, PatternSignal,
+    Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType, PatternSignal, Position,
 };
-use daytrader::risk::types::AccountId;
 use daytrader::risk::RiskEngine;
+use daytrader::risk::types::AccountId;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test complete PDT workflow: pattern detection → risk evaluation → trading halt
 #[tokio::test]
@@ -39,7 +39,9 @@ async fn test_pdt_e2e_workflow() {
         price: Price::new(Decimal::new(15000, 2)).unwrap(),
     };
 
-    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal });
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: pattern_signal,
+    });
 
     // Step 2: Order placement (simulating execution system)
     let order1 = create_test_order("pdt-order-1", "AAPL", 100);
@@ -104,7 +106,10 @@ async fn test_pdt_e2e_workflow() {
         }
     }
 
-    assert!(violations_found > 0, "Should detect PDT violation on 4th day trade");
+    assert!(
+        violations_found > 0,
+        "Should detect PDT violation on 4th day trade"
+    );
 }
 
 /// Test emergency liquidation workflow under severe loss conditions
@@ -124,12 +129,19 @@ async fn test_emergency_liquidation_workflow() {
     // Step 1: Establish positions
     let positions = vec![
         create_position("AAPL", 1000, Decimal::new(15000, 2), Decimal::new(15000, 2)), // $15,000 position
-        create_position("GOOGL", 50, Decimal::new(250000, 2), Decimal::new(250000, 2)), // $12,500 position
-        create_position("MSFT", 200, Decimal::new(30000, 2), Decimal::new(30000, 2)),   // $6,000 position
+        create_position(
+            "GOOGL",
+            50,
+            Decimal::new(250000, 2),
+            Decimal::new(250000, 2),
+        ), // $12,500 position
+        create_position("MSFT", 200, Decimal::new(30000, 2), Decimal::new(30000, 2)), // $6,000 position
     ];
 
     for position in &positions {
-        event_bus.publish(MarketEvent::PositionUpdated { position: position.clone() });
+        event_bus.publish(MarketEvent::PositionUpdated {
+            position: position.clone(),
+        });
     }
 
     sleep(Duration::from_millis(50)).await;
@@ -137,12 +149,19 @@ async fn test_emergency_liquidation_workflow() {
     // Step 2: Simulate market crash - severe losses
     let crashed_positions = vec![
         create_position_with_loss("AAPL", 1000, Decimal::new(15000, 2), Decimal::new(7500, 2)), // 50% loss
-        create_position_with_loss("GOOGL", 50, Decimal::new(250000, 2), Decimal::new(125000, 2)), // 50% loss
-        create_position_with_loss("MSFT", 200, Decimal::new(30000, 2), Decimal::new(15000, 2)),   // 50% loss
+        create_position_with_loss(
+            "GOOGL",
+            50,
+            Decimal::new(250000, 2),
+            Decimal::new(125000, 2),
+        ), // 50% loss
+        create_position_with_loss("MSFT", 200, Decimal::new(30000, 2), Decimal::new(15000, 2)), // 50% loss
     ];
 
     for position in &crashed_positions {
-        event_bus.publish(MarketEvent::PositionUpdated { position: position.clone() });
+        event_bus.publish(MarketEvent::PositionUpdated {
+            position: position.clone(),
+        });
     }
 
     sleep(Duration::from_millis(50)).await;
@@ -178,7 +197,10 @@ async fn test_emergency_liquidation_workflow() {
     }
 
     // System should respond to severe losses
-    assert!(liquidation_events > 0 || trading_halted, "Should trigger emergency response to severe losses");
+    assert!(
+        liquidation_events > 0 || trading_halted,
+        "Should trigger emergency response to severe losses"
+    );
 }
 
 /// Test multi-day PDT compliance across trading days
@@ -244,7 +266,10 @@ async fn test_multi_day_pdt_compliance() {
         }
     }
 
-    assert_eq!(violations, 0, "Should allow trades within PDT limits across days");
+    assert_eq!(
+        violations, 0,
+        "Should allow trades within PDT limits across days"
+    );
 }
 
 /// Test risk recovery after trading halt
@@ -280,7 +305,10 @@ async fn test_risk_recovery_after_halt() {
     sleep(Duration::from_millis(50)).await;
 
     // Verify trading is halted
-    assert!(!engine.is_trading_allowed().await, "Trading should be halted after large loss");
+    assert!(
+        !engine.is_trading_allowed().await,
+        "Trading should be halted after large loss"
+    );
 
     // Step 2: Simulate recovery (profitable trades)
     let recovery_fill = Fill {
@@ -306,7 +334,10 @@ async fn test_risk_recovery_after_halt() {
     println!("Daily P&L after recovery: {}", state.daily_pl);
 
     // System should handle recovery gracefully
-    assert!(state.daily_pl > Decimal::new(-200000, 2), "Recovery should improve P&L");
+    assert!(
+        state.daily_pl > Decimal::new(-200000, 2),
+        "Recovery should improve P&L"
+    );
 }
 
 /// Test concurrent pattern detection and risk evaluation
@@ -339,10 +370,16 @@ async fn test_concurrent_pattern_risk_workflow() {
                 price: Price::new(Decimal::new(15000 + i as i64 * 100, 2)).unwrap(),
             };
 
-            bus_clone.publish(MarketEvent::PatternDetected { signal: pattern_signal });
+            bus_clone.publish(MarketEvent::PatternDetected {
+                signal: pattern_signal,
+            });
 
             // Order placement
-            let order = create_test_order(&format!("concurrent-order-{}", i), &format!("SYMBOL{}", i), 100);
+            let order = create_test_order(
+                &format!("concurrent-order-{}", i),
+                &format!("SYMBOL{}", i),
+                100,
+            );
             bus_clone.publish(MarketEvent::OrderPlaced {
                 order: Arc::clone(&order),
             });
@@ -370,7 +407,10 @@ async fn test_concurrent_pattern_risk_workflow() {
         events_processed += 1;
     }
 
-    assert!(events_processed > 0, "Should process concurrent pattern workflows");
+    assert!(
+        events_processed > 0,
+        "Should process concurrent pattern workflows"
+    );
 }
 
 /// Helper function to create strict PDT configuration
@@ -393,7 +433,8 @@ fn create_strict_pdt_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 
@@ -417,7 +458,8 @@ fn create_emergency_config() -> RiskConfig {
         emergency_liquidate_threshold: 2000.0, // Lower threshold for testing
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 
@@ -441,7 +483,8 @@ fn create_loss_limit_config() -> RiskConfig {
         emergency_liquidate_threshold: 5000.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 
@@ -465,7 +508,8 @@ fn create_test_risk_config() -> RiskConfig {
         emergency_liquidate_threshold: 500.0,
         pattern_profiles: std::collections::HashMap::new(),
         confidence_multipliers: vec![],
-        pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds::default(),
+        pattern_performance_thresholds:
+            daytrader::risk::types::PatternPerformanceThresholds::default(),
     }
 }
 
@@ -513,7 +557,12 @@ fn create_fill_for_order(order_id: &str, quantity: u64) -> Fill {
 }
 
 /// Helper function to create positions
-fn create_position(symbol: &str, quantity: u64, entry_price: Decimal, current_price: Decimal) -> Position {
+fn create_position(
+    symbol: &str,
+    quantity: u64,
+    entry_price: Decimal,
+    current_price: Decimal,
+) -> Position {
     Position {
         symbol: Symbol::new(symbol).unwrap(),
         quantity: Quantity::new(quantity as u32).unwrap(),
@@ -527,7 +576,12 @@ fn create_position(symbol: &str, quantity: u64, entry_price: Decimal, current_pr
 }
 
 /// Helper function to create positions with specific losses
-fn create_position_with_loss(symbol: &str, quantity: u64, entry_price: Decimal, current_price: Decimal) -> Position {
+fn create_position_with_loss(
+    symbol: &str,
+    quantity: u64,
+    entry_price: Decimal,
+    current_price: Decimal,
+) -> Position {
     let unrealized_pl = Decimal::from(quantity) * (current_price - entry_price);
     Position {
         symbol: Symbol::new(symbol).unwrap(),

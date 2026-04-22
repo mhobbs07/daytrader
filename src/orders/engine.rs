@@ -12,6 +12,7 @@ use crate::orders::types::{ManagedOrder, OrderConfig, OrderError, OrderRequest};
 use crate::risk::engine::RiskEngine;
 use chrono::Utc;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, error, info, warn};
@@ -118,6 +119,11 @@ impl OrderEngine {
         }
     }
 
+    /// Gets access to the broker provider
+    pub fn broker(&self) -> &Arc<dyn OrderExecutionProvider> {
+        &self.broker
+    }
+
     /// Places a new order with full validation pipeline
     ///
     /// # Validation Pipeline
@@ -212,7 +218,8 @@ impl OrderEngine {
 
         // 11. Update with broker ID
         let submitted_at = Utc::now();
-        self.tracker.update_broker_id(&order_id, broker_order_id.clone(), submitted_at)?;
+        self.tracker
+            .update_broker_id(&order_id, broker_order_id.clone(), submitted_at)?;
 
         // 12. Update in database
         self.update_broker_id_in_db(&order_id, &broker_order_id, submitted_at)
@@ -257,10 +264,7 @@ impl OrderEngine {
 
         // Validate cancellable
         if !order.is_cancellable() {
-            return Err(OrderError::NotCancellable(
-                order_id.clone(),
-                order.status,
-            ));
+            return Err(OrderError::NotCancellable(order_id.clone(), order.status));
         }
 
         // Cancel with broker if submitted
@@ -283,11 +287,8 @@ impl OrderEngine {
             .await?;
 
         // Update in database
-        self.update_order_status_in_db(
-            order_id,
-            crate::brokers::traits::OrderStatus::Cancelled,
-        )
-        .await?;
+        self.update_order_status_in_db(order_id, crate::brokers::traits::OrderStatus::Cancelled)
+            .await?;
 
         info!(order_id = %order_id, "Order cancelled successfully");
 
@@ -351,7 +352,10 @@ impl OrderEngine {
     }
 
     /// Validates pattern trade against limits
-    async fn validate_pattern_trade(&self, pattern_name: &crate::brokers::types::PatternName) -> Result<(), OrderError> {
+    async fn validate_pattern_trade(
+        &self,
+        pattern_name: &crate::brokers::types::PatternName,
+    ) -> Result<(), OrderError> {
         // Get pattern evaluator from risk engine
         let evaluator = self.risk_engine.get_pattern_risk_evaluator();
         let evaluator_guard = evaluator.read().await;
@@ -376,6 +380,24 @@ impl OrderEngine {
 
     /// Saves order to database
     async fn save_order(&self, order: &ManagedOrder) -> Result<(), OrderError> {
+        let symbol_str = order.symbol.as_str().to_string();
+        let side_str = format!("{:?}", order.side).to_lowercase();
+        let order_type_str = format!("{:?}", order.order_type).to_lowercase();
+        let quantity_val = order.quantity.value();
+        let limit_price_val = order.limit_price.map(|p| p.as_f64());
+        let stop_price_val = order.stop_price.map(|p| p.as_f64());
+        let trailing_val = order.trailing_amount.and_then(|d| d.to_f64());
+        let status_str = order_status_to_db(&order.status);
+        let tif_str = time_in_force_to_db(&order.time_in_force);
+        let filled_avg_val = order.filled_avg_price.map(|p| p.as_f64());
+        let commission_val = order.commission.and_then(|c| c.to_f64());
+        let pattern_name_str = order.pattern_name.as_ref().map(|p| p.as_str().to_string());
+        // Use internal order.id as placeholder broker_order_id to keep the UNIQUE
+        // constraint happy before the broker assigns its own id.
+        let initial_broker_id = order
+            .broker_order_id
+            .clone()
+            .unwrap_or_else(|| order.id.as_str().to_string());
         sqlx::query!(
             r#"
             INSERT INTO orders (
@@ -386,24 +408,24 @@ impl OrderEngine {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.account_id,
-            order.broker_order_id,
-            order.symbol.as_str(),
-            format!("{:?}", order.side).to_lowercase(),
-            format!("{:?}", order.order_type).to_lowercase(),
-            order.quantity.value(),
+            initial_broker_id,
+            symbol_str,
+            side_str,
+            order_type_str,
+            quantity_val,
             order.filled_quantity,
-            order.limit_price.map(|p| p.as_f64()),
-            order.stop_price.map(|p| p.as_f64()),
-            order.trailing_amount.and_then(|d| d.to_f64()),
-            order_status_to_db(&order.status),
-            time_in_force_to_db(&order.time_in_force),
+            limit_price_val,
+            stop_price_val,
+            trailing_val,
+            status_str,
+            tif_str,
             order.submitted_at,
             order.filled_at,
-            order.filled_avg_price.map(|p| p.as_f64()),
-            order.commission.and_then(|c| c.to_f64()),
+            filled_avg_val,
+            commission_val,
             order.error_message,
             order.is_pattern_trade,
-            order.pattern_name.as_ref().map(|p| p.as_str()),
+            pattern_name_str,
         )
         .execute(&*self.db_pool)
         .await?;
@@ -418,13 +440,14 @@ impl OrderEngine {
         broker_order_id: &str,
         submitted_at: chrono::DateTime<Utc>,
     ) -> Result<(), OrderError> {
-        // For now, we use broker_order_id as the identifier since we haven't saved
-        // the internal order_id to the database yet. In a production system,
-        // you'd want to add an internal_order_id column.
+        // save_order used the internal order_id as the placeholder broker_order_id,
+        // so we can locate the row by that and swap in the real broker id here.
+        let internal_id = order_id.as_str();
         sqlx::query!(
-            "UPDATE orders SET broker_order_id = ?, submitted_at = ?, status = 'pending' WHERE broker_order_id IS NULL ORDER BY id DESC LIMIT 1",
+            "UPDATE orders SET broker_order_id = ?, submitted_at = ?, status = 'pending' WHERE broker_order_id = ?",
             broker_order_id,
             submitted_at,
+            internal_id,
         )
         .execute(&*self.db_pool)
         .await?;
@@ -440,10 +463,12 @@ impl OrderEngine {
     ) -> Result<(), OrderError> {
         // Find by broker_order_id (after initial save, internal ID needs mapping)
         // This is a simplified approach - production would use internal_order_id
+        let status_str = order_status_to_db(&status);
+        let order_id_str = order_id.as_str();
         sqlx::query!(
             "UPDATE orders SET status = ? WHERE broker_order_id = ?",
-            order_status_to_db(&status),
-            order_id.as_str(),
+            status_str,
+            order_id_str,
         )
         .execute(&*self.db_pool)
         .await?;
@@ -513,17 +538,26 @@ mod tests {
 
     #[async_trait::async_trait]
     impl OrderExecutionProvider for MockOrderExecutionProvider {
-        async fn place_order(&self, _order: crate::brokers::traits::Order) -> Result<OrderId, crate::utils::errors::BrokerError> {
+        async fn place_order(
+            &self,
+            _order: crate::brokers::traits::Order,
+        ) -> Result<OrderId, crate::utils::errors::BrokerError> {
             Ok(OrderId::new("mock-broker-123"))
         }
 
-        async fn cancel_order(&self, _order_id: &OrderId) -> Result<(), crate::utils::errors::BrokerError> {
+        async fn cancel_order(
+            &self,
+            _order_id: &OrderId,
+        ) -> Result<(), crate::utils::errors::BrokerError> {
             Ok(())
         }
 
-        async fn get_order(&self, _order_id: &OrderId) -> Result<crate::brokers::traits::Order, crate::utils::errors::BrokerError> {
+        async fn get_order(
+            &self,
+            _order_id: &OrderId,
+        ) -> Result<crate::brokers::traits::Order, crate::utils::errors::BrokerError> {
             use crate::brokers::types::{Price, Quantity, Symbol};
-            
+
             Ok(crate::brokers::traits::Order {
                 id: OrderId::new("mock-order"),
                 symbol: Symbol::new("AAPL").unwrap(),
@@ -542,7 +576,9 @@ mod tests {
             })
         }
 
-        async fn get_open_orders(&self) -> Result<Vec<crate::brokers::traits::Order>, crate::utils::errors::BrokerError> {
+        async fn get_open_orders(
+            &self,
+        ) -> Result<Vec<crate::brokers::traits::Order>, crate::utils::errors::BrokerError> {
             Ok(vec![])
         }
 
@@ -559,18 +595,25 @@ mod tests {
             })
         }
 
-        async fn get_positions(&self) -> Result<Vec<crate::brokers::traits::Position>, crate::utils::errors::BrokerError> {
+        async fn get_positions(
+            &self,
+        ) -> Result<Vec<crate::brokers::traits::Position>, crate::utils::errors::BrokerError>
+        {
             Ok(vec![])
         }
 
-        async fn get_position(&self, _symbol: &crate::brokers::types::Symbol) -> Result<Option<crate::brokers::traits::Position>, crate::utils::errors::BrokerError> {
+        async fn get_position(
+            &self,
+            _symbol: &crate::brokers::types::Symbol,
+        ) -> Result<Option<crate::brokers::traits::Position>, crate::utils::errors::BrokerError>
+        {
             Ok(None)
         }
     }
 
     async fn create_test_engine() -> OrderEngine {
         let event_bus = Arc::new(EventBus::new(1000));
-        
+
         let risk_config = RiskConfig {
             max_daily_loss_dollars: 500.0,
             max_daily_loss_percent: 2.0,
@@ -589,7 +632,8 @@ mod tests {
             emergency_liquidate_threshold: 500.0,
             pattern_profiles: HashMap::new(),
             confidence_multipliers: vec![],
-            pattern_performance_thresholds: crate::risk::types::PatternPerformanceThresholds::default(),
+            pattern_performance_thresholds:
+                crate::risk::types::PatternPerformanceThresholds::default(),
         };
 
         let risk_engine = Arc::new(RiskEngine::new(
@@ -601,16 +645,12 @@ mod tests {
 
         let broker = Arc::new(MockOrderExecutionProvider::new(Decimal::new(5000000, 2)));
         let broker_adapter = Arc::new(MockBrokerAdapter::new_success());
-        
+
         // Create in-memory database for testing
-        let db_pool = Arc::new(
-            sqlx::SqlitePool::connect(":memory:")
-                .await
-                .unwrap()
-        );
+        let db_pool = Arc::new(sqlx::SqlitePool::connect(":memory:").await.unwrap());
 
         // Run migrations
-        sqlx::query(include_str!("../../db/schema.sql"))
+        sqlx::query(include_str!("../db/schema.sql"))
             .execute(&*db_pool)
             .await
             .unwrap();
@@ -649,7 +689,7 @@ mod tests {
 
         let order_id = result.unwrap();
         let order = engine.get_order(&order_id).await.unwrap();
-        
+
         assert!(order.pre_trade_validation_passed);
         assert!(order.broker_order_id.is_some());
     }
@@ -694,9 +734,10 @@ mod tests {
             emergency_liquidate_threshold: 500.0,
             pattern_profiles: HashMap::new(),
             confidence_multipliers: vec![],
-            pattern_performance_thresholds: crate::risk::types::PatternPerformanceThresholds::default(),
+            pattern_performance_thresholds:
+                crate::risk::types::PatternPerformanceThresholds::default(),
         };
-        
+
         let risk_engine = Arc::new(RiskEngine::new(
             risk_config,
             Arc::clone(&event_bus),
@@ -706,9 +747,9 @@ mod tests {
 
         let broker = Arc::new(MockOrderExecutionProvider::new(Decimal::new(100000, 2))); // $1,000
         let broker_adapter = Arc::new(MockBrokerAdapter::new_success());
-        
+
         let db_pool = Arc::new(sqlx::SqlitePool::connect(":memory:").await.unwrap());
-        sqlx::query(include_str!("../../db/schema.sql"))
+        sqlx::query(include_str!("../db/schema.sql"))
             .execute(&*db_pool)
             .await
             .unwrap();
@@ -786,19 +827,19 @@ mod tests {
         let order_id = engine.place_order(request).await.unwrap();
 
         // Manually update to filled
-        engine.tracker
-            .update_order_status(
-                &order_id,
-                crate::brokers::traits::OrderStatus::Filled,
-                None,
-            )
+        engine
+            .tracker
+            .update_order_status(&order_id, crate::brokers::traits::OrderStatus::Filled, None)
             .await
             .unwrap();
 
         // Try to cancel
         let result = engine.cancel_order(&order_id).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), OrderError::NotCancellable(_, _)));
+        assert!(matches!(
+            result.unwrap_err(),
+            OrderError::NotCancellable(_, _)
+        ));
     }
 
     #[tokio::test]

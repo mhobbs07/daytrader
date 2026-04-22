@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use super::config::AlpacaConfig;
 use super::types::{AlpacaAccount, AlpacaOrder, AlpacaPosition, PlaceOrderRequest};
-use crate::brokers::traits::{
-    Account, Candle, Order, OrderExecutionProvider, Position, Timeframe,
-};
+use crate::brokers::traits::{Account, Candle, Order, OrderExecutionProvider, Position, Timeframe};
 use crate::brokers::types::{OrderId, Reason, Symbol};
 use crate::utils::errors::BrokerError;
 
@@ -39,10 +37,7 @@ impl RestClient {
     }
 
     /// Makes a GET request to the Alpaca API
-    async fn get<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> Result<T, BrokerError> {
+    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, BrokerError> {
         let url = format!("{}{}", self.config.base_url, path);
         let request = self.client.get(&url);
         let request = self.add_auth_headers(request);
@@ -205,10 +200,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     fn test_config() -> AlpacaConfig {
-        AlpacaConfig::paper().with_credentials(
-            "test_key".to_string(),
-            "test_secret".to_string(),
-        )
+        AlpacaConfig::paper().with_credentials("test_key".to_string(), "test_secret".to_string())
     }
 
     #[test]

@@ -169,8 +169,10 @@ impl BrokerAdapter for AlpacaAdapter {
 pub struct MockBrokerAdapter {
     /// Simulates successful submissions
     pub should_succeed: bool,
-    /// Simulated broker order ID
+    /// Simulated broker order ID prefix
     pub broker_order_id: String,
+    /// Counter to generate unique ids per submit call
+    submit_counter: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(test)]
@@ -179,7 +181,8 @@ impl MockBrokerAdapter {
     pub fn new_success() -> Self {
         Self {
             should_succeed: true,
-            broker_order_id: "mock-broker-order-123".to_string(),
+            broker_order_id: "mock-broker-order".to_string(),
+            submit_counter: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -188,6 +191,7 @@ impl MockBrokerAdapter {
         Self {
             should_succeed: false,
             broker_order_id: String::new(),
+            submit_counter: std::sync::atomic::AtomicU64::new(0),
         }
     }
 }
@@ -197,7 +201,10 @@ impl MockBrokerAdapter {
 impl BrokerAdapter for MockBrokerAdapter {
     async fn submit_order(&self, _order: &ManagedOrder) -> Result<String, OrderError> {
         if self.should_succeed {
-            Ok(self.broker_order_id.clone())
+            let n = self
+                .submit_counter
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(format!("{}-{}", self.broker_order_id, n))
         } else {
             Err(OrderError::BrokerRejection("Mock rejection".into()))
         }
@@ -266,7 +273,8 @@ mod tests {
 
         let result = adapter.submit_order(&order).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "mock-broker-order-123");
+        // Counter starts at 0, so first id is "-0"
+        assert_eq!(result.unwrap(), "mock-broker-order-0");
     }
 
     #[tokio::test]

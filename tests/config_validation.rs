@@ -224,7 +224,9 @@ emergency_liquidate_threshold = -500.0
 "#;
 
     let mut temp_file = NamedTempFile::new().unwrap();
-    temp_file.write_all(negative_values_toml.as_bytes()).unwrap();
+    temp_file
+        .write_all(negative_values_toml.as_bytes())
+        .unwrap();
     temp_file.flush().unwrap();
 
     // Note: TOML parsing itself allows negative values, but our application logic
@@ -238,7 +240,10 @@ emergency_liquidate_threshold = -500.0
 #[test]
 fn test_missing_config_file() {
     let result = AppConfig::from_file("nonexistent_config.toml");
-    assert!(result.is_err(), "Should fail when config file doesn't exist");
+    assert!(
+        result.is_err(),
+        "Should fail when config file doesn't exist"
+    );
 }
 
 /// Test dynamic configuration updates (simulated)
@@ -328,12 +333,24 @@ fn test_config_serialization() {
             pattern_profiles: std::collections::HashMap::new(),
             confidence_multipliers: vec![],
             pattern_performance_thresholds: daytrader::risk::types::PatternPerformanceThresholds {
-                min_win_rate_short: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
-                min_win_rate_medium: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
-                min_win_rate_long: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(600, 1)).unwrap(),
+                min_win_rate_short: daytrader::risk::types::Percentage::new(
+                    rust_decimal::Decimal::new(600, 1),
+                )
+                .unwrap(),
+                min_win_rate_medium: daytrader::risk::types::Percentage::new(
+                    rust_decimal::Decimal::new(600, 1),
+                )
+                .unwrap(),
+                min_win_rate_long: daytrader::risk::types::Percentage::new(
+                    rust_decimal::Decimal::new(600, 1),
+                )
+                .unwrap(),
                 max_consecutive_losses: daytrader::risk::types::Count::new(3).unwrap(),
                 min_sample_size: daytrader::risk::types::Count::new(20).unwrap(),
-                auto_disable_threshold: daytrader::risk::types::Percentage::new(rust_decimal::Decimal::new(400, 1)).unwrap(),
+                auto_disable_threshold: daytrader::risk::types::Percentage::new(
+                    rust_decimal::Decimal::new(400, 1),
+                )
+                .unwrap(),
             },
         },
     };
@@ -347,7 +364,10 @@ fn test_config_serialization() {
     // Test round-trip: serialize then deserialize
     let deserialized: AppConfig = toml::from_str(&serialized).unwrap();
     assert_eq!(deserialized.broker.provider, config.broker.provider);
-    assert_eq!(deserialized.risk.max_daily_loss_dollars, config.risk.max_daily_loss_dollars);
+    assert_eq!(
+        deserialized.risk.max_daily_loss_dollars,
+        config.risk.max_daily_loss_dollars
+    );
 }
 
 /// Test configuration with invalid enum values

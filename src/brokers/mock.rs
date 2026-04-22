@@ -128,7 +128,9 @@ impl MockBroker {
     /// Sets a mock quote for a symbol
     pub fn set_mock_quote(&self, quote: Quote) {
         let mut state = self.state.write();
-        state.quotes.insert(quote.symbol.as_str().to_string(), quote);
+        state
+            .quotes
+            .insert(quote.symbol.as_str().to_string(), quote);
     }
 
     /// Sets mock candles for a symbol
@@ -140,7 +142,9 @@ impl MockBroker {
     /// Sets a mock position
     pub fn set_mock_position(&self, position: Position) {
         let mut state = self.state.write();
-        state.positions.insert(position.symbol.as_str().to_string(), position);
+        state
+            .positions
+            .insert(position.symbol.as_str().to_string(), position);
     }
 
     /// Sets the mock account state
@@ -192,7 +196,11 @@ impl MarketDataProvider for MockBroker {
 
         let mut state = self.state.write();
         for symbol in symbols {
-            if !state.subscribed_symbols.iter().any(|s| s.as_str() == symbol.as_str()) {
+            if !state
+                .subscribed_symbols
+                .iter()
+                .any(|s| s.as_str() == symbol.as_str())
+            {
                 state.subscribed_symbols.push(symbol);
             }
         }
@@ -208,9 +216,9 @@ impl MarketDataProvider for MockBroker {
         }
 
         let mut state = self.state.write();
-        state.subscribed_symbols.retain(|s| {
-            !symbols.iter().any(|sym| sym.as_str() == s.as_str())
-        });
+        state
+            .subscribed_symbols
+            .retain(|s| !symbols.iter().any(|sym| sym.as_str() == s.as_str()));
         Ok(())
     }
 
@@ -223,7 +231,8 @@ impl MarketDataProvider for MockBroker {
         }
 
         let state = self.state.read();
-        state.quotes
+        state
+            .quotes
             .get(symbol.as_str())
             .cloned()
             .ok_or_else(|| BrokerError::SymbolNotFound(symbol.to_string()))
@@ -244,7 +253,8 @@ impl MarketDataProvider for MockBroker {
         }
 
         let state = self.state.read();
-        let candles = state.candles
+        let candles = state
+            .candles
             .get(symbol.as_str())
             .cloned()
             .unwrap_or_default();
@@ -296,7 +306,7 @@ impl OrderExecutionProvider for MockBroker {
         }
 
         let mut state = self.state.write();
-        
+
         // Generate order ID
         let order_id = OrderId::new(format!("MOCK{}", state.next_order_id));
         state.next_order_id += 1;
@@ -325,7 +335,10 @@ impl OrderExecutionProvider for MockBroker {
             order.status = OrderStatus::Cancelled;
             Ok(())
         } else {
-            Err(BrokerError::ApiError(format!("Order not found: {}", order_id)))
+            Err(BrokerError::ApiError(format!(
+                "Order not found: {}",
+                order_id
+            )))
         }
     }
 
@@ -338,7 +351,8 @@ impl OrderExecutionProvider for MockBroker {
         }
 
         let state = self.state.read();
-        state.orders
+        state
+            .orders
             .get(order_id.as_str())
             .cloned()
             .ok_or_else(|| BrokerError::ApiError(format!("Order not found: {}", order_id)))
@@ -353,9 +367,15 @@ impl OrderExecutionProvider for MockBroker {
         }
 
         let state = self.state.read();
-        let orders: Vec<Order> = state.orders
+        let orders: Vec<Order> = state
+            .orders
             .values()
-            .filter(|o| matches!(o.status, OrderStatus::Accepted | OrderStatus::PartiallyFilled))
+            .filter(|o| {
+                matches!(
+                    o.status,
+                    OrderStatus::Accepted | OrderStatus::PartiallyFilled
+                )
+            })
             .cloned()
             .collect();
 
@@ -431,11 +451,11 @@ mod tests {
     async fn test_mock_broker_quotes() {
         let broker = MockBroker::default();
         let symbol = Symbol::new("AAPL").unwrap();
-        
+
         // Set mock quote
         let quote = create_mock_quote(symbol.clone(), Decimal::new(15000, 2));
         broker.set_mock_quote(quote.clone());
-        
+
         // Retrieve quote
         let retrieved = broker.get_quote(&symbol).await.unwrap();
         assert_eq!(retrieved.symbol, symbol);
@@ -447,15 +467,15 @@ mod tests {
         let broker = MockBroker::default();
         let symbol = Symbol::new("AAPL").unwrap();
         let qty = Quantity::new(100).unwrap();
-        
+
         // Place order
         let order = Order::market(symbol, OrderSide::Buy, qty);
         let order_id = broker.place_order(order).await.unwrap();
-        
+
         // Retrieve order
         let retrieved = broker.get_order(&order_id).await.unwrap();
         assert_eq!(retrieved.status, OrderStatus::Accepted);
-        
+
         // Cancel order
         broker.cancel_order(&order_id).await.unwrap();
         let cancelled = broker.get_order(&order_id).await.unwrap();
@@ -466,10 +486,10 @@ mod tests {
     async fn test_mock_broker_call_history() {
         let broker = MockBroker::default();
         let symbol = Symbol::new("AAPL").unwrap();
-        
+
         broker.get_quote(&symbol).await.ok();
         broker.get_account().await.ok();
-        
+
         let history = broker.get_call_history();
         assert!(history.contains(&format!("get_quote({})", symbol)));
         assert!(history.contains(&"get_account".to_string()));
@@ -484,7 +504,7 @@ mod tests {
         };
         let broker = MockBroker::new(config);
         let symbol = Symbol::new("AAPL").unwrap();
-        
+
         let result = broker.get_quote(&symbol).await;
         assert!(result.is_err());
     }

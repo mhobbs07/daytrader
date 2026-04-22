@@ -1,9 +1,11 @@
-use tauri::State;
 use crate::state::AppState;
-use chrono::Utc;
-use serde::Serialize;
-use tracing::{error, warn, debug};
+use chrono::{DateTime, Utc};
+use daytrader::risk::{RiskEngine, engine::RiskState};
 use daytrader::utils::holidays::MarketHolidayCalendar;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tauri::State;
+use tracing::{debug, error, warn};
 
 // ============================================================================
 // Response Structures for Frontend
@@ -141,13 +143,11 @@ pub struct HolidayInfo {
 // ============================================================================
 
 #[tauri::command]
-pub async fn get_risk_state(
-    state: State<'_, AppState>
-) -> Result<RiskStateResponse, String> {
+pub async fn get_risk_state(state: State<'_, AppState>) -> Result<RiskStateResponse, String> {
     debug!("Getting risk state");
-    
+
     let risk_state = state.risk_engine.get_risk_state().await;
-    
+
     Ok(RiskStateResponse {
         account_id: risk_state.account_id.to_string(),
         trading_date: risk_state.trading_date.to_string(),
@@ -159,9 +159,7 @@ pub async fn get_risk_state(
 }
 
 #[tauri::command]
-pub async fn get_risk_limits(
-    state: State<'_, AppState>
-) -> Result<RiskLimitsResponse, String> {
+pub async fn get_risk_limits(state: State<'_, AppState>) -> Result<RiskLimitsResponse, String> {
     debug!("Getting risk limits from configuration");
 
     let config = state.risk_engine.get_config();
@@ -179,14 +177,14 @@ pub async fn get_risk_limits(
 
 #[tauri::command]
 pub async fn get_recent_risk_violations(
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<Vec<RiskViolationResponse>, String> {
     debug!("Getting recent risk violations");
-    
+
     // TODO: Implement actual risk violation retrieval from database
     // For now, return empty array but with proper error handling structure
     // This will be enhanced once we have database integration in the state
-    
+
     match get_violations_from_database().await {
         Ok(violations) => Ok(violations),
         Err(e) => {
@@ -201,30 +199,28 @@ pub async fn get_recent_risk_violations(
 // ============================================================================
 
 #[tauri::command]
-pub async fn get_pdt_status(
-    state: State<'_, AppState>
-) -> Result<PdtStatusResponse, String> {
+pub async fn get_pdt_status(state: State<'_, AppState>) -> Result<PdtStatusResponse, String> {
     debug!("Getting PDT status");
-    
+
     // Check if PDT enforcer is available
     if let Some(pdt_enforcer) = state.pdt_enforcer() {
         let pdt_state = pdt_enforcer.get_pdt_state().await;
         let current_date = Utc::now().date_naive();
         let day_trade_count = pdt_enforcer.count_day_trades().await;
         let meets_requirement = pdt_enforcer.meets_equity_requirement().await;
-        
+
         // Calculate rolling window dates using holiday calendar
         let holiday_calendar = state.holiday_calendar();
         let window_start = holiday_calendar.subtract_business_days(current_date, 5);
-        
+
         // Determine max allowed day trades based on equity
         let max_allowed = if meets_requirement { u32::MAX } else { 3 };
-        let remaining = if meets_requirement { 
-            u32::MAX 
-        } else { 
-            max_allowed.saturating_sub(day_trade_count) 
+        let remaining = if meets_requirement {
+            u32::MAX
+        } else {
+            max_allowed.saturating_sub(day_trade_count)
         };
-        
+
         // Generate warnings
         let mut warnings = Vec::new();
         if !meets_requirement && day_trade_count >= 2 {
@@ -233,7 +229,7 @@ pub async fn get_pdt_status(
         if !meets_requirement && day_trade_count >= 3 {
             warnings.push("PDT day trade limit reached. Cannot day trade until equity exceeds $25,000 or rolling window resets".to_string());
         }
-        
+
         Ok(PdtStatusResponse {
             account_id: state.account_id.to_string(),
             current_equity: pdt_state.current_equity.to_f64().unwrap_or(0.0),
@@ -253,7 +249,7 @@ pub async fn get_pdt_status(
         warn!("PDT enforcer not available, returning basic status");
         let current_date = Utc::now().date_naive();
         let window_start = current_date - chrono::Duration::days(5);
-        
+
         Ok(PdtStatusResponse {
             account_id: state.account_id.to_string(),
             current_equity: 50000.0, // Default for demo
@@ -274,19 +270,23 @@ pub async fn get_pdt_status(
 #[tauri::command]
 pub async fn get_day_trade_history(
     days: Option<i32>,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<DayTradeHistoryResponse, String> {
     let days = days.unwrap_or(30);
     debug!("Getting day trade history for {} days", days);
-    
+
     let end_date = Utc::now().date_naive();
     let start_date = end_date - chrono::Duration::days(days as i64);
-    
+
     if let Some(pdt_repo) = state.pdt_repository() {
-        match pdt_repo.get_day_trades_in_range(state.account_id, start_date, end_date).await {
+        match pdt_repo
+            .get_day_trades_in_range(state.account_id, start_date, end_date)
+            .await
+        {
             Ok(trades) => {
-                let trade_responses: Vec<DayTradeRecordResponse> = trades.into_iter().map(|trade| {
-                    DayTradeRecordResponse {
+                let trade_responses: Vec<DayTradeRecordResponse> = trades
+                    .into_iter()
+                    .map(|trade| DayTradeRecordResponse {
                         trade_id: trade.trade_id,
                         symbol: trade.symbol,
                         quantity: trade.quantity,
@@ -297,9 +297,9 @@ pub async fn get_day_trade_history(
                         realized_pl: trade.realized_pl,
                         commission: trade.commission,
                         pattern_name: trade.pattern_name,
-                    }
-                }).collect();
-                
+                    })
+                    .collect();
+
                 Ok(DayTradeHistoryResponse {
                     total_count: trade_responses.len() as i32,
                     trades: trade_responses,
@@ -328,39 +328,43 @@ pub async fn check_pdt_eligibility(
     symbol: String,
     quantity: i32,
     side: String,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<PdtEligibilityResponse, String> {
-    debug!("Checking PDT eligibility for {} {} shares of {}", side, quantity, symbol);
-    
+    debug!(
+        "Checking PDT eligibility for {} {} shares of {}",
+        side, quantity, symbol
+    );
+
     // Input validation
     if symbol.is_empty() {
         return Err("Symbol cannot be empty".to_string());
     }
-    
+
     if quantity <= 0 {
         return Err("Quantity must be positive".to_string());
     }
-    
+
     if !matches!(side.to_lowercase().as_str(), "buy" | "sell") {
         return Err("Side must be 'buy' or 'sell'".to_string());
     }
-    
+
     if let Some(pdt_enforcer) = state.pdt_enforcer() {
         let day_trade_count = pdt_enforcer.count_day_trades().await;
         let equity_requirement_met = pdt_enforcer.meets_equity_requirement().await;
-        
+
         // Check if this would be a day trade using position tracker
         let position_tracker = state.position_tracker();
         let symbol_obj = daytrader::brokers::types::Symbol::new(&symbol)
             .map_err(|e| format!("Invalid symbol: {}", e))?;
-        
-        let would_be_day_trade = if let Some(position) = position_tracker.get_position(&symbol_obj).await {
-            let current_date = Utc::now().date_naive();
-            position.has_components_opened_on_date(current_date)
-        } else {
-            false
-        };
-        
+
+        let would_be_day_trade =
+            if let Some(position) = position_tracker.get_position(&symbol_obj).await {
+                let current_date = Utc::now().date_naive();
+                position.has_components_opened_on_date(current_date)
+            } else {
+                false
+            };
+
         // Determine eligibility
         let max_allowed = if equity_requirement_met { u32::MAX } else { 3 };
         let eligible = if equity_requirement_met {
@@ -370,15 +374,21 @@ pub async fn check_pdt_eligibility(
         } else {
             true // Not a day trade, so eligible
         };
-        
+
         let reason = if !eligible {
-            format!("PDT day trade limit reached ({}/{})", day_trade_count, max_allowed)
+            format!(
+                "PDT day trade limit reached ({}/{})",
+                day_trade_count, max_allowed
+            )
         } else if would_be_day_trade && !equity_requirement_met {
-            format!("Would be day trade - {} day trades used of {} allowed", day_trade_count, max_allowed)
+            format!(
+                "Would be day trade - {} day trades used of {} allowed",
+                day_trade_count, max_allowed
+            )
         } else {
             "Eligible for trade".to_string()
         };
-        
+
         let suggested_action = if !eligible {
             Some("Increase account equity to $25,000 or wait for rolling window reset".to_string())
         } else if would_be_day_trade && day_trade_count >= 2 && !equity_requirement_met {
@@ -386,7 +396,7 @@ pub async fn check_pdt_eligibility(
         } else {
             None
         };
-        
+
         Ok(PdtEligibilityResponse {
             eligible,
             reason,
@@ -414,16 +424,20 @@ pub async fn check_pdt_eligibility(
 #[tauri::command]
 pub async fn get_pdt_violations(
     limit: Option<i32>,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<PdtViolationsResponse, String> {
     let limit = limit.unwrap_or(50);
     debug!("Getting PDT violations with limit {}", limit);
-    
+
     if let Some(pdt_repo) = state.pdt_repository() {
-        match pdt_repo.get_audit_events(state.account_id, Some(limit)).await {
+        match pdt_repo
+            .get_audit_events(state.account_id, Some(limit))
+            .await
+        {
             Ok(audit_events) => {
-                let audit_responses: Vec<PdtAuditEventResponse> = audit_events.into_iter().map(|event| {
-                    PdtAuditEventResponse {
+                let audit_responses: Vec<PdtAuditEventResponse> = audit_events
+                    .into_iter()
+                    .map(|event| PdtAuditEventResponse {
                         id: event.id,
                         event_type: event.event_type,
                         event_date: event.event_date.to_string(),
@@ -432,11 +446,12 @@ pub async fn get_pdt_violations(
                         is_restricted: event.is_restricted,
                         message: event.message,
                         created_at: event.created_at.to_rfc3339(),
-                    }
-                }).collect();
-                
+                    })
+                    .collect();
+
                 // For violations, filter audit events for violation types
-                let violation_events: Vec<PdtViolationRecord> = audit_responses.iter()
+                let violation_events: Vec<PdtViolationRecord> = audit_responses
+                    .iter()
                     .filter(|event| event.event_type.contains("violation") || event.is_restricted)
                     .map(|event| PdtViolationRecord {
                         event_type: event.event_type.clone(),
@@ -446,8 +461,9 @@ pub async fn get_pdt_violations(
                         is_restricted: event.is_restricted,
                         violation_details: None,
                         message: event.message.clone(),
-                    }).collect();
-                
+                    })
+                    .collect();
+
                 Ok(PdtViolationsResponse {
                     violations: violation_events,
                     audit_events: audit_responses,
@@ -469,23 +485,23 @@ pub async fn get_pdt_violations(
 
 #[tauri::command]
 pub async fn get_business_day_info(
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<BusinessDayInfoResponse, String> {
     debug!("Getting business day information");
-    
+
     let current_date = Utc::now().date_naive();
     let holiday_calendar = state.holiday_calendar();
-    
+
     // Use the actual holiday calendar for accurate business day calculations
     let is_business_day = holiday_calendar.is_business_day(current_date);
     let next_business_day = holiday_calendar.add_business_days(current_date, 1);
     let previous_business_day = holiday_calendar.subtract_business_days(current_date, 1);
-    
+
     // Get upcoming holidays (next 90 days)
     let mut upcoming_holidays = Vec::new();
     let mut check_date = current_date;
     let end_date = current_date + chrono::Duration::days(90);
-    
+
     while check_date <= end_date {
         if holiday_calendar.is_holiday(check_date) {
             if let Some(holiday_name) = holiday_calendar.get_holiday_name(check_date) {
@@ -497,16 +513,17 @@ pub async fn get_business_day_info(
             }
         }
         check_date = check_date.succ_opt().unwrap_or(check_date);
-        
+
         // Prevent infinite loops
         if upcoming_holidays.len() > 20 {
             break;
         }
     }
-    
+
     // Count business days in current month
-    let business_days_in_month = count_business_days_in_month_with_calendar(current_date, &holiday_calendar);
-    
+    let business_days_in_month =
+        count_business_days_in_month_with_calendar(current_date, &holiday_calendar);
+
     Ok(BusinessDayInfoResponse {
         current_date: current_date.to_string(),
         is_business_day,
@@ -521,7 +538,8 @@ pub async fn get_business_day_info(
 // Helper Functions
 // ============================================================================
 
-async fn get_violations_from_database() -> Result<Vec<RiskViolationResponse>, Box<dyn std::error::Error + Send + Sync>> {
+async fn get_violations_from_database()
+-> Result<Vec<RiskViolationResponse>, Box<dyn std::error::Error + Send + Sync>> {
     // TODO: Implement database query for risk violations
     // This will require database integration in the AppState
     Ok(vec![])
@@ -551,8 +569,8 @@ fn find_previous_business_day(mut date: chrono::NaiveDate) -> chrono::NaiveDate 
 }
 
 fn count_business_days_in_month(date: chrono::NaiveDate) -> u32 {
-    let start_of_month = chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), 1)
-        .unwrap_or(date);
+    let start_of_month =
+        chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap_or(date);
     let end_of_month = if date.month() == 12 {
         chrono::NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
             .unwrap_or(date)
@@ -564,7 +582,7 @@ fn count_business_days_in_month(date: chrono::NaiveDate) -> u32 {
             .pred_opt()
             .unwrap_or(date)
     };
-    
+
     let mut count = 0;
     let mut current = start_of_month;
     while current <= end_of_month {
@@ -579,9 +597,12 @@ fn count_business_days_in_month(date: chrono::NaiveDate) -> u32 {
     count
 }
 
-fn count_business_days_in_month_with_calendar(date: chrono::NaiveDate, calendar: &MarketHolidayCalendar) -> u32 {
-    let start_of_month = chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), 1)
-        .unwrap_or(date);
+fn count_business_days_in_month_with_calendar(
+    date: chrono::NaiveDate,
+    calendar: &MarketHolidayCalendar,
+) -> u32 {
+    let start_of_month =
+        chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap_or(date);
     let end_of_month = if date.month() == 12 {
         chrono::NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
             .unwrap_or(date)
@@ -593,7 +614,7 @@ fn count_business_days_in_month_with_calendar(date: chrono::NaiveDate, calendar:
             .pred_opt()
             .unwrap_or(date)
     };
-    
+
     let mut count = 0;
     let mut current = start_of_month;
     while current <= end_of_month {

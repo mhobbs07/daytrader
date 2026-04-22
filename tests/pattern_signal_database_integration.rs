@@ -2,6 +2,7 @@
 //!
 //! Tests signal storage, retrieval, outcome tracking, and statistics.
 
+use chrono::Utc;
 use daytrader::brokers::types::{Confidence, Price, Symbol};
 use daytrader::db::repositories::SignalRepository;
 use daytrader::events::types::SignalType;
@@ -9,7 +10,6 @@ use daytrader::patterns::signals::{
     MarketContext, SignalComponent, SignalComponentType, SignalConfig, SignalEngine, TradingSignal,
 };
 use daytrader::patterns::types::TrendContext;
-use chrono::Utc;
 use rust_decimal::Decimal;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -222,7 +222,11 @@ async fn test_concurrent_signal_writes() {
     // Wait for all to complete
     for handle in handles {
         let result = handle.await.unwrap();
-        assert!(result.is_ok(), "Concurrent write failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Concurrent write failed: {:?}",
+            result.err()
+        );
     }
 
     // Verify count
@@ -269,18 +273,15 @@ async fn test_json_serialization_roundtrip() {
         0.3,
         1.0,
     ));
-    signal
-        .components
-        .push(SignalComponent::new(
-            SignalComponentType::Volume,
-            "volume_surge",
-            0.8,
-            0.2,
-            1.0,
-        ).add_data("ratio", "1.5"));
+    signal.components.push(
+        SignalComponent::new(SignalComponentType::Volume, "volume_surge", 0.8, 0.2, 1.0)
+            .add_data("ratio", "1.5"),
+    );
 
     // Add metadata
-    signal.metadata.insert("source".to_string(), "real_time".to_string());
+    signal
+        .metadata
+        .insert("source".to_string(), "real_time".to_string());
     signal
         .metadata
         .insert("version".to_string(), "3.0".to_string());
@@ -325,7 +326,11 @@ async fn test_signal_engine_with_database_persistence() {
 
     // Generate signals (will be empty due to empty inputs, but tests the flow)
     let result = engine.generate_signals(&patterns, &candles).await;
-    assert!(result.is_ok(), "Signal generation failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Signal generation failed: {:?}",
+        result.err()
+    );
 
     // The actual signal generation would require valid pattern and candle data,
     // but we've verified the database persistence flow is integrated
@@ -390,10 +395,7 @@ async fn test_signal_data_integrity() {
     .execute(&pool)
     .await;
 
-    assert!(
-        invalid_result.is_err(),
-        "Should reject invalid signal_type"
-    );
+    assert!(invalid_result.is_err(), "Should reject invalid signal_type");
 
     // Test constraint: confidence must be 0-1
     let invalid_confidence = sqlx::query!(

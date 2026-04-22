@@ -62,9 +62,11 @@ pub fn calculate_volume_ratio(current_candle: &Candle, previous_candles: &[Candl
     }
 
     let current_volume = current_candle.volume as f64;
-    let avg_previous_volume = previous_candles.iter()
+    let avg_previous_volume = previous_candles
+        .iter()
         .map(|c| c.volume as f64)
-        .sum::<f64>() / previous_candles.len() as f64;
+        .sum::<f64>()
+        / previous_candles.len() as f64;
 
     if avg_previous_volume == 0.0 {
         1.0 // Avoid division by zero
@@ -113,20 +115,20 @@ impl ConfidenceComponents {
     }
 
     pub fn calculate_final_confidence(&self) -> Result<Confidence, PatternError> {
-        let total_score = self.base_score + self.volume_bonus + self.trend_bonus + self.pattern_specific_bonus;
+        let total_score =
+            self.base_score + self.volume_bonus + self.trend_bonus + self.pattern_specific_bonus;
         let capped_score = total_score.min(100.0).max(0.0);
 
-        Confidence::new(capped_score / 100.0)
-            .map_err(|e| PatternError::InvalidParameters {
-                message: format!("Invalid confidence score: {}", e)
-            })
+        Confidence::new(capped_score / 100.0).map_err(|e| PatternError::InvalidParameters {
+            message: format!("Invalid confidence score: {}", e),
+        })
     }
 }
 
 /// Apply volume confirmation bonus to confidence components
 pub fn apply_volume_confirmation_bonus(
     components: ConfidenceComponents,
-    context: &PatternContext
+    context: &PatternContext,
 ) -> ConfidenceComponents {
     if let Some(volume_conf) = &context.volume_confirmation {
         let bonus = if volume_conf.is_confirmed() {
@@ -147,11 +149,12 @@ pub fn apply_trend_context_bonus(
     components: ConfidenceComponents,
     context: &PatternContext,
     bullish_preference: bool,
-    bearish_preference: bool
+    bearish_preference: bool,
 ) -> ConfidenceComponents {
     if let Some(trend) = &context.trend_context {
-        let bonus = if (bullish_preference && trend.is_bullish()) ||
-                      (bearish_preference && trend.is_bearish()) {
+        let bonus = if (bullish_preference && trend.is_bullish())
+            || (bearish_preference && trend.is_bearish())
+        {
             15.0 // Strong trend alignment
         } else if trend.is_sideways() {
             5.0 // Neutral trend
@@ -195,7 +198,7 @@ pub fn validate_engulfing(
     first: &Candle,
     second: &Candle,
     min_ratio: f64,
-    allow_gap: bool
+    allow_gap: bool,
 ) -> bool {
     // First candle direction check will be pattern-specific
     let second_body = second.body_size();
@@ -250,9 +253,18 @@ mod tests {
 
     #[test]
     fn test_decimal_to_ratio() {
-        assert_eq!(decimal_to_ratio(Decimal::new(5, 0), Decimal::new(10, 0)), 0.5);
-        assert_eq!(decimal_to_ratio(Decimal::new(0, 0), Decimal::new(10, 0)), 0.0);
-        assert_eq!(decimal_to_ratio(Decimal::new(10, 0), Decimal::new(0, 0)), 0.0);
+        assert_eq!(
+            decimal_to_ratio(Decimal::new(5, 0), Decimal::new(10, 0)),
+            0.5
+        );
+        assert_eq!(
+            decimal_to_ratio(Decimal::new(0, 0), Decimal::new(10, 0)),
+            0.0
+        );
+        assert_eq!(
+            decimal_to_ratio(Decimal::new(10, 0), Decimal::new(0, 0)),
+            0.0
+        );
     }
 
     #[test]
@@ -337,7 +349,12 @@ pub fn calculate_single_candle_confidence(
 
     // Apply common bonuses
     components = apply_volume_confirmation_bonus(components, context);
-    components = apply_trend_context_bonus(components, context, pattern_type.is_bullish(), pattern_type.is_bearish());
+    components = apply_trend_context_bonus(
+        components,
+        context,
+        pattern_type.is_bullish(),
+        pattern_type.is_bearish(),
+    );
 
     components.calculate_final_confidence()
 }
@@ -413,13 +430,13 @@ pub fn validate_hammer(candle: &Candle) -> bool {
     // Lower shadow must be at least 2x the body size
     let body_size = candle.body_size();
     let lower_shadow = candle.open.value().min(candle.close.value()) - candle.low.value();
-    
+
     let lower_shadow_valid = lower_shadow >= body_size * Decimal::new(2, 0);
-    
+
     // Upper shadow should be small (less than body size)
     let upper_shadow = candle.high.value() - candle.open.value().max(candle.close.value());
     let upper_shadow_valid = upper_shadow <= body_size;
-    
+
     // Body should be small to medium (10-40% of range)
     let body_valid = validate_body_ratio(shadow_ratios.body, 0.1, 0.4);
 
@@ -440,13 +457,13 @@ pub fn validate_shooting_star(candle: &Candle) -> bool {
     // Upper shadow must be at least 2x the body size
     let body_size = candle.body_size();
     let upper_shadow = candle.high.value() - candle.open.value().max(candle.close.value());
-    
+
     let upper_shadow_valid = upper_shadow >= body_size * Decimal::new(2, 0);
-    
+
     // Lower shadow should be small (less than body size)
     let lower_shadow = candle.open.value().min(candle.close.value()) - candle.low.value();
     let lower_shadow_valid = lower_shadow <= body_size;
-    
+
     // Body should be small to medium (10-40% of range)
     let body_valid = validate_body_ratio(shadow_ratios.body, 0.1, 0.4);
 
@@ -474,21 +491,21 @@ pub fn validate_bullish_engulfing(first: &Candle, second: &Candle) -> bool {
     if first.close.value() >= first.open.value() {
         return false;
     }
-    
+
     // Second candle must be bullish
     if second.close.value() <= second.open.value() {
         return false;
     }
-    
+
     // Second candle must engulf first candle's body
-    let engulfing = second.open.value() <= first.close.value() && 
-                   second.close.value() >= first.open.value();
-    
+    let engulfing =
+        second.open.value() <= first.close.value() && second.close.value() >= first.open.value();
+
     // Size validation: second candle should be significantly larger
     let first_body = first.body_size();
     let second_body = second.body_size();
     let size_ratio = calculate_engulfing_ratio(first_body, second_body);
-    
+
     engulfing && size_ratio >= 1.2
 }
 
@@ -498,21 +515,21 @@ pub fn validate_bearish_engulfing(first: &Candle, second: &Candle) -> bool {
     if first.close.value() <= first.open.value() {
         return false;
     }
-    
+
     // Second candle must be bearish
     if second.close.value() >= second.open.value() {
         return false;
     }
-    
+
     // Second candle must engulf first candle's body
-    let engulfing = second.open.value() >= first.close.value() && 
-                   second.close.value() <= first.open.value();
-    
+    let engulfing =
+        second.open.value() >= first.close.value() && second.close.value() <= first.open.value();
+
     // Size validation: second candle should be significantly larger
     let first_body = first.body_size();
     let second_body = second.body_size();
     let size_ratio = calculate_engulfing_ratio(first_body, second_body);
-    
+
     engulfing && size_ratio >= 1.2
 }
 
@@ -520,17 +537,17 @@ pub fn validate_bearish_engulfing(first: &Candle, second: &Candle) -> bool {
 pub fn calculate_gap_ratio(first: &Candle, second: &Candle) -> Option<f64> {
     let first_close = first.close.value();
     let second_open = second.open.value();
-    
+
     if first_close == Decimal::ZERO {
         return None;
     }
-    
+
     let gap_size = if second_open > first_close {
         second_open - first_close
     } else {
         first_close - second_open
     };
-    
+
     let gap_ratio = decimal_to_ratio(gap_size, first_close);
     Some(gap_ratio)
 }

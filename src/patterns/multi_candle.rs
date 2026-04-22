@@ -13,8 +13,7 @@ use crate::brokers::types::{Confidence, PatternName, Price};
 use crate::events::types::{Candle, SignalType};
 use crate::patterns::traits::PatternDetector;
 use crate::patterns::types::{
-    PatternContext, PatternError, PatternParams, PatternResult,
-    VolumeConfirmation, TrendContext
+    PatternContext, PatternError, PatternParams, PatternResult, TrendContext, VolumeConfirmation,
 };
 use rust_decimal::Decimal;
 use std::fmt::Debug;
@@ -50,7 +49,7 @@ impl MorningStarDetector {
 
         // Third candle must be bullish
         let third_bullish = third.close.value() > third.open.value();
-        
+
         // Third candle should close above the midpoint of the first candle
         let first_midpoint = (first.open.value() + first.close.value()) / Decimal::new(2, 0);
         let third_closes_high = third.close.value() > first_midpoint;
@@ -58,17 +57,28 @@ impl MorningStarDetector {
         // Second candle should be lower than both first and third (star position)
         let second_is_star = second.high.value() < first.close.value().max(third.open.value());
 
-        first_bearish && first_substantial && second_small && third_bullish && third_closes_high && second_is_star
+        first_bearish
+            && first_substantial
+            && second_small
+            && third_bullish
+            && third_closes_high
+            && second_is_star
     }
 
     /// Calculates confidence score based on pattern metrics
-    fn calculate_confidence(&self, first: &Candle, second: &Candle, third: &Candle, context: &PatternContext) -> Result<Confidence, PatternError> {
+    fn calculate_confidence(
+        &self,
+        first: &Candle,
+        second: &Candle,
+        third: &Candle,
+        context: &PatternContext,
+    ) -> Result<Confidence, PatternError> {
         let mut confidence_score: f64 = 55.0; // Base 55%
 
         // Gap analysis - gaps increase confidence significantly
         let gap_down = second.high.value() < first.close.value();
         let gap_up = third.open.value() > second.high.value();
-        
+
         if gap_down && gap_up {
             confidence_score += 25.0; // Both gaps present
         } else if gap_down || gap_up {
@@ -104,8 +114,11 @@ impl MorningStarDetector {
         // Third candle penetration into first candle
         let first_midpoint = (first.open.value() + first.close.value()) / Decimal::new(2, 0);
         let penetration_ratio = if first.open.value() > first.close.value() {
-            ((third.close.value() - first.close.value()) / (first.open.value() - first.close.value()))
-                .to_string().parse::<f64>().unwrap_or(0.0)
+            ((third.close.value() - first.close.value())
+                / (first.open.value() - first.close.value()))
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0)
         } else {
             0.0
         };
@@ -133,8 +146,9 @@ impl MorningStarDetector {
         // Cap at 100%
         confidence_score = confidence_score.min(100.0);
 
-        Confidence::new(confidence_score / 100.0)
-            .map_err(|e| PatternError::InvalidParameters { message: e.to_string() })
+        Confidence::new(confidence_score / 100.0).map_err(|e| PatternError::InvalidParameters {
+            message: e.to_string(),
+        })
     }
 
     /// Helper function to calculate body ratio
@@ -157,7 +171,11 @@ impl PatternDetector for MorningStarDetector {
         3
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         if candles.len() < 3 {
             return Err(PatternError::InsufficientData {
                 required: 3,
@@ -165,23 +183,29 @@ impl PatternDetector for MorningStarDetector {
             });
         }
 
-        let first = &candles[2];  // Oldest candle
+        let first = &candles[2]; // Oldest candle
         let second = &candles[1]; // Middle candle
-        let third = &candles[0];  // Newest candle
-        
+        let third = &candles[0]; // Newest candle
+
         if !self.validate_morning_star(first, second, third) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(3);
-        
+
         // Add volume confirmation based on third candle
         if candles.len() > 3 {
             let current_volume = third.volume as f64;
-            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>() / (candles.len() - 3) as f64;
-            let volume_ratio = if avg_volume > 0.0 { current_volume / avg_volume } else { 1.0 };
-            context = context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
+            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>()
+                / (candles.len() - 3) as f64;
+            let volume_ratio = if avg_volume > 0.0 {
+                current_volume / avg_volume
+            } else {
+                1.0
+            };
+            context =
+                context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
         }
 
         // Add pattern-specific metadata
@@ -191,7 +215,7 @@ impl PatternDetector for MorningStarDetector {
         context = context.add_metadata("has_gap_up", &gap_up.to_string());
 
         let confidence = self.calculate_confidence(first, second, third, &context)?;
-        
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -239,7 +263,7 @@ impl EveningStarDetector {
 
         // Third candle must be bearish
         let third_bearish = third.close.value() < third.open.value();
-        
+
         // Third candle should close below the midpoint of the first candle
         let first_midpoint = (first.open.value() + first.close.value()) / Decimal::new(2, 0);
         let third_closes_low = third.close.value() < first_midpoint;
@@ -247,17 +271,28 @@ impl EveningStarDetector {
         // Second candle should be higher than both first and third (star position)
         let second_is_star = second.low.value() > first.close.value().min(third.open.value());
 
-        first_bullish && first_substantial && second_small && third_bearish && third_closes_low && second_is_star
+        first_bullish
+            && first_substantial
+            && second_small
+            && third_bearish
+            && third_closes_low
+            && second_is_star
     }
 
     /// Calculates confidence score based on pattern metrics
-    fn calculate_confidence(&self, first: &Candle, second: &Candle, third: &Candle, context: &PatternContext) -> Result<Confidence, PatternError> {
+    fn calculate_confidence(
+        &self,
+        first: &Candle,
+        second: &Candle,
+        third: &Candle,
+        context: &PatternContext,
+    ) -> Result<Confidence, PatternError> {
         let mut confidence_score: f64 = 55.0; // Base 55%
 
         // Gap analysis - gaps increase confidence significantly
         let gap_up = second.low.value() > first.close.value();
         let gap_down = third.open.value() < second.low.value();
-        
+
         if gap_up && gap_down {
             confidence_score += 25.0; // Both gaps present
         } else if gap_up || gap_down {
@@ -292,8 +327,11 @@ impl EveningStarDetector {
 
         // Third candle penetration into first candle
         let penetration_ratio = if first.close.value() > first.open.value() {
-            ((first.close.value() - third.close.value()) / (first.close.value() - first.open.value()))
-                .to_string().parse::<f64>().unwrap_or(0.0)
+            ((first.close.value() - third.close.value())
+                / (first.close.value() - first.open.value()))
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0)
         } else {
             0.0
         };
@@ -321,8 +359,9 @@ impl EveningStarDetector {
         // Cap at 100%
         confidence_score = confidence_score.min(100.0);
 
-        Confidence::new(confidence_score / 100.0)
-            .map_err(|e| PatternError::InvalidParameters { message: e.to_string() })
+        Confidence::new(confidence_score / 100.0).map_err(|e| PatternError::InvalidParameters {
+            message: e.to_string(),
+        })
     }
 
     /// Helper function to calculate body ratio
@@ -345,7 +384,11 @@ impl PatternDetector for EveningStarDetector {
         3
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         if candles.len() < 3 {
             return Err(PatternError::InsufficientData {
                 required: 3,
@@ -353,23 +396,29 @@ impl PatternDetector for EveningStarDetector {
             });
         }
 
-        let first = &candles[2];  // Oldest candle
+        let first = &candles[2]; // Oldest candle
         let second = &candles[1]; // Middle candle
-        let third = &candles[0];  // Newest candle
-        
+        let third = &candles[0]; // Newest candle
+
         if !self.validate_evening_star(first, second, third) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(3);
-        
+
         // Add volume confirmation based on third candle
         if candles.len() > 3 {
             let current_volume = third.volume as f64;
-            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>() / (candles.len() - 3) as f64;
-            let volume_ratio = if avg_volume > 0.0 { current_volume / avg_volume } else { 1.0 };
-            context = context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
+            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>()
+                / (candles.len() - 3) as f64;
+            let volume_ratio = if avg_volume > 0.0 {
+                current_volume / avg_volume
+            } else {
+                1.0
+            };
+            context =
+                context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
         }
 
         // Add pattern-specific metadata
@@ -379,7 +428,7 @@ impl PatternDetector for EveningStarDetector {
         context = context.add_metadata("has_gap_down", &gap_down.to_string());
 
         let confidence = self.calculate_confidence(first, second, third, &context)?;
-        
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -416,45 +465,66 @@ impl ThreeWhiteSoldiersDetector {
     }
 
     /// Validates three white soldiers pattern criteria
-    fn validate_three_white_soldiers(&self, first: &Candle, second: &Candle, third: &Candle) -> bool {
+    fn validate_three_white_soldiers(
+        &self,
+        first: &Candle,
+        second: &Candle,
+        third: &Candle,
+    ) -> bool {
         // All three candles must be bullish
-        let all_bullish = first.close.value() > first.open.value() &&
-                         second.close.value() > second.open.value() &&
-                         third.close.value() > third.open.value();
+        let all_bullish = first.close.value() > first.open.value()
+            && second.close.value() > second.open.value()
+            && third.close.value() > third.open.value();
 
         // Each candle should close higher than the previous
-        let ascending_closes = second.close.value() > first.close.value() &&
-                              third.close.value() > second.close.value();
+        let ascending_closes = second.close.value() > first.close.value()
+            && third.close.value() > second.close.value();
 
         // Each candle should open within the previous candle's body
-        let opens_within_body = second.open.value() > first.open.value() &&
-                               second.open.value() < first.close.value() &&
-                               third.open.value() > second.open.value() &&
-                               third.open.value() < second.close.value();
+        let opens_within_body = second.open.value() > first.open.value()
+            && second.open.value() < first.close.value()
+            && third.open.value() > second.open.value()
+            && third.open.value() < second.close.value();
 
         // Bodies should be substantial (at least 30% of range)
-        let substantial_bodies = self.body_ratio(first) >= 0.3 &&
-                                self.body_ratio(second) >= 0.3 &&
-                                self.body_ratio(third) >= 0.3;
+        let substantial_bodies = self.body_ratio(first) >= 0.3
+            && self.body_ratio(second) >= 0.3
+            && self.body_ratio(third) >= 0.3;
 
         // Upper shadows should be small (less than 25% of range)
-        let small_upper_shadows = self.upper_shadow_ratio(first) <= 0.25 &&
-                                 self.upper_shadow_ratio(second) <= 0.25 &&
-                                 self.upper_shadow_ratio(third) <= 0.25;
+        let small_upper_shadows = self.upper_shadow_ratio(first) <= 0.25
+            && self.upper_shadow_ratio(second) <= 0.25
+            && self.upper_shadow_ratio(third) <= 0.25;
 
-        all_bullish && ascending_closes && opens_within_body && substantial_bodies && small_upper_shadows
+        all_bullish
+            && ascending_closes
+            && opens_within_body
+            && substantial_bodies
+            && small_upper_shadows
     }
 
     /// Calculates confidence score based on pattern metrics
-    fn calculate_confidence(&self, first: &Candle, second: &Candle, third: &Candle, context: &PatternContext) -> Result<Confidence, PatternError> {
+    fn calculate_confidence(
+        &self,
+        first: &Candle,
+        second: &Candle,
+        third: &Candle,
+        context: &PatternContext,
+    ) -> Result<Confidence, PatternError> {
         let mut confidence_score: f64 = 60.0; // Base 60%
 
         // Body size consistency - similar sized bodies increase confidence
-        let body_ratios = [self.body_ratio(first), self.body_ratio(second), self.body_ratio(third)];
+        let body_ratios = [
+            self.body_ratio(first),
+            self.body_ratio(second),
+            self.body_ratio(third),
+        ];
         let avg_body_ratio = body_ratios.iter().sum::<f64>() / 3.0;
-        let body_consistency = body_ratios.iter()
+        let body_consistency = body_ratios
+            .iter()
             .map(|&ratio| (ratio - avg_body_ratio).abs())
-            .sum::<f64>() / 3.0;
+            .sum::<f64>()
+            / 3.0;
 
         if body_consistency <= 0.1 {
             confidence_score += 15.0; // Very consistent bodies
@@ -473,8 +543,11 @@ impl ThreeWhiteSoldiersDetector {
         let avg_upper_shadow = [
             self.upper_shadow_ratio(first),
             self.upper_shadow_ratio(second),
-            self.upper_shadow_ratio(third)
-        ].iter().sum::<f64>() / 3.0;
+            self.upper_shadow_ratio(third),
+        ]
+        .iter()
+        .sum::<f64>()
+            / 3.0;
 
         if avg_upper_shadow <= 0.1 {
             confidence_score += 15.0; // Very small shadows
@@ -490,7 +563,7 @@ impl ThreeWhiteSoldiersDetector {
         let advances = [
             first_advance.to_string().parse::<f64>().unwrap_or(0.0),
             second_advance.to_string().parse::<f64>().unwrap_or(0.0),
-            third_advance.to_string().parse::<f64>().unwrap_or(0.0)
+            third_advance.to_string().parse::<f64>().unwrap_or(0.0),
         ];
 
         let avg_advance = advances.iter().sum::<f64>() / 3.0;
@@ -517,8 +590,9 @@ impl ThreeWhiteSoldiersDetector {
         // Cap at 100%
         confidence_score = confidence_score.min(100.0);
 
-        Confidence::new(confidence_score / 100.0)
-            .map_err(|e| PatternError::InvalidParameters { message: e.to_string() })
+        Confidence::new(confidence_score / 100.0).map_err(|e| PatternError::InvalidParameters {
+            message: e.to_string(),
+        })
     }
 
     /// Helper function to calculate body ratio
@@ -551,7 +625,11 @@ impl PatternDetector for ThreeWhiteSoldiersDetector {
         3
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         if candles.len() < 3 {
             return Err(PatternError::InsufficientData {
                 required: 3,
@@ -559,32 +637,40 @@ impl PatternDetector for ThreeWhiteSoldiersDetector {
             });
         }
 
-        let first = &candles[2];  // Oldest candle
+        let first = &candles[2]; // Oldest candle
         let second = &candles[1]; // Middle candle
-        let third = &candles[0];  // Newest candle
-        
+        let third = &candles[0]; // Newest candle
+
         if !self.validate_three_white_soldiers(first, second, third) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(3);
-        
+
         // Add volume confirmation based on third candle
         if candles.len() > 3 {
             let current_volume = third.volume as f64;
-            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>() / (candles.len() - 3) as f64;
-            let volume_ratio = if avg_volume > 0.0 { current_volume / avg_volume } else { 1.0 };
-            context = context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
+            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>()
+                / (candles.len() - 3) as f64;
+            let volume_ratio = if avg_volume > 0.0 {
+                current_volume / avg_volume
+            } else {
+                1.0
+            };
+            context =
+                context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
         }
 
         // Add pattern-specific metadata
         let total_advance = ((third.close.value() - first.open.value()) / first.open.value())
-            .to_string().parse::<f64>().unwrap_or(0.0);
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0);
         context = context.add_metadata("total_advance", &format!("{:.4}", total_advance));
 
         let confidence = self.calculate_confidence(first, second, third, &context)?;
-        
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }
@@ -623,43 +709,59 @@ impl ThreeBlackCrowsDetector {
     /// Validates three black crows pattern criteria
     fn validate_three_black_crows(&self, first: &Candle, second: &Candle, third: &Candle) -> bool {
         // All three candles must be bearish
-        let all_bearish = first.close.value() < first.open.value() &&
-                         second.close.value() < second.open.value() &&
-                         third.close.value() < third.open.value();
+        let all_bearish = first.close.value() < first.open.value()
+            && second.close.value() < second.open.value()
+            && third.close.value() < third.open.value();
 
         // Each candle should close lower than the previous
-        let descending_closes = second.close.value() < first.close.value() &&
-                               third.close.value() < second.close.value();
+        let descending_closes = second.close.value() < first.close.value()
+            && third.close.value() < second.close.value();
 
         // Each candle should open within the previous candle's body
-        let opens_within_body = second.open.value() < first.open.value() &&
-                               second.open.value() > first.close.value() &&
-                               third.open.value() < second.open.value() &&
-                               third.open.value() > second.close.value();
+        let opens_within_body = second.open.value() < first.open.value()
+            && second.open.value() > first.close.value()
+            && third.open.value() < second.open.value()
+            && third.open.value() > second.close.value();
 
         // Bodies should be substantial (at least 30% of range)
-        let substantial_bodies = self.body_ratio(first) >= 0.3 &&
-                                self.body_ratio(second) >= 0.3 &&
-                                self.body_ratio(third) >= 0.3;
+        let substantial_bodies = self.body_ratio(first) >= 0.3
+            && self.body_ratio(second) >= 0.3
+            && self.body_ratio(third) >= 0.3;
 
         // Lower shadows should be small (less than 25% of range)
-        let small_lower_shadows = self.lower_shadow_ratio(first) <= 0.25 &&
-                                 self.lower_shadow_ratio(second) <= 0.25 &&
-                                 self.lower_shadow_ratio(third) <= 0.25;
+        let small_lower_shadows = self.lower_shadow_ratio(first) <= 0.25
+            && self.lower_shadow_ratio(second) <= 0.25
+            && self.lower_shadow_ratio(third) <= 0.25;
 
-        all_bearish && descending_closes && opens_within_body && substantial_bodies && small_lower_shadows
+        all_bearish
+            && descending_closes
+            && opens_within_body
+            && substantial_bodies
+            && small_lower_shadows
     }
 
     /// Calculates confidence score based on pattern metrics
-    fn calculate_confidence(&self, first: &Candle, second: &Candle, third: &Candle, context: &PatternContext) -> Result<Confidence, PatternError> {
+    fn calculate_confidence(
+        &self,
+        first: &Candle,
+        second: &Candle,
+        third: &Candle,
+        context: &PatternContext,
+    ) -> Result<Confidence, PatternError> {
         let mut confidence_score: f64 = 60.0; // Base 60%
 
         // Body size consistency - similar sized bodies increase confidence
-        let body_ratios = [self.body_ratio(first), self.body_ratio(second), self.body_ratio(third)];
+        let body_ratios = [
+            self.body_ratio(first),
+            self.body_ratio(second),
+            self.body_ratio(third),
+        ];
         let avg_body_ratio = body_ratios.iter().sum::<f64>() / 3.0;
-        let body_consistency = body_ratios.iter()
+        let body_consistency = body_ratios
+            .iter()
             .map(|&ratio| (ratio - avg_body_ratio).abs())
-            .sum::<f64>() / 3.0;
+            .sum::<f64>()
+            / 3.0;
 
         if body_consistency <= 0.1 {
             confidence_score += 15.0; // Very consistent bodies
@@ -678,8 +780,11 @@ impl ThreeBlackCrowsDetector {
         let avg_lower_shadow = [
             self.lower_shadow_ratio(first),
             self.lower_shadow_ratio(second),
-            self.lower_shadow_ratio(third)
-        ].iter().sum::<f64>() / 3.0;
+            self.lower_shadow_ratio(third),
+        ]
+        .iter()
+        .sum::<f64>()
+            / 3.0;
 
         if avg_lower_shadow <= 0.1 {
             confidence_score += 15.0; // Very small shadows
@@ -695,7 +800,7 @@ impl ThreeBlackCrowsDetector {
         let declines = [
             first_decline.to_string().parse::<f64>().unwrap_or(0.0),
             second_decline.to_string().parse::<f64>().unwrap_or(0.0),
-            third_decline.to_string().parse::<f64>().unwrap_or(0.0)
+            third_decline.to_string().parse::<f64>().unwrap_or(0.0),
         ];
 
         let avg_decline = declines.iter().sum::<f64>() / 3.0;
@@ -722,8 +827,9 @@ impl ThreeBlackCrowsDetector {
         // Cap at 100%
         confidence_score = confidence_score.min(100.0);
 
-        Confidence::new(confidence_score / 100.0)
-            .map_err(|e| PatternError::InvalidParameters { message: e.to_string() })
+        Confidence::new(confidence_score / 100.0).map_err(|e| PatternError::InvalidParameters {
+            message: e.to_string(),
+        })
     }
 
     /// Helper function to calculate body ratio
@@ -756,7 +862,11 @@ impl PatternDetector for ThreeBlackCrowsDetector {
         3
     }
 
-    fn detect(&self, candles: &[Candle], params: &PatternParams) -> Result<Option<PatternResult>, PatternError> {
+    fn detect(
+        &self,
+        candles: &[Candle],
+        params: &PatternParams,
+    ) -> Result<Option<PatternResult>, PatternError> {
         if candles.len() < 3 {
             return Err(PatternError::InsufficientData {
                 required: 3,
@@ -764,32 +874,40 @@ impl PatternDetector for ThreeBlackCrowsDetector {
             });
         }
 
-        let first = &candles[2];  // Oldest candle
+        let first = &candles[2]; // Oldest candle
         let second = &candles[1]; // Middle candle
-        let third = &candles[0];  // Newest candle
-        
+        let third = &candles[0]; // Newest candle
+
         if !self.validate_three_black_crows(first, second, third) {
             return Ok(None);
         }
 
         // Build context
         let mut context = PatternContext::new(3);
-        
+
         // Add volume confirmation based on third candle
         if candles.len() > 3 {
             let current_volume = third.volume as f64;
-            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>() / (candles.len() - 3) as f64;
-            let volume_ratio = if avg_volume > 0.0 { current_volume / avg_volume } else { 1.0 };
-            context = context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
+            let avg_volume = candles[3..].iter().map(|c| c.volume as f64).sum::<f64>()
+                / (candles.len() - 3) as f64;
+            let volume_ratio = if avg_volume > 0.0 {
+                current_volume / avg_volume
+            } else {
+                1.0
+            };
+            context =
+                context.with_volume_confirmation(VolumeConfirmation::from_ratio(volume_ratio));
         }
 
         // Add pattern-specific metadata
         let total_decline = ((first.open.value() - third.close.value()) / first.open.value())
-            .to_string().parse::<f64>().unwrap_or(0.0);
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0);
         context = context.add_metadata("total_decline", &format!("{:.4}", total_decline));
 
         let confidence = self.calculate_confidence(first, second, third, &context)?;
-        
+
         if confidence.value() < params.min_confidence {
             return Ok(None);
         }

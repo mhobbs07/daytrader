@@ -3,8 +3,9 @@
 //! These tests validate the complete risk workflow from event ingestion
 //! through risk evaluation and violation handling.
 
-use daytrader::brokers::types::{Message, OrderId, Price, Quantity, Symbol, PatternName, Confidence};
-use daytrader::risk::types::{AccountId, PatternPerformanceThresholds, Percentage, Count};
+use daytrader::brokers::types::{
+    Confidence, Message, OrderId, PatternName, Price, Quantity, Symbol,
+};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
 use daytrader::events::types::{
@@ -12,9 +13,10 @@ use daytrader::events::types::{
     RiskViolation, RiskViolationType, SignalType,
 };
 use daytrader::risk::RiskEngine;
+use daytrader::risk::types::{AccountId, Count, PatternPerformanceThresholds, Percentage};
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test the complete risk workflow: event bus → risk evaluation → violation handling
 #[tokio::test]
@@ -64,7 +66,10 @@ async fn test_complete_risk_workflow() {
     }
 
     // Should have detected position size violation
-    assert!(violations_found > 0, "Expected risk violations but none were detected");
+    assert!(
+        violations_found > 0,
+        "Expected risk violations but none were detected"
+    );
 
     // Verify trading is not halted (position size might not be critical)
     assert!(engine.is_trading_allowed().await);
@@ -96,7 +101,9 @@ async fn test_pattern_detection_risk_workflow() {
     };
 
     // Publish pattern detected event
-    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal.clone() });
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: pattern_signal.clone(),
+    });
 
     // Wait for processing
     sleep(Duration::from_millis(100)).await;
@@ -116,9 +123,18 @@ async fn test_pattern_detection_risk_workflow() {
     }
 
     // Should have processed the pattern without critical violations
-    assert!(events_received > 0, "Expected events from pattern detection");
-    assert_eq!(violations, 0, "Should not have violations for valid pattern");
-    println!("Processed {} events, {} performance updates, {} violations", events_received, performance_updates, violations);
+    assert!(
+        events_received > 0,
+        "Expected events from pattern detection"
+    );
+    assert_eq!(
+        violations, 0,
+        "Should not have violations for valid pattern"
+    );
+    println!(
+        "Processed {} events, {} performance updates, {} violations",
+        events_received, performance_updates, violations
+    );
 }
 
 /// Test event persistence for risk events
@@ -141,7 +157,9 @@ async fn test_event_persistence() {
         pattern_name: None,
     };
 
-    event_bus.publish(MarketEvent::RiskViolation { violation: violation.clone() });
+    event_bus.publish(MarketEvent::RiskViolation {
+        violation: violation.clone(),
+    });
 
     // Wait for persistence (assuming implemented)
     sleep(Duration::from_millis(100)).await;
@@ -176,7 +194,9 @@ async fn test_pattern_specific_events() {
         price: Price::new(Decimal::new(15000, 2)).unwrap(),
     };
 
-    event_bus.publish(MarketEvent::PatternDetected { signal: low_conf_pattern });
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: low_conf_pattern,
+    });
 
     // Wait for processing
     sleep(Duration::from_millis(100)).await;
@@ -193,7 +213,10 @@ async fn test_pattern_specific_events() {
     }
 
     // Should have a violation for low confidence
-    assert_eq!(violations, 1, "Expected violation for low confidence pattern");
+    assert_eq!(
+        violations, 1,
+        "Expected violation for low confidence pattern"
+    );
     assert!(performance_updates >= 1, "Expected performance update");
 }
 
@@ -240,11 +263,16 @@ async fn test_multi_rule_evaluation() {
     assert!(!violations.is_empty(), "Expected multiple risk violations");
 
     // Check for different violation types
-    let violation_types: std::collections::HashSet<_> =
-        violations.iter().map(|v| v.violation_type.clone()).collect();
+    let violation_types: std::collections::HashSet<_> = violations
+        .iter()
+        .map(|v| v.violation_type.clone())
+        .collect();
 
     println!("Detected violation types: {:?}", violation_types);
-    assert!(violations.len() >= 1, "Should detect at least one type of violation");
+    assert!(
+        violations.len() >= 1,
+        "Should detect at least one type of violation"
+    );
 }
 
 /// Test end-to-end: pattern detection → risk evaluation → trade execution
@@ -271,7 +299,9 @@ async fn test_end_to_end_pattern_risk_workflow() {
         price: Price::new(Decimal::new(15000, 2)).unwrap(),
     };
 
-    event_bus.publish(MarketEvent::PatternDetected { signal: pattern_signal.clone() });
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: pattern_signal.clone(),
+    });
 
     // Step 2: Order placement (assuming execution system would do this)
     let order = Arc::new(Order {
@@ -286,7 +316,9 @@ async fn test_end_to_end_pattern_risk_workflow() {
         updated_at: chrono::Utc::now(),
     });
 
-    event_bus.publish(MarketEvent::OrderPlaced { order: Arc::clone(&order) });
+    event_bus.publish(MarketEvent::OrderPlaced {
+        order: Arc::clone(&order),
+    });
 
     // Step 3: Order fill
     let fill = Fill {
@@ -338,8 +370,14 @@ async fn test_end_to_end_pattern_risk_workflow() {
 
     // Should have processed the full workflow without critical failures
     assert!(events_received > 0, "Expected events from full workflow");
-    assert_eq!(violations, 0, "Should not have violations for valid workflow");
-    println!("Full workflow processed: {} events, {} performance updates, {} violations", events_received, performance_updates, violations);
+    assert_eq!(
+        violations, 0,
+        "Should not have violations for valid workflow"
+    );
+    println!(
+        "Full workflow processed: {} events, {} performance updates, {} violations",
+        events_received, performance_updates, violations
+    );
 }
 
 /// Test event publishing and risk violation events
@@ -379,8 +417,14 @@ async fn test_event_publishing() {
         }
     }
 
-    assert_eq!(risk_violations, 1, "Should publish exactly one risk violation event");
-    println!("Received {} risk violations and {} other events", risk_violations, other_events);
+    assert_eq!(
+        risk_violations, 1,
+        "Should publish exactly one risk violation event"
+    );
+    println!(
+        "Received {} risk violations and {} other events",
+        risk_violations, other_events
+    );
 }
 
 /// Test risk state persistence (mock database interaction)
@@ -427,7 +471,10 @@ async fn test_risk_state_persistence() {
 
     // State should be updated (P&L should reflect commission)
     assert_ne!(updated_state.last_updated, initial_state.last_updated);
-    println!("State updated from {:?} to {:?}", initial_state.last_updated, updated_state.last_updated);
+    println!(
+        "State updated from {:?} to {:?}",
+        initial_state.last_updated, updated_state.last_updated
+    );
 }
 
 /// Test concurrent risk evaluations under load
@@ -479,11 +526,17 @@ async fn test_concurrent_risk_evaluations() {
         violation_count += 1;
     }
 
-    println!("Processed {} concurrent orders, detected {} violations", 50, violation_count);
+    println!(
+        "Processed {} concurrent orders, detected {} violations",
+        50, violation_count
+    );
 
     // Should handle concurrent load without panicking
     // (exact violation count may vary based on rule evaluation)
-    assert!(violation_count >= 0, "Should handle concurrent load gracefully");
+    assert!(
+        violation_count >= 0,
+        "Should handle concurrent load gracefully"
+    );
 }
 
 /// Test risk evaluation with position updates
@@ -503,7 +556,7 @@ async fn test_position_update_risk_evaluation() {
         quantity: Quantity::new(1000).unwrap(),
         average_entry_price: Price::new(Decimal::new(20000, 2)).unwrap(),
         current_price: Price::new(Decimal::new(15000, 2)).unwrap(), // Down 25%
-        unrealized_pl: Decimal::new(-500000, 2), // -$5,000 loss
+        unrealized_pl: Decimal::new(-500000, 2),                    // -$5,000 loss
         realized_pl: Decimal::ZERO,
         opened_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
@@ -520,7 +573,10 @@ async fn test_position_update_risk_evaluation() {
     println!("Daily P&L after position update: {}", state.daily_pl);
 
     // Should reflect the unrealized loss in daily P&L tracking
-    assert!(state.daily_pl <= Decimal::ZERO, "Should track unrealized losses");
+    assert!(
+        state.daily_pl <= Decimal::ZERO,
+        "Should track unrealized losses"
+    );
 }
 
 /// Helper function to create test risk configuration
