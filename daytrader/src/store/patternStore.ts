@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
+
+let patternUnlistener: UnlistenFn | null = null;
 
 interface PatternSignal {
   symbol: string;
@@ -21,21 +23,34 @@ interface PatternStore {
   patterns: PatternSignal[];
   statistics: PatternStats | null;
   loadStatistics: () => Promise<void>;
+  dispose: () => void;
 }
 
-export const usePatternStore = create<PatternStore>((set) => ({
-  patterns: [],
-  statistics: null,
+export const usePatternStore = create<PatternStore>((set) => {
+  if (!patternUnlistener) {
+    (async () => {
+      patternUnlistener = await listen<PatternSignal>('patterns:detected', (event) => {
+        usePatternStore.setState(state => ({
+          patterns: [event.payload, ...state.patterns].slice(0, 100)
+        }));
+      });
+    })();
+  }
 
-  loadStatistics: async () => {
-    const stats = await invoke<PatternStats>('get_pattern_statistics');
-    set({ statistics: stats });
-  },
-}));
+  return {
+    patterns: [],
+    statistics: null,
 
-// Listen for pattern detections
-listen<PatternSignal>('patterns:detected', (event) => {
-  usePatternStore.setState(state => ({
-    patterns: [event.payload, ...state.patterns].slice(0, 100) // Keep last 100
-  }));
+    loadStatistics: async () => {
+      const stats = await invoke<PatternStats>('get_pattern_statistics');
+      set({ statistics: stats });
+    },
+
+    dispose: () => {
+      if (patternUnlistener) {
+        patternUnlistener();
+        patternUnlistener = null;
+      }
+    }
+  };
 });
