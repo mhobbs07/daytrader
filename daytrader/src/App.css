@@ -268,10 +268,45 @@ button:disabled {
   flex-direction: column;
 }
 
+.pattern-filters {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.filter-input,
+.filter-select {
+  min-width: 120px;
+  font-size: 0.85rem;
+}
+
+.filter-slider {
+  min-width: 140px;
+  height: 6px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
 .pattern-list ul {
   list-style: none;
   padding: 0;
-  margin: 0.75rem 0 0 0;
+  margin: 0;
   overflow-y: auto;
   flex: 1;
 }
