@@ -48,7 +48,6 @@ Last Updated: 2026-04-22
 | B-036 | Add TypeScript types module: `daytrader/src/types/` with market, pattern, system, risk types | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/types/` (new) |
 | B-037 | Add React custom hooks: `useMarketData`, `usePatterns`, `useTauriEvents` | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/hooks/` (new) |
 | B-039 | Extend App.tsx to support multi-symbol watchlist (not just AAPL hardcoded) | Medium | codebase audit | `daytrader/src/App.tsx` |
-| B-040 | Add PatternList filter UI (by symbol, signal type, confidence threshold) | Medium | codebase audit | `daytrader/src/components/PatternList.tsx` |
 | B-042 | Fix PDT holiday edge cases in risk/pdt module | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/holidays.rs` |
 | B-043 | Time zone handling (DST transitions) in risk/pdt | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/` |
 | B-044 | Rate limiting improvements for Alpaca broker | Medium | progress-tracking.md | `src/brokers/alpaca/` |
@@ -101,6 +100,7 @@ Last Updated: 2026-04-22
 | B-038 | Add event listener cleanup in marketStore / patternStore on unmount | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | patternStore robustified with array pattern; StoreCleanup wrapper runs dispose on all stores at app unmount |
 | B-041 | Add error boundary component for graceful IPC failure handling | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | ErrorBoundary.tsx created; wraps App in main.tsx; shows clean error UI on IPC crashes |
 | B-047 | Fix trivial test in src/risk/mod.rs (assert!(true)) | 2026-04-22 | feat/techdebt-unblock-sweep | 9/9 pass | Strengthened test to construct RiskEngine; removed stale baseline entry from known_test_issues.txt |
+| B-040 | Add PatternList filter UI (by symbol, signal type, confidence threshold) | 2026-04-22 | feat/techdebt-unblock-sweep | npm run build + verify_agent_work.sh 9/9 | Symbol substring filter, signal type dropdown, confidence threshold slider; filters applied client-side via useMemo |
 
 ---
 
