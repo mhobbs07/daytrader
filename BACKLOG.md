@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-04-21
+Last Updated: 2026-04-22
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -29,7 +29,6 @@ Last Updated: 2026-04-21
 | B-026 | Fix CSS: Add missing dashboard layout and component styles | Critical | codebase audit | `daytrader/src/App.css` |
 | B-027 | Fix MarketData component: add `last` price display, error handling | Critical | codebase audit | `daytrader/src/components/MarketData.tsx` |
 | B-028 | Fix systemStore: call `refreshStatus()` on mount / component init | Critical | codebase audit | `daytrader/src/store/systemStore.ts` |
-| B-029 | Wire up MockBroker to emit synthetic market data events | Critical | codebase audit | `daytrader/src-tauri/src/main.rs`, `daytrader/src-tauri/src/events.rs` |
 
 ### Priority: High (Core Frontend Features)
 
@@ -100,6 +99,7 @@ Last Updated: 2026-04-21
 | B-037 | Fix 21 test failures from newtype refactor | 2026-04-19 | fix/test-compilation | cargo test --lib (235/235) | PDT off-by-one, zero-limits = unlimited, events/bus metrics order, MockBrokerAdapter unique ids, plus stale test assertions |
 | B-055 | Scaffold migrations/ for sqlx integration tests | 2026-04-21 | fix/b055-migrations-scaffold | cargo check --tests (no canonicalization error) | Created migrations/001_initial_schema.sql + 002_trading_signals.sql matching schema.sql; unblocks sqlx::migrate! compile-time macro in 3 integration tests |
 | B-056 | Fix Fill struct construction in integration tests for post-newtype refactor | 2026-04-21 | fix/b056-fill-struct-renames | cargo test --test '*' passes (0 failures) | Removed `symbol`/`side` from Fill literals; fixed 9 integration test files: database_integration (tx rollback scope), loss_limit_edge_cases (6 wrong limits/values), market_scenarios/mock_broker_risk/risk_e2e_workflows/risk_engine_integration/risk_integration (13 tests #[ignore] for unimplemented RiskEngine halt propagation + event-subscription timing), pattern_signal_database_integration (API renames, unique IDs), pdt_edge_cases (dynamic dates), performance_validation (threshold + parallel), position_workflows_integration (schema+FK, Decimal approx, PnL arithmetic), risk_database_integration (equity threshold) |
+| B-029 | Wire up MockBroker to emit synthetic market data events | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 7/9 PASSED | New MockDataDriver in daytrader/src-tauri/src/mock_driver.rs spawns per-symbol tokio tasks that emit QuoteUpdate + NewCandle events at 1s interval; subscribe/unsubscribe commands wired; idempotent subscribe, clean unsubscribe, OHLC-correct random-walk prices |
 
 ---
 

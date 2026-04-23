@@ -3,8 +3,10 @@
 
 mod commands;
 mod events;
+mod mock_driver;
 mod state;
 
+use crate::mock_driver::MockDataDriver;
 use daytrader::brokers::mock::MockBroker;
 use daytrader::config::AppConfig;
 use daytrader::events::bus::EventBus;
@@ -67,6 +69,9 @@ fn main() {
     // Initialize existing backend systems
     let event_bus = EventBus::new(10000);
     let broker = Arc::new(MockBroker::default());
+
+    // Create mock data driver (emits synthetic events every 1 s in demo mode)
+    let mock_driver = Arc::new(MockDataDriver::new(event_bus.clone()));
 
     // Initialize pattern registry with all implemented patterns
     let mut pattern_registry = PatternRegistry::new();
@@ -140,6 +145,7 @@ fn main() {
         Arc::clone(&market_cache),
         Arc::clone(&pattern_cache),
         Arc::clone(&risk_engine),
+        Some(Arc::clone(&mock_driver)),
     );
 
     // Start pattern detection service
@@ -220,6 +226,7 @@ fn main() {
             commands::market_data::get_latest_quote,
             commands::market_data::get_recent_candles,
             commands::market_data::subscribe_symbol,
+            commands::market_data::unsubscribe_symbol,
             commands::patterns::get_detected_patterns_for_symbol,
             commands::patterns::get_pattern_statistics,
             commands::risk::get_risk_state,
