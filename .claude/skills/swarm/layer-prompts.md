@@ -57,7 +57,7 @@ When done, run: cargo check && cargo test --lib -- {test_filter}
 
 ---
 
-## Frontend Layer Agent (model: haiku)
+## Frontend Layer Agent (model: sonnet)
 
 ```
 You are a Tauri frontend specialist working on: {feature_description}
@@ -81,7 +81,7 @@ When done, verify the frontend builds successfully.
 
 ---
 
-## Test/Verification Agent (model: haiku)
+## Test/Verification Agent (model: sonnet)
 
 ```
 You are a verification specialist. Run the full test suite and report results.
