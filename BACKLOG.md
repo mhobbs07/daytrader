@@ -47,10 +47,8 @@ Last Updated: 2026-04-22
 |----|------|----------|--------|-------|
 | B-036 | Add TypeScript types module: `daytrader/src/types/` with market, pattern, system, risk types | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/types/` (new) |
 | B-037 | Add React custom hooks: `useMarketData`, `usePatterns`, `useTauriEvents` | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/hooks/` (new) |
-| B-038 | Add event listener cleanup (unlisten) in marketStore / patternStore on unmount | Medium | codebase audit | `daytrader/src/store/marketStore.ts`, `daytrader/src/store/patternStore.ts` |
 | B-039 | Extend App.tsx to support multi-symbol watchlist (not just AAPL hardcoded) | Medium | codebase audit | `daytrader/src/App.tsx` |
 | B-040 | Add PatternList filter UI (by symbol, signal type, confidence threshold) | Medium | codebase audit | `daytrader/src/components/PatternList.tsx` |
-| B-041 | Add error boundary component for graceful IPC failure handling | Medium | best practice | `daytrader/src/components/` |
 | B-042 | Fix PDT holiday edge cases in risk/pdt module | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/holidays.rs` |
 | B-043 | Time zone handling (DST transitions) in risk/pdt | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/` |
 | B-044 | Rate limiting improvements for Alpaca broker | Medium | progress-tracking.md | `src/brokers/alpaca/` |
@@ -99,7 +97,9 @@ Last Updated: 2026-04-22
 | B-037 | Fix 21 test failures from newtype refactor | 2026-04-19 | fix/test-compilation | cargo test --lib (235/235) | PDT off-by-one, zero-limits = unlimited, events/bus metrics order, MockBrokerAdapter unique ids, plus stale test assertions |
 | B-055 | Scaffold migrations/ for sqlx integration tests | 2026-04-21 | fix/b055-migrations-scaffold | cargo check --tests (no canonicalization error) | Created migrations/001_initial_schema.sql + 002_trading_signals.sql matching schema.sql; unblocks sqlx::migrate! compile-time macro in 3 integration tests |
 | B-056 | Fix Fill struct construction in integration tests for post-newtype refactor | 2026-04-21 | fix/b056-fill-struct-renames | cargo test --test '*' passes (0 failures) | Removed `symbol`/`side` from Fill literals; fixed 9 integration test files: database_integration (tx rollback scope), loss_limit_edge_cases (6 wrong limits/values), market_scenarios/mock_broker_risk/risk_e2e_workflows/risk_engine_integration/risk_integration (13 tests #[ignore] for unimplemented RiskEngine halt propagation + event-subscription timing), pattern_signal_database_integration (API renames, unique IDs), pdt_edge_cases (dynamic dates), performance_validation (threshold + parallel), position_workflows_integration (schema+FK, Decimal approx, PnL arithmetic), risk_database_integration (equity threshold) |
-| B-029 | Wire up MockBroker to emit synthetic market data events | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 7/9 PASSED | New MockDataDriver in daytrader/src-tauri/src/mock_driver.rs spawns per-symbol tokio tasks that emit QuoteUpdate + NewCandle events at 1s interval; subscribe/unsubscribe commands wired; idempotent subscribe, clean unsubscribe, OHLC-correct random-walk prices |
+| B-029 | Wire up MockBroker to emit synthetic market data events | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 PASSED | New MockDataDriver in daytrader/src-tauri/src/mock_driver.rs spawns per-symbol tokio tasks that emit QuoteUpdate + NewCandle events at 1s interval; subscribe/unsubscribe commands wired; idempotent subscribe, clean unsubscribe, OHLC-correct random-walk prices |
+| B-038 | Add event listener cleanup in marketStore / patternStore on unmount | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | patternStore robustified with array pattern; StoreCleanup wrapper runs dispose on all stores at app unmount |
+| B-041 | Add error boundary component for graceful IPC failure handling | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | ErrorBoundary.tsx created; wraps App in main.tsx; shows clean error UI on IPC crashes |
 
 ---
 
