@@ -100,6 +100,7 @@ Last Updated: 2026-04-22
 | B-029 | Wire up MockBroker to emit synthetic market data events | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 PASSED | New MockDataDriver in daytrader/src-tauri/src/mock_driver.rs spawns per-symbol tokio tasks that emit QuoteUpdate + NewCandle events at 1s interval; subscribe/unsubscribe commands wired; idempotent subscribe, clean unsubscribe, OHLC-correct random-walk prices |
 | B-038 | Add event listener cleanup in marketStore / patternStore on unmount | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | patternStore robustified with array pattern; StoreCleanup wrapper runs dispose on all stores at app unmount |
 | B-041 | Add error boundary component for graceful IPC failure handling | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | ErrorBoundary.tsx created; wraps App in main.tsx; shows clean error UI on IPC crashes |
+| B-047 | Fix trivial test in src/risk/mod.rs (assert!(true)) | 2026-04-22 | feat/techdebt-unblock-sweep | 9/9 pass | Strengthened test to construct RiskEngine; removed stale baseline entry from known_test_issues.txt |
 
 ---
 

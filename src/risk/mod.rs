@@ -17,10 +17,21 @@ pub use crate::config::RiskConfig;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::bus::EventBus;
+    use rust_decimal::Decimal;
+    use std::sync::Arc;
 
     #[test]
-    fn test_module_compilation() {
-        // Basic compilation test - will be expanded as implementation progresses
-        assert!(true);
+    fn test_risk_engine_construction() {
+        // Verify RiskEngine can be constructed and exports are accessible
+        let config = RiskConfig::default();
+        let event_bus = Arc::new(EventBus::new(100));
+        let account_id = AccountId::new("TEST_ACCOUNT");
+        let initial_equity = Decimal::from(100_000);
+
+        let engine = RiskEngine::new(config, event_bus, account_id, initial_equity);
+
+        // Verify the engine was successfully created by checking it exists
+        let _ = &engine;
     }
 }
