@@ -57,6 +57,18 @@ if echo "$COMMAND" | grep -qE "^git push" 2>/dev/null; then
   exit 0
 fi
 
+# Warn when --no-verify or -n flag is used with git commit (bypasses pre-commit hooks)
+if echo "$COMMAND" | grep -qE "git commit.*(--no-verify|-n( |$))" 2>/dev/null; then
+  jq -n '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
+      permissionDecisionReason: "⚠️ --no-verify bypasses pre-commit hooks (commitlint + Husky). Ensure verify_agent_work.sh has been run manually."
+    }
+  }'
+  exit 0
+fi
+
 # Warn for git commit without running verification first
 if echo "$COMMAND" | grep -qE "^git commit" 2>/dev/null; then
   jq -n '{
