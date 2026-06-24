@@ -14,18 +14,18 @@ jobs:
           BRANCH_NAME="${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}"
           echo "Validating branch name: $BRANCH_NAME"
 
-          # Allow main and develop
-          if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "develop" ]]; then
-            echo "Branch name $BRANCH_NAME is allowed"
+          # Allowed branch names match .claude/rules/branching.md.
+          if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "staging" ]]; then
+            echo "Branch name $BRANCH_NAME is allowed (protected)"
             exit 0
           fi
 
-          # Check pattern: feature/*, bugfix/*, hotfix/*, release/*
-          if [[ "$BRANCH_NAME" =~ ^(feature|bugfix|hotfix|release)/.+ ]]; then
+          # Pattern: feat/*, fix/*, refactor/*, test/*, docs/*, claude/* (worktree)
+          if [[ "$BRANCH_NAME" =~ ^(feat|fix|refactor|test|docs|claude)/.+ ]]; then
             echo "Branch name $BRANCH_NAME follows naming convention"
             exit 0
           else
             echo "Branch name $BRANCH_NAME does not follow naming convention"
-            echo "Allowed patterns: feature/*, bugfix/*, hotfix/*, release/*"
+            echo "Allowed: main, staging, feat/*, fix/*, refactor/*, test/*, docs/*, claude/*"
             exit 1
           fi
