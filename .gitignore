@@ -23,9 +23,10 @@ config/production.toml
 .env
 .env.local
 
-# Data directory (except default config)
-data/
-!data/.gitkeep
+# Data directory (except default config) — root-only, so source dirs
+# named `data` (e.g. `src/data/`) are NOT silently swallowed.
+/data/
+!/data/.gitkeep
 
 # IDE
 .vscode/

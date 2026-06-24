@@ -294,7 +294,6 @@ impl EventBus {
 
         match self.sender.send(event) {
             Ok(subscriber_count) => {
-
                 let latency_ns = start.elapsed().as_nanos() as u64;
                 self.metrics.record_latency(latency_ns);
 

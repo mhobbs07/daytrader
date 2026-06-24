@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-04-21
+Last Updated: 2026-06-24
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -77,6 +77,14 @@ Last Updated: 2026-04-21
 |----|------|----------|--------|-------|
 | B-055 | Scaffold `migrations/` directory for sqlx integration tests | Critical | integration test failures | `migrations/` (new) |
 
+### Priority: Medium (Architecture Cleanup)
+
+| ID | Task | Priority | Source | Scope |
+|----|------|----------|--------|-------|
+| B-058 | Integrate orphaned `src/domain/` and `src/infrastructure/` into the build | Medium | baseline audit 2026-06-24 | `src/lib.rs`, `src/domain/*`, `src/infrastructure/*` |
+
+> Note: `domain/` and `infrastructure/` exist on disk with their own CLAUDE.md files and are listed in architecture rules, but are not declared in `lib.rs` — so they are dead code. Bringing them into the build will likely surface compile errors from drift since the newtype refactor (B-036/B-037).
+
 ---
 
 ## Completed Tasks
@@ -99,6 +107,7 @@ Last Updated: 2026-04-21
 | B-036 | Fix test compilation errors and async deadlocks | 2026-04-14 | fix/test-compilation | cargo test --lib (235/235) | Fixed 91 compile errors + 3 RwLock deadlocks; added .unwrap() to newtype constructors in tests; fixed include_str path |
 | B-037 | Fix 21 test failures from newtype refactor | 2026-04-19 | fix/test-compilation | cargo test --lib (235/235) | PDT off-by-one, zero-limits = unlimited, events/bus metrics order, MockBrokerAdapter unique ids, plus stale test assertions |
 | B-055 | Scaffold migrations/ for sqlx integration tests | 2026-04-21 | fix/b055-migrations-scaffold | cargo check --tests (no canonicalization error) | Created migrations/001_initial_schema.sql + 002_trading_signals.sql matching schema.sql; unblocks sqlx::migrate! compile-time macro in 3 integration tests |
+| B-057 | Unbreak baseline: remove phantom `data` module, fix `.gitignore` swallow, auto-setup dev DB in verify | 2026-06-24 | claude/check-last-commit-HRELj | verify_agent_work.sh | Root cause: `.gitignore` `data/` pattern silently swallowed `src/data/` since Phase 0; phantom `pub mod data;` blocked all compile-dependent checks. Fixes: removed phantom from `lib.rs`, scoped `.gitignore` to `/data/`, added `schema_migrations` to `schema.sql`, made `setup_db.sh` non-interactive with python3 fallback, `verify_agent_work.sh` now bootstraps DB+DATABASE_URL automatically. |
 
 ---
 

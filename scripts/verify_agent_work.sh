@@ -21,6 +21,16 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
+# Ensure dev database exists and DATABASE_URL is set, so sqlx compile-time
+# `query!` macros can validate against a real schema during cargo check/test/doc.
+if [ -z "${DATABASE_URL:-}" ]; then
+    if [ ! -f "data/db/daytrader.db" ]; then
+        echo -e "${BLUE}Dev database missing — running setup_db.sh --if-missing${NC}"
+        ./scripts/setup_db.sh --if-missing >/dev/null
+    fi
+    export DATABASE_URL="sqlite:$(pwd)/data/db/daytrader.db"
+fi
+
 TOTAL_STEPS=9
 PASSED=0
 FAILED=0

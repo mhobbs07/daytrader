@@ -459,3 +459,12 @@ CREATE TABLE IF NOT EXISTS indicator_values (
 );
 
 CREATE INDEX IF NOT EXISTS idx_indicator_values_symbol_time ON indicator_values(symbol, timestamp DESC);
+
+-- Schema migrations tracking. Created at runtime by MigrationManager, but also
+-- included here so sqlx compile-time `query!` macros in src/db/migrations.rs
+-- can validate against a fresh dev DB built from this schema.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    description TEXT NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

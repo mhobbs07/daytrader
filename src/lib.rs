@@ -13,7 +13,6 @@
 
 pub mod brokers;
 pub mod config;
-pub mod data;
 pub mod db;
 pub mod events;
 pub mod execution;
