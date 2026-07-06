@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMarketStore } from '../store/marketStore';
+import { CandleChart } from './CandleChart';
 
 export const MarketData: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { quotes, getLatestQuote, subscribeToSymbol } = useMarketStore();
@@ -80,6 +81,7 @@ export const MarketData: React.FC<{ symbol: string }> = ({ symbol }) => {
           Updated: {new Date(quote.timestamp).toLocaleTimeString()}
         </div>
       </div>
+      <CandleChart symbol={symbol} />
     </div>
   );
 };
