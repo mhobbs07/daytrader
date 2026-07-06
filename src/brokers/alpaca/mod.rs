@@ -3,7 +3,9 @@
 //! This module provides integration with Alpaca Markets for both
 //! order execution (REST API) and real-time market data (WebSocket).
 
+pub mod backoff;
 pub mod config;
+pub mod ratelimit;
 pub mod rest;
 pub mod types;
 pub mod websocket;

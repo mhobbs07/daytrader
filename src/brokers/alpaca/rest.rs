@@ -3,30 +3,47 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::config::AlpacaConfig;
+use super::ratelimit::{RateLimiter, RateLimiterConfig};
 use super::types::{AlpacaAccount, AlpacaOrder, AlpacaPosition, PlaceOrderRequest};
 use crate::brokers::traits::{Account, Candle, Order, OrderExecutionProvider, Position, Timeframe};
 use crate::brokers::types::{OrderId, Reason, Symbol};
 use crate::utils::errors::BrokerError;
+
+/// Fallback wait time when a 429 response has no usable `Retry-After`
+/// header (missing or unparseable).
+const DEFAULT_RATE_LIMIT_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 /// Alpaca REST API client
 #[derive(Debug, Clone)]
 pub struct RestClient {
     config: AlpacaConfig,
     client: Client,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl RestClient {
-    /// Creates a new REST client
+    /// Creates a new REST client using the default Alpaca free-tier rate
+    /// limit (200 requests/minute).
     pub fn new(config: AlpacaConfig) -> Self {
+        Self::with_rate_limit(config, RateLimiterConfig::default())
+    }
+
+    /// Creates a new REST client with a custom rate-limit configuration.
+    pub fn with_rate_limit(config: AlpacaConfig, rate_limit: RateLimiterConfig) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap_or_else(|_| Client::new());
 
-        Self { config, client }
+        Self {
+            config,
+            client,
+            rate_limiter: Arc::new(RateLimiter::new(rate_limit)),
+        }
     }
 
     /// Adds authentication headers to a request builder
@@ -38,6 +55,8 @@ impl RestClient {
 
     /// Makes a GET request to the Alpaca API
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, BrokerError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url, path);
         let request = self.client.get(&url);
         let request = self.add_auth_headers(request);
@@ -56,6 +75,8 @@ impl RestClient {
         path: &str,
         body: &B,
     ) -> Result<T, BrokerError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url, path);
         let request = self.client.post(&url).json(body);
         let request = self.add_auth_headers(request);
@@ -70,6 +91,8 @@ impl RestClient {
 
     /// Makes a DELETE request to the Alpaca API
     async fn delete(&self, path: &str) -> Result<(), BrokerError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url, path);
         let request = self.client.delete(&url);
         let request = self.add_auth_headers(request);
@@ -83,11 +106,12 @@ impl RestClient {
             Ok(())
         } else {
             let status = response.status();
+            let retry_after = Self::parse_retry_after(&response);
             let error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(self.map_error(status, &error_text))
+            Err(self.map_error(status, &error_text, retry_after))
         }
     }
 
@@ -104,26 +128,53 @@ impl RestClient {
                 .await
                 .map_err(|e| BrokerError::ApiError(format!("Failed to parse response: {}", e)))
         } else {
+            let retry_after = Self::parse_retry_after(&response);
             let error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(self.map_error(status, &error_text))
+            Err(self.map_error(status, &error_text, retry_after))
         }
     }
 
+    /// Extracts and parses the `Retry-After` header from a response, if
+    /// present. Returns `None` if the header is absent or unparseable, in
+    /// which case callers fall back to a default wait.
+    fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
+        let raw = response.headers().get(reqwest::header::RETRY_AFTER)?;
+        let raw = raw.to_str().ok()?;
+        Self::parse_retry_after_value(raw)
+    }
+
+    /// Parses a raw `Retry-After` header value into a [`Duration`].
+    ///
+    /// Alpaca (like most APIs) sends this as an integer number of seconds,
+    /// so only that form is supported. Anything else (missing, empty,
+    /// non-numeric, negative) yields `None` so the caller can fall back to
+    /// [`DEFAULT_RATE_LIMIT_RETRY_AFTER`].
+    fn parse_retry_after_value(raw: &str) -> Option<Duration> {
+        raw.trim().parse::<u64>().ok().map(Duration::from_secs)
+    }
+
     /// Maps HTTP status codes to BrokerError
-    fn map_error(&self, status: StatusCode, message: &str) -> BrokerError {
+    ///
+    /// `retry_after` should be the parsed `Retry-After` header value from
+    /// the response (if any); it is only used for 429 responses and falls
+    /// back to [`DEFAULT_RATE_LIMIT_RETRY_AFTER`] when `None`.
+    fn map_error(
+        &self,
+        status: StatusCode,
+        message: &str,
+        retry_after: Option<Duration>,
+    ) -> BrokerError {
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 BrokerError::AuthenticationFailed(message.to_string())
             }
             StatusCode::NOT_FOUND => BrokerError::SymbolNotFound(message.to_string()),
-            StatusCode::TOO_MANY_REQUESTS => {
-                // Try to parse retry-after from message, default to 60 seconds
-                let retry_after = Duration::from_secs(60);
-                BrokerError::RateLimitExceeded { retry_after }
-            }
+            StatusCode::TOO_MANY_REQUESTS => BrokerError::RateLimitExceeded {
+                retry_after: retry_after.unwrap_or(DEFAULT_RATE_LIMIT_RETRY_AFTER),
+            },
             StatusCode::BAD_REQUEST => {
                 // Check if it's an order rejection
                 if message.contains("insufficient") {
@@ -231,14 +282,99 @@ mod tests {
         let config = test_config();
         let client = RestClient::new(config);
 
-        let error = client.map_error(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        let error = client.map_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None);
         assert!(matches!(error, BrokerError::AuthenticationFailed(_)));
 
-        let error = client.map_error(StatusCode::NOT_FOUND, "Symbol not found");
+        let error = client.map_error(StatusCode::NOT_FOUND, "Symbol not found", None);
         assert!(matches!(error, BrokerError::SymbolNotFound(_)));
 
-        let error = client.map_error(StatusCode::TOO_MANY_REQUESTS, "Rate limit");
+        let error = client.map_error(StatusCode::TOO_MANY_REQUESTS, "Rate limit", None);
         assert!(matches!(error, BrokerError::RateLimitExceeded { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_map_error_rate_limit_uses_default_when_retry_after_absent() {
+        let config = test_config();
+        let client = RestClient::new(config);
+
+        let error = client.map_error(StatusCode::TOO_MANY_REQUESTS, "Rate limit", None);
+        match error {
+            BrokerError::RateLimitExceeded { retry_after } => {
+                assert_eq!(retry_after, DEFAULT_RATE_LIMIT_RETRY_AFTER);
+            }
+            other => panic!("expected RateLimitExceeded, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_map_error_rate_limit_uses_parsed_retry_after_when_present() {
+        let config = test_config();
+        let client = RestClient::new(config);
+
+        let error = client.map_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit",
+            Some(Duration::from_secs(17)),
+        );
+        match error {
+            BrokerError::RateLimitExceeded { retry_after } => {
+                assert_eq!(retry_after, Duration::from_secs(17));
+            }
+            other => panic!("expected RateLimitExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_retry_after_value_present_and_numeric() {
+        assert_eq!(
+            RestClient::parse_retry_after_value("30"),
+            Some(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn test_parse_retry_after_value_handles_surrounding_whitespace() {
+        assert_eq!(
+            RestClient::parse_retry_after_value("  45 "),
+            Some(Duration::from_secs(45))
+        );
+    }
+
+    #[test]
+    fn test_parse_retry_after_value_absent_returns_none() {
+        assert_eq!(RestClient::parse_retry_after_value(""), None);
+    }
+
+    #[test]
+    fn test_parse_retry_after_value_malformed_returns_none() {
+        assert_eq!(RestClient::parse_retry_after_value("not-a-number"), None);
+        assert_eq!(
+            RestClient::parse_retry_after_value("Wed, 21 Oct 2026 07:28:00 GMT"),
+            None
+        );
+        assert_eq!(RestClient::parse_retry_after_value("-5"), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_rest_client_throttles_via_rate_limiter() {
+        let config = test_config();
+        let client = RestClient::with_rate_limit(
+            config,
+            RateLimiterConfig {
+                max_requests: 1,
+                refill_period: Duration::from_secs(60),
+            },
+        );
+
+        // First acquisition should be immediate (bucket starts full).
+        client.rate_limiter.acquire().await;
+
+        // Second acquisition must wait for a refill; bound it with a
+        // timeout so a regression (e.g. no throttling) fails loudly rather
+        // than hanging.
+        let acquired =
+            tokio::time::timeout(Duration::from_secs(120), client.rate_limiter.acquire()).await;
+        assert!(acquired.is_ok(), "expected acquire to eventually succeed");
     }
 
     // Note: Integration tests with actual API calls would go in tests/ directory
