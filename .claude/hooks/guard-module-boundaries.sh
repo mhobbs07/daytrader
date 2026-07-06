@@ -58,7 +58,7 @@ if [ -z "$FORBIDDEN_PATTERN" ]; then
   exit 0
 fi
 
-# Check if new content introduces a forbidden import
+# Check if new content introduces a forbidden import via `use crate::` statements
 VIOLATIONS=$(echo "$NEW_CONTENT" | grep -E "use crate::(${FORBIDDEN_PATTERN})" 2>/dev/null || true)
 
 if [ -n "$VIOLATIONS" ]; then
@@ -84,6 +84,37 @@ if [ -n "$VIOLATIONS" ]; then
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason: ("ARCHITECTURE VIOLATION: Module \"" + $module + "\" cannot import these modules. Check src/" + $module + "/CLAUDE.md for allowed dependencies.\nViolating imports:\n" + $violations)
+      }
+    }'
+    exit 0
+  fi
+fi
+
+# Check for qualified path references (e.g., crate::execution::SomeType) without use statements
+QUALIFIED_VIOLATIONS=$(echo "$NEW_CONTENT" | grep -E "crate::(${FORBIDDEN_PATTERN})::" 2>/dev/null || true)
+
+if [ -n "$QUALIFIED_VIOLATIONS" ]; then
+  PROJECT_DIR=$(echo "$FILE_PATH" | sed 's|/src/.*||')
+  EXCEPTIONS_FILE="${PROJECT_DIR}/.governance/architecture_exceptions.txt"
+
+  BLOCKED_QUALIFIED=""
+  while IFS= read -r violation; do
+    TARGET=$(echo "$violation" | sed -n 's|.*crate::\([a-z_]*\)::.*|\1|p')
+    if [ -n "$TARGET" ]; then
+      # Check if exception exists
+      if [ -f "$EXCEPTIONS_FILE" ] && grep -q "^${MODULE} -> ${TARGET}" "$EXCEPTIONS_FILE" 2>/dev/null; then
+        continue  # Exception exists, allow
+      fi
+      BLOCKED_QUALIFIED="${BLOCKED_QUALIFIED}${violation}\n"
+    fi
+  done <<< "$QUALIFIED_VIOLATIONS"
+
+  if [ -n "$BLOCKED_QUALIFIED" ]; then
+    jq -n --arg module "$MODULE" --arg violations "$BLOCKED_QUALIFIED" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("ARCHITECTURE VIOLATION: Module \"" + $module + "\" uses qualified paths to forbidden modules. Check src/" + $module + "/CLAUDE.md for allowed dependencies.\nViolating references:\n" + $violations)
       }
     }'
     exit 0
