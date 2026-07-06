@@ -1,3 +1,4 @@
+use crate::mock_driver::MockDataDriver;
 use daytrader::{
     brokers::{Candle, Quote, Symbol, traits::MarketDataProvider},
     db::{
@@ -107,6 +108,11 @@ pub struct AppState {
     pub market_cache: Arc<std::sync::Mutex<MarketDataCache>>,
     pub pattern_cache: Arc<std::sync::Mutex<PatternCache>>,
     pub risk_engine: Arc<RiskEngine>,
+    /// Synthetic market data driver (mock mode only).
+    ///
+    /// Present when running with `MockBroker`.  Calling `subscribe` / `unsubscribe`
+    /// on this driver starts / stops per-symbol event streams.
+    pub mock_driver: Option<Arc<MockDataDriver>>,
     // Enhanced risk management components
     pub pdt_enforcer: Option<Arc<PdtEnforcer>>,
     pub position_tracker: Arc<PositionTracker>,
@@ -135,6 +141,7 @@ impl AppState {
             market_cache: Arc::new(std::sync::Mutex::new(MarketDataCache::new())),
             pattern_cache: Arc::new(std::sync::Mutex::new(PatternCache::new())),
             risk_engine,
+            mock_driver: None,
             // Enhanced risk management components (None for basic setup)
             pdt_enforcer: None,
             position_tracker: Arc::new(PositionTracker::new()),
@@ -156,6 +163,7 @@ impl AppState {
         market_cache: Arc<std::sync::Mutex<MarketDataCache>>,
         pattern_cache: Arc<std::sync::Mutex<PatternCache>>,
         risk_engine: Arc<RiskEngine>,
+        mock_driver: Option<Arc<MockDataDriver>>,
     ) -> Self {
         Self {
             event_bus,
@@ -165,6 +173,7 @@ impl AppState {
             market_cache,
             pattern_cache,
             risk_engine,
+            mock_driver,
             // Enhanced risk management components (None for basic setup)
             pdt_enforcer: None,
             position_tracker: Arc::new(PositionTracker::new()),
@@ -211,6 +220,7 @@ impl AppState {
             market_cache: Arc::new(std::sync::Mutex::new(MarketDataCache::new())),
             pattern_cache: Arc::new(std::sync::Mutex::new(PatternCache::new())),
             risk_engine,
+            mock_driver: None,
             // Enhanced risk management components
             pdt_enforcer: Some(Arc::new(pdt_enforcer)),
             position_tracker: Arc::new(PositionTracker::new()),

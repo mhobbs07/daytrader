@@ -69,11 +69,36 @@ pub async fn get_recent_candles(
 pub async fn subscribe_symbol(symbol: String, state: State<'_, AppState>) -> Result<(), String> {
     let symbol = Symbol::new(&symbol).map_err(|e| format!("Invalid symbol: {}", e))?;
 
-    state
-        .broker
-        .subscribe_quotes(vec![symbol])
-        .await
-        .map_err(|e| format!("Subscription failed: {}", e))
+    // If a mock data driver is wired up, delegate subscription to it so that
+    // synthetic events are emitted.  Otherwise fall back to the broker trait
+    // (real broker implementations handle their own streaming).
+    if let Some(driver) = &state.mock_driver {
+        driver
+            .subscribe(symbol)
+            .map_err(|e| format!("Subscription failed: {}", e))
+    } else {
+        state
+            .broker
+            .subscribe_quotes(vec![symbol])
+            .await
+            .map_err(|e| format!("Subscription failed: {}", e))
+    }
+}
+
+#[tauri::command]
+pub async fn unsubscribe_symbol(symbol: String, state: State<'_, AppState>) -> Result<(), String> {
+    let symbol = Symbol::new(&symbol).map_err(|e| format!("Invalid symbol: {}", e))?;
+
+    if let Some(driver) = &state.mock_driver {
+        driver.unsubscribe(&symbol);
+        Ok(())
+    } else {
+        state
+            .broker
+            .unsubscribe_quotes(vec![symbol])
+            .await
+            .map_err(|e| format!("Unsubscription failed: {}", e))
+    }
 }
 
 #[derive(serde::Serialize)]

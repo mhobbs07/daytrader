@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
-let patternUnlistener: UnlistenFn | null = null;
+const unlisteners: UnlistenFn[] = [];
 
 interface PatternSignal {
   symbol: string;
@@ -27,15 +27,17 @@ interface PatternStore {
 }
 
 export const usePatternStore = create<PatternStore>((set) => {
-  if (!patternUnlistener) {
-    (async () => {
-      patternUnlistener = await listen<PatternSignal>('patterns:detected', (event) => {
+  // Initialize listener at store creation
+  (async () => {
+    if (unlisteners.length === 0) {
+      const unlisten = await listen<PatternSignal>('patterns:detected', (event) => {
         usePatternStore.setState(state => ({
           patterns: [event.payload, ...state.patterns].slice(0, 100)
         }));
       });
-    })();
-  }
+      unlisteners.push(unlisten);
+    }
+  })();
 
   return {
     patterns: [],
@@ -47,10 +49,10 @@ export const usePatternStore = create<PatternStore>((set) => {
     },
 
     dispose: () => {
-      if (patternUnlistener) {
-        patternUnlistener();
-        patternUnlistener = null;
+      for (const unlisten of unlisteners) {
+        unlisten();
       }
+      unlisteners.length = 0;
     }
   };
 });

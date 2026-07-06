@@ -18,6 +18,8 @@ fn test_valid_toml_parsing() {
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -45,7 +47,7 @@ min_account_balance = 1000.0
 emergency_liquidate_threshold = 500.0
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(toml_content.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -72,7 +74,7 @@ is_paper = true
 max_daily_loss_dollars = "not_a_number"
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(invalid_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -97,7 +99,7 @@ max_daily_loss_dollars = 500.0
 # Missing many required risk fields
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(incomplete_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -113,6 +115,8 @@ fn test_configuration_boundary_values() {
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -140,7 +144,7 @@ min_account_balance = 0.0
 emergency_liquidate_threshold = 0.0
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(zero_values_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -153,6 +157,8 @@ emergency_liquidate_threshold = 0.0
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -180,7 +186,7 @@ min_account_balance = 1000000.0
 emergency_liquidate_threshold = 100000.0
 "#;
 
-    let mut temp_file2 = NamedTempFile::new().unwrap();
+    let mut temp_file2 = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file2.write_all(large_values_toml.as_bytes()).unwrap();
     temp_file2.flush().unwrap();
 
@@ -196,6 +202,8 @@ fn test_negative_values_validation() {
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -223,17 +231,19 @@ min_account_balance = -1000.0
 emergency_liquidate_threshold = -500.0
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file
         .write_all(negative_values_toml.as_bytes())
         .unwrap();
     temp_file.flush().unwrap();
 
-    // Note: TOML parsing itself allows negative values, but our application logic
-    // should validate these. For now, we test that parsing succeeds but values are negative.
-    let config = AppConfig::from_file(temp_file.path()).unwrap();
-    assert_eq!(config.database.max_connections as i32, -1);
-    assert_eq!(config.risk.max_daily_loss_dollars, -100.0);
+    // Unsigned integer fields reject negative values at parse time (TOML deserialization),
+    // so the config should fail to parse with negative unsigned integer values.
+    let result = AppConfig::from_file(temp_file.path());
+    assert!(
+        result.is_err(),
+        "Config with negative unsigned integer fields should fail to parse"
+    );
 }
 
 /// Test configuration file not found error
@@ -253,6 +263,8 @@ fn test_dynamic_config_updates() {
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -280,7 +292,7 @@ min_account_balance = 1000.0
 emergency_liquidate_threshold = 500.0
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(initial_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -377,6 +389,8 @@ fn test_invalid_enum_values() {
 [broker]
 provider = "invalid_provider"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -404,7 +418,7 @@ min_account_balance = 1000.0
 emergency_liquidate_threshold = 500.0
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(invalid_enum_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
@@ -421,6 +435,8 @@ fn test_precision_edge_cases() {
 [broker]
 provider = "alpaca"
 is_paper = true
+api_key = "test_key"
+api_secret = "test_secret"
 
 [database]
 path = "test.db"
@@ -448,7 +464,7 @@ min_account_balance = 0.0000001
 emergency_liquidate_threshold = 0.0000001
 "#;
 
-    let mut temp_file = NamedTempFile::new().unwrap();
+    let mut temp_file = NamedTempFile::with_suffix(".toml").unwrap();
     temp_file.write_all(precision_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 

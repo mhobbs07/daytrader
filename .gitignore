@@ -23,9 +23,9 @@ config/production.toml
 .env
 .env.local
 
-# Data directory (except default config)
-data/
-!data/.gitkeep
+# Data directory (except default config) — anchored to repo root so src/data/ is NOT ignored
+/data/
+!/data/.gitkeep
 
 # IDE
 .vscode/

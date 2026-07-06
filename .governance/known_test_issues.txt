@@ -5,9 +5,6 @@
 #
 # To resolve an issue: fix the test, then remove the line from this file.
 
-# Pre-existing trivial tests
-src/risk/mod.rs:assert!(true)
-
 # Logic bugs from newtype refactor (values changed but test expectations not updated)
 events::bus::tests::test_debug_output:assertion mismatch
 events::bus::tests::test_no_subscribers:assertion mismatch

@@ -36,12 +36,12 @@ Costs must be controlled. Each agent tier has a model assignment:
 | Agent Role | Model | Rationale |
 |------------|-------|-----------|
 | **Orchestrator** (you) | opus | Needs full architectural understanding to coordinate |
-| **Backend agent** | sonnet | Complex business logic, moderate cost |
+| **Backend agent** | sonnet | Complex business logic |
 | **Database agent** | sonnet | Schema design needs good reasoning |
-| **Frontend agent** | haiku | Template-heavy UI work, lowest cost |
-| **Test/verify agent** | haiku | Running commands, reading output |
+| **Frontend agent** | sonnet | Haiku is prohibited in this project (see .claude/rules/agent-models.md) |
+| **Test/verify agent** | sonnet | Haiku is prohibited in this project |
 
-Override these defaults ONLY if the user explicitly requests it.
+Override these defaults ONLY if the user explicitly requests it. **Never** pass `model="haiku"`.
 
 ## Process
 
@@ -92,7 +92,7 @@ Agent 2 (backend): model=sonnet, isolation=worktree
    Follow each module's CLAUDE.md boundary rules.
    Commit with: feat(<module>): <description>"
 
-Agent 3 (frontend): model=haiku, isolation=worktree
+Agent 3 (frontend): model=sonnet, isolation=worktree
   "Implement the Tauri frontend components for <feature>.
    Work in daytrader/src-tauri/.
    Commit with: feat(ui): <description>"
@@ -147,7 +147,7 @@ Summarize:
 ## Rules
 
 - ALWAYS get user approval on the plan before spawning agents
-- ALWAYS use the model budget policy (haiku for simple, sonnet for moderate, opus only for orchestration)
+- ALWAYS use the model budget policy (sonnet for all subagents, opus only for orchestration — haiku is prohibited)
 - Each agent MUST commit before its worktree is cleaned up
 - Each agent MUST respect its module's CLAUDE.md boundary rules
 - Do NOT spawn more than 4 agents at once (cost control)

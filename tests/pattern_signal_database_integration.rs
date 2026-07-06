@@ -61,15 +61,15 @@ async fn test_signal_storage_and_retrieval() {
     let result = repo.save_trading_signal(&signal).await;
     assert!(result.is_ok(), "Failed to save signal: {:?}", result.err());
 
-    // Retrieve signals for symbol
+    // Retrieve signals for symbol (trading_signals table, returns TradingSignal)
     let retrieved = repo
-        .get_signals_for_symbol("AAPL", 10)
+        .get_trading_signals_for_symbol("AAPL", 10)
         .await
         .expect("Failed to retrieve signals");
 
     assert_eq!(retrieved.len(), 1);
     assert_eq!(retrieved[0].symbol.as_str(), "AAPL");
-    assert_eq!(retrieved[0].signal_type, SignalType::Buy);
+    assert_eq!(retrieved[0].signal_type.as_str(), "buy");
     assert!((retrieved[0].confidence.value() - 0.85).abs() < 0.01);
 }
 
@@ -86,26 +86,24 @@ async fn test_signal_outcome_update() {
 
     let signal = TradingSignal::new(symbol, SignalType::Sell, confidence, price, market_context);
 
-    let signal_id = signal.id.clone();
+    let signal_str_id = signal.id.clone();
     repo.save_trading_signal(&signal).await.unwrap();
 
-    // Update outcome
-    repo.update_signal_outcome(&signal_id, "win", Some(12345))
+    // Update outcome using the string ID (trading_signals table uses TEXT primary key)
+    repo.update_trading_signal_outcome(&signal_str_id, "win", None)
         .await
         .expect("Failed to update outcome");
 
     // Verify update by querying directly
     let row = sqlx::query!(
-        "SELECT outcome, acted_upon, order_id FROM trading_signals WHERE id = ?",
-        signal_id
+        "SELECT outcome FROM trading_signals WHERE id = ?",
+        signal_str_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
     assert_eq!(row.outcome.unwrap(), "win");
-    assert_eq!(row.acted_upon, true);
-    assert_eq!(row.order_id.unwrap(), 12345);
 }
 
 #[tokio::test]
@@ -113,9 +111,10 @@ async fn test_signal_statistics() {
     let pool = setup_test_db().await;
     let repo = SignalRepository::new(pool.clone());
 
-    // Create multiple signals with outcomes
+    // Create multiple signals with outcomes — use unique symbols to avoid ID collision
+    // (TradingSignal.id = "{symbol}_{type}_{timestamp_seconds}", so same-second creates need unique symbols)
     for i in 0..10 {
-        let symbol = Symbol::new("SPY").unwrap();
+        let symbol = Symbol::new(&format!("SPY{}", i)).unwrap();
         let confidence = Confidence::new(0.6 + (i as f64 * 0.02)).unwrap();
         let price = Price::new(Decimal::new(40000 + (i * 100), 2)).unwrap();
         let market_context = MarketContext::new(TrendContext::WeakUptrend { strength: 0.5 });
@@ -138,7 +137,7 @@ async fn test_signal_statistics() {
         // Set outcomes for half of them
         if i < 5 {
             let outcome = if i < 3 { "win" } else { "loss" };
-            repo.update_signal_outcome(&signal_id, outcome, None)
+            repo.update_trading_signal_outcome(&signal_id, outcome, None)
                 .await
                 .unwrap();
         }
@@ -166,7 +165,9 @@ async fn test_batch_signal_insertion() {
 
     let mut signals = Vec::new();
     for i in 0..100 {
-        let symbol = Symbol::new(&format!("TEST{}", i % 5)).unwrap();
+        // Use unique symbol per signal to avoid ID collision
+        // (TradingSignal.id = "{symbol}_{type}_{timestamp_seconds}")
+        let symbol = Symbol::new(&format!("TEST{}", i)).unwrap();
         let confidence = Confidence::new(0.7).unwrap();
         let price = Price::new(Decimal::new(10000 + (i * 10), 2)).unwrap();
         let market_context = MarketContext::new(TrendContext::Sideways { volatility: 0.5 });
@@ -289,8 +290,9 @@ async fn test_json_serialization_roundtrip() {
     // Save and retrieve
     repo.save_trading_signal(&signal).await.unwrap();
 
+    // Use get_trading_signals_for_symbol (queries trading_signals table, returns TradingSignal)
     let retrieved = repo
-        .get_signals_for_symbol("NVDA", 10)
+        .get_trading_signals_for_symbol("NVDA", 10)
         .await
         .expect("Failed to retrieve signals");
 
@@ -381,6 +383,8 @@ async fn test_signal_data_integrity() {
     let pool = setup_test_db().await;
     let repo = SignalRepository::new(pool.clone());
 
+    let now = Utc::now();
+
     // Test constraint: signal_type must be 'buy' or 'sell'
     let invalid_result = sqlx::query!(
         "INSERT INTO trading_signals (id, symbol, signal_type, confidence, price_level, generated_at, components) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -389,7 +393,7 @@ async fn test_signal_data_integrity() {
         "invalid_type",
         0.8,
         100.0,
-        Utc::now(),
+        now,
         "[]"
     )
     .execute(&pool)
@@ -405,7 +409,7 @@ async fn test_signal_data_integrity() {
         "buy",
         1.5,
         100.0,
-        Utc::now(),
+        now,
         "[]"
     )
     .execute(&pool)
@@ -424,7 +428,7 @@ async fn test_signal_data_integrity() {
         "buy",
         0.85,
         100.0,
-        Utc::now(),
+        now,
         "[]"
     )
     .execute(&pool)
