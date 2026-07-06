@@ -21,11 +21,26 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
-TOTAL_STEPS=9
+TOTAL_STEPS=11
 PASSED=0
 FAILED=0
 SKIPPED=0
 START_TIME=$(date +%s)
+
+# sqlx compile-time macros validate queries against DATABASE_URL. Fresh
+# worktrees have neither the env var nor the database — provision both so the
+# pipeline works anywhere without manual setup (see scripts/setup_db.sh).
+if [ -z "${DATABASE_URL:-}" ]; then
+    if [ ! -f "data/db/daytrader.db" ] && command -v sqlite3 >/dev/null 2>&1; then
+        mkdir -p data/db
+        sqlite3 data/db/daytrader.db < src/db/schema.sql 2>/dev/null || true
+        sqlite3 data/db/daytrader.db "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));" 2>/dev/null || true
+    fi
+    if [ -f "data/db/daytrader.db" ]; then
+        export DATABASE_URL="sqlite://$PWD/data/db/daytrader.db"
+        echo -e "${YELLOW}DATABASE_URL was unset — using ${DATABASE_URL}${NC}"
+    fi
+fi
 
 # Track results for summary
 declare -a RESULTS
@@ -92,31 +107,37 @@ fi
 
 # ===== Step 4: Unit Tests =====
 echo -e "${BLUE}[4/${TOTAL_STEPS}] Running unit tests (cargo test --lib)...${NC}"
-# Use timeout to prevent hanging tests from blocking the pipeline
+# Use timeout to prevent hanging tests from blocking the pipeline.
+# The exit code is the source of truth: grepping for "test result: ok" passed
+# when ANY test binary was ok even if another failed, and grep -oP is GNU-only
+# (always reported "0 passed" on macOS).
 KNOWN_ISSUES_FILE=".governance/known_test_issues.txt"
-TEST_OUTPUT=$(timeout 120 cargo test --lib 2>&1) || true
-TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -oP '\d+ passed' | grep -oP '\d+' || echo "0")
-TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -oP '\d+ failed' | grep -oP '\d+' || echo "0")
-if echo "$TEST_OUTPUT" | grep -q "test result: ok"; then
+TEST_OUTPUT=$(timeout 120 cargo test --lib 2>&1)
+TEST_STATUS=$?
+TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ passed' | awk '{s+=$1} END {print s+0}')
+TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ failed' | awk '{s+=$1} END {print s+0}')
+if [ "$TEST_STATUS" -eq 0 ]; then
     step_pass "Unit tests (${TEST_PASSED} passed)"
 elif [ "$TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
     KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
     if [ "$TEST_FAILED" -le "$KNOWN_COUNT" ]; then
         echo -e "  ${YELLOW}${TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
+        echo -e "  ${YELLOW}Known failures are a ceiling, not a licence — shrink the file when you touch these areas.${NC}"
         step_pass "Unit tests (${TEST_PASSED} passed, ${TEST_FAILED} known failures)"
     else
         echo "$TEST_OUTPUT" | grep "FAILED"
         step_fail "Unit tests (${TEST_FAILED} failures exceed ${KNOWN_COUNT} known issues)"
     fi
 else
-    echo "$TEST_OUTPUT" | grep "FAILED" | head -10
-    step_fail "Unit tests"
+    echo "$TEST_OUTPUT" | grep -E "FAILED|error" | head -10
+    step_fail "Unit tests (exit ${TEST_STATUS}, ${TEST_FAILED} failed)"
 fi
 
 # ===== Step 5: Integration Tests =====
 echo -e "${BLUE}[5/${TOTAL_STEPS}] Running integration tests...${NC}"
-# Check if source files were changed (optimization: skip if only docs/plans changed)
-CHANGED_SRC=$(git diff --cached --name-only 2>/dev/null | grep -E '\.(rs|toml)$' || true)
+# Skip only when neither the staged set NOR the working tree touches .rs/.toml
+# (checking staged-only silently skipped integration tests for unstaged work).
+CHANGED_SRC=$( { git diff --cached --name-only; git diff HEAD --name-only; } 2>/dev/null | sort -u | grep -E '\.(rs|toml)$' || true)
 if [ -n "$CHANGED_SRC" ]; then
     if cargo test --test '*' 2>&1; then
         step_pass "Integration tests"
@@ -124,7 +145,7 @@ if [ -n "$CHANGED_SRC" ]; then
         step_fail "Integration tests"
     fi
 else
-    step_skip "Integration tests" "no .rs/.toml files in staged changes"
+    step_skip "Integration tests" "no .rs/.toml changes staged or in working tree"
 fi
 
 # ===== Step 6: Documentation =====
@@ -159,8 +180,39 @@ else
     step_skip "Test quality" "verify_test_quality.sh not found or not executable"
 fi
 
-# ===== Step 9: Backlog Updated =====
-echo -e "${BLUE}[9/${TOTAL_STEPS}] Checking BACKLOG.md was updated...${NC}"
+# ===== Step 9: Production Safety =====
+echo -e "${BLUE}[9/${TOTAL_STEPS}] Verifying production safety (unwrap/std::sync)...${NC}"
+if [ -x "./scripts/verify_production_safety.sh" ]; then
+    if ./scripts/verify_production_safety.sh 2>&1; then
+        step_pass "Production safety"
+    else
+        step_fail "Production safety"
+    fi
+else
+    step_skip "Production safety" "verify_production_safety.sh not found or not executable"
+fi
+
+# ===== Step 10: Frontend Build =====
+echo -e "${BLUE}[10/${TOTAL_STEPS}] Checking frontend build (tsc + vite)...${NC}"
+CHANGED_FRONTEND=$( { git diff --cached --name-only; git diff HEAD --name-only; } 2>/dev/null | sort -u | grep -E '^daytrader/(src/|package\.json|tsconfig|vite)' || true)
+if [ -z "$CHANGED_FRONTEND" ]; then
+    step_skip "Frontend build" "no daytrader/ frontend changes staged or in working tree"
+elif ! command -v npm >/dev/null 2>&1; then
+    step_skip "Frontend build" "npm not available"
+else
+    if [ ! -d "daytrader/node_modules" ]; then
+        echo -e "  ${YELLOW}node_modules missing — running npm install...${NC}"
+        (cd daytrader && npm install --no-audit --no-fund >/dev/null 2>&1)
+    fi
+    if (cd daytrader && npm run build 2>&1); then
+        step_pass "Frontend build"
+    else
+        step_fail "Frontend build"
+    fi
+fi
+
+# ===== Step 11: Backlog Updated =====
+echo -e "${BLUE}[11/${TOTAL_STEPS}] Checking BACKLOG.md was updated...${NC}"
 BACKLOG_CHANGED=$(git diff --cached --name-only 2>/dev/null | grep 'BACKLOG.md' || true)
 SRC_CHANGED=$(git diff --cached --name-only 2>/dev/null | grep -E '^src/' || true)
 if [ -n "$BACKLOG_CHANGED" ]; then
