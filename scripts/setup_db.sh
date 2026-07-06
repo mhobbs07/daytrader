@@ -29,5 +29,12 @@ fi
 echo "Creating database and applying schema..."
 sqlite3 "$DB_FILE" < "$SCHEMA_FILE"
 
+# schema.sql omits schema_migrations because MigrationManager creates it at
+# runtime — but sqlx's compile-time query validation needs it to exist already.
+sqlite3 "$DB_FILE" "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));"
+
 echo "Database setup complete: $DB_FILE"
 echo "You can inspect it with: sqlite3 $DB_FILE"
+echo ""
+echo "For sqlx compile-time macros, export:"
+echo "  export DATABASE_URL=\"sqlite://$PWD/$DB_FILE\""
