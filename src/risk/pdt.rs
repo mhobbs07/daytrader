@@ -9,7 +9,8 @@
 //! - **Equity Requirements**: $25,000 minimum for unrestricted day trading
 //! - **Automatic Restrictions**: Limit to 3 day trades when under equity minimum
 //! - **Rolling Window**: 5 business day sliding window for compliance
-//! - **Business Day Logic**: Proper handling of weekends and holidays
+//! - **Business Day Logic**: Proper handling of weekends and NYSE market
+//!   holidays via [`MarketHolidayCalendar`]
 //!
 //! # Examples
 //!
@@ -37,7 +38,8 @@ use crate::db::mock::MockPdtRepository;
 #[cfg(feature = "database")]
 use crate::db::traits::PdtRepositoryTrait;
 use crate::risk::types::{DollarAmount, RiskEvaluation, ViolationSeverity};
-use chrono::{DateTime, Datelike, Utc, Weekday};
+use crate::utils::holidays::MarketHolidayCalendar;
+use chrono::{DateTime, Utc};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -115,12 +117,19 @@ impl PdtState {
     }
 
     /// Counts total day trades in the rolling window
+    ///
+    /// # Arguments
+    ///
+    /// * `window_days` - Number of business days in the rolling window
+    /// * `current_date` - The current date to calculate the window from
+    /// * `calendar` - Market holiday calendar used for business day determination
     pub fn total_day_trades_in_window(
         &self,
         window_days: u32,
         current_date: chrono::NaiveDate,
+        calendar: &MarketHolidayCalendar,
     ) -> u32 {
-        let cutoff_date = self.calculate_cutoff_date(current_date, window_days);
+        let cutoff_date = self.calculate_cutoff_date(current_date, window_days, calendar);
         self.day_trade_history
             .iter()
             .filter(|record| record.date >= cutoff_date)
@@ -129,29 +138,35 @@ impl PdtState {
     }
 
     /// Calculates the cutoff date for the rolling window (business days back)
+    ///
+    /// Business days skip both weekends and NYSE market holidays (observed
+    /// dates), via the supplied [`MarketHolidayCalendar`]. This keeps the
+    /// PDT 5-business-day rolling window aligned with actual market sessions.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_date` - The date to count backwards from
+    /// * `business_days_back` - Number of business days to go back
+    /// * `calendar` - Market holiday calendar used for business day determination
     pub fn calculate_cutoff_date(
         &self,
         from_date: chrono::NaiveDate,
         business_days_back: u32,
+        calendar: &MarketHolidayCalendar,
     ) -> chrono::NaiveDate {
         let mut date = from_date;
         let mut days_counted = 0;
 
         while days_counted < business_days_back {
-            date = date.pred_opt().unwrap(); // Go back one day
+            date = date.pred_opt().unwrap_or(date); // Go back one day, saturating at NaiveDate::MIN
 
-            // Only count business days (Monday-Friday)
-            if self.is_business_day(date) {
+            // Only count business days (weekdays that are not NYSE holidays)
+            if calendar.is_business_day(date) {
                 days_counted += 1;
             }
         }
 
         date
-    }
-
-    /// Checks if a date is a business day (Monday-Friday)
-    fn is_business_day(&self, date: chrono::NaiveDate) -> bool {
-        !matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
     }
 
     /// Adds a day trade to the history
@@ -180,8 +195,19 @@ impl PdtState {
     }
 
     /// Cleans up old records beyond the rolling window
-    pub fn cleanup_old_records(&mut self, window_days: u32, current_date: chrono::NaiveDate) {
-        let cutoff_date = self.calculate_cutoff_date(current_date, window_days);
+    ///
+    /// # Arguments
+    ///
+    /// * `window_days` - Number of business days in the rolling window
+    /// * `current_date` - The current date to calculate the window from
+    /// * `calendar` - Market holiday calendar used for business day determination
+    pub fn cleanup_old_records(
+        &mut self,
+        window_days: u32,
+        current_date: chrono::NaiveDate,
+        calendar: &MarketHolidayCalendar,
+    ) {
+        let cutoff_date = self.calculate_cutoff_date(current_date, window_days, calendar);
 
         // Remove records older than cutoff date
         while let Some(record) = self.day_trade_history.back() {
@@ -198,10 +224,15 @@ impl PdtState {
 ///
 /// Provides compliance checking and enforcement for Pattern Day Trading rules.
 /// Uses RwLock for concurrent access to PDT state and optional database persistence.
+///
+/// Business day determination (used for the rolling window cutoff) is
+/// delegated to a [`MarketHolidayCalendar`], so the 5-business-day window
+/// correctly skips both weekends and NYSE market holidays.
 #[derive(Clone)]
 pub struct PdtEnforcer {
     config: PdtConfig,
     state: Arc<RwLock<PdtState>>,
+    holiday_calendar: Arc<MarketHolidayCalendar>,
     #[cfg(any(feature = "database", feature = "mock"))]
     repository: Option<Arc<dyn PdtRepositoryTrait>>,
     #[cfg(any(feature = "database", feature = "mock"))]
@@ -210,10 +241,35 @@ pub struct PdtEnforcer {
 
 impl PdtEnforcer {
     /// Creates a new PDT enforcer without database persistence
+    ///
+    /// Uses a default [`MarketHolidayCalendar`] (standard NYSE holiday set)
+    /// for business day calculations.
     pub fn new(config: PdtConfig, initial_equity: Decimal) -> Self {
         Self {
             config,
             state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
+            #[cfg(any(feature = "database", feature = "mock"))]
+            repository: None,
+            #[cfg(any(feature = "database", feature = "mock"))]
+            account_id: 0,
+        }
+    }
+
+    /// Creates a new PDT enforcer with an explicit holiday calendar
+    ///
+    /// Useful for tests that need a deterministic or custom-configured
+    /// [`MarketHolidayCalendar`], or for callers that share a single
+    /// calendar instance (e.g. the Tauri app state) across the app.
+    pub fn with_calendar(
+        config: PdtConfig,
+        initial_equity: Decimal,
+        calendar: Arc<MarketHolidayCalendar>,
+    ) -> Self {
+        Self {
+            config,
+            state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            holiday_calendar: calendar,
             #[cfg(any(feature = "database", feature = "mock"))]
             repository: None,
             #[cfg(any(feature = "database", feature = "mock"))]
@@ -228,6 +284,7 @@ impl PdtEnforcer {
         Self {
             config,
             state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
             repository: Some(repository),
             account_id: 0, // Default account ID for testing
         }
@@ -244,6 +301,7 @@ impl PdtEnforcer {
         let enforcer = Self {
             config,
             state: Arc::new(RwLock::new(PdtState::new(initial_equity))),
+            holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
             repository: Some(repository),
             account_id,
         };
@@ -258,6 +316,11 @@ impl PdtEnforcer {
     pub fn from_config(config: &RiskConfig, initial_equity: Decimal) -> Self {
         let pdt_config = PdtConfig::from_config(config);
         Self::new(pdt_config, initial_equity)
+    }
+
+    /// Returns a reference to the holiday calendar used by this enforcer
+    pub fn holiday_calendar(&self) -> &Arc<MarketHolidayCalendar> {
+        &self.holiday_calendar
     }
 
     /// Counts day trades in the current rolling window
@@ -289,12 +352,20 @@ impl PdtEnforcer {
         // Clean up old records first
         {
             let mut state = self.state.write().await;
-            state.cleanup_old_records(self.config.rolling_window_days, current_date);
+            state.cleanup_old_records(
+                self.config.rolling_window_days,
+                current_date,
+                &self.holiday_calendar,
+            );
         }
 
         // Count trades in window
         let state = self.state.read().await;
-        state.total_day_trades_in_window(self.config.rolling_window_days, current_date)
+        state.total_day_trades_in_window(
+            self.config.rolling_window_days,
+            current_date,
+            &self.holiday_calendar,
+        )
     }
 
     /// Checks if the account is eligible for day trading
@@ -324,8 +395,11 @@ impl PdtEnforcer {
     pub async fn check_pdt_eligibility(&self) -> Result<bool, String> {
         let state = self.state.read().await;
         let current_date = Utc::now().date_naive();
-        let day_trade_count =
-            state.total_day_trades_in_window(self.config.rolling_window_days, current_date);
+        let day_trade_count = state.total_day_trades_in_window(
+            self.config.rolling_window_days,
+            current_date,
+            &self.holiday_calendar,
+        );
 
         // If equity meets threshold, unlimited day trading allowed
         if state.meets_equity_threshold(self.config.min_equity_threshold) {
@@ -470,8 +544,11 @@ impl PdtEnforcer {
 
                 // Restore recent day trades for accurate window calculations
                 let current_date = Utc::now().date_naive();
-                let window_start =
-                    state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+                let window_start = state.calculate_cutoff_date(
+                    current_date,
+                    self.config.rolling_window_days,
+                    &self.holiday_calendar,
+                );
 
                 // Get day trades from database to restore in-memory state
                 let recent_trades = repository
@@ -496,7 +573,11 @@ impl PdtEnforcer {
                 info!(
                     "Restored PDT state: equity=${}, day trades in window={}",
                     state.current_equity,
-                    state.total_day_trades_in_window(self.config.rolling_window_days, current_date)
+                    state.total_day_trades_in_window(
+                        self.config.rolling_window_days,
+                        current_date,
+                        &self.holiday_calendar,
+                    )
                 );
             }
         }
@@ -537,8 +618,11 @@ impl PdtEnforcer {
         if let Some(ref repository) = self.repository {
             let state = self.state.read().await;
             let current_date = Utc::now().date_naive();
-            let window_start =
-                state.calculate_cutoff_date(current_date, self.config.rolling_window_days);
+            let window_start = state.calculate_cutoff_date(
+                current_date,
+                self.config.rolling_window_days,
+                &self.holiday_calendar,
+            );
             let window_end = current_date;
 
             // Count day trades from database for accuracy
@@ -747,14 +831,48 @@ mod tests {
         let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
 
         let state = enforcer.get_pdt_state().await;
+        let calendar = enforcer.holiday_calendar();
 
         // Test with a Friday date
         let friday = chrono::NaiveDate::from_ymd_opt(2023, 12, 15).unwrap(); // Friday
-        let cutoff = state.calculate_cutoff_date(friday, 5);
+        let cutoff = state.calculate_cutoff_date(friday, 5, calendar);
 
         // 5 business days back from Friday should be the previous Friday
         // Fri -1: Thu, -2: Wed, -3: Tue, -4: Mon, -5: Fri (previous week)
+        // (No NYSE holiday falls in this window, so it matches plain weekday math.)
         let expected = chrono::NaiveDate::from_ymd_opt(2023, 12, 8).unwrap();
         assert_eq!(cutoff, expected);
+    }
+
+    /// Test that the rolling window cutoff correctly skips NYSE holidays,
+    /// not just weekends. Uses a window spanning Christmas Day (Dec 25, 2024,
+    /// a Wednesday) — a naive weekday-only implementation would incorrectly
+    /// count Christmas as a business day.
+    #[tokio::test]
+    async fn test_business_day_cutoff_skips_christmas_holiday() {
+        let config = create_test_config();
+        let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
+
+        let state = enforcer.get_pdt_state().await;
+        let calendar = enforcer.holiday_calendar();
+
+        // Dec 30, 2024 is a Monday. Walking back 5 business days must skip
+        // both the weekend (Dec 28-29) and Christmas Day (Dec 25, Wednesday).
+        let from_date = chrono::NaiveDate::from_ymd_opt(2024, 12, 30).unwrap();
+        let cutoff = state.calculate_cutoff_date(from_date, 5, calendar);
+
+        // Business days back from Mon Dec 30:
+        // -1: Fri Dec 27, -2: Thu Dec 26, -3 (skip holiday Dec 25),
+        // -3: Tue Dec 24, -4: Mon Dec 23, -5: Fri Dec 20
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 12, 20).unwrap();
+        assert_eq!(
+            cutoff, expected,
+            "cutoff must skip Christmas Day (2024-12-25), not just weekends"
+        );
+
+        // Sanity check: a naive weekday-only cutoff would have landed on
+        // Dec 23 (Monday) instead, one business day later than correct.
+        let naive_weekday_only_cutoff = chrono::NaiveDate::from_ymd_opt(2024, 12, 23).unwrap();
+        assert_ne!(cutoff, naive_weekday_only_cutoff);
     }
 }
