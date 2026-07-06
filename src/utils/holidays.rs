@@ -124,9 +124,14 @@ impl MarketHolidayCalendar {
         // Pre-populate cache for current and future years if enabled
         if calendar.config.enable_cache {
             let current_year = chrono::Utc::now().year();
-            for year in current_year..(current_year + calendar.config.cache_years_ahead as i32 + 1) {
+            for year in current_year..(current_year + calendar.config.cache_years_ahead as i32 + 1)
+            {
                 if let Ok(holidays) = calendar.calculate_holidays_for_year(year) {
-                    calendar.holiday_cache.write().unwrap().insert(year, holidays);
+                    calendar
+                        .holiday_cache
+                        .write()
+                        .unwrap()
+                        .insert(year, holidays);
                 }
             }
         }
@@ -151,7 +156,7 @@ impl MarketHolidayCalendar {
 
         // Calculate and cache if enabled
         let holidays = self.calculate_holidays_for_year(year)?;
-        
+
         if self.config.enable_cache {
             if let Ok(mut cache) = self.holiday_cache.write() {
                 cache.insert(year, holidays.clone());
@@ -173,7 +178,11 @@ impl MarketHolidayCalendar {
         }
 
         // Martin Luther King Jr. Day (3rd Monday in January)
-        if self.config.enabled_holidays.contains("martin_luther_king_day") {
+        if self
+            .config
+            .enabled_holidays
+            .contains("martin_luther_king_day")
+        {
             let date = third_monday_of_month(year, 1)?;
             holidays.push(Holiday::new("Martin Luther King Jr. Day".to_string(), date));
         }
@@ -361,7 +370,7 @@ fn apply_observation_rules(date: NaiveDate) -> NaiveDate {
     match date.weekday() {
         Weekday::Sat => date - Duration::days(1), // Friday
         Weekday::Sun => date + Duration::days(1), // Monday
-        _ => date, // Weekday - no change
+        _ => date,                                // Weekday - no change
     }
 }
 
@@ -390,8 +399,9 @@ fn calculate_easter(year: i32) -> Result<NaiveDate, HolidayError> {
 
 /// Returns the first Monday of a given month and year
 fn first_monday_of_month(year: i32, month: u32) -> Result<NaiveDate, HolidayError> {
-    let first_day = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| HolidayError::InvalidDate(format!("First day of month {}/{}", month, year)))?;
+    let first_day = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| {
+        HolidayError::InvalidDate(format!("First day of month {}/{}", month, year))
+    })?;
 
     // Find the first Monday
     let days_to_monday = match first_day.weekday() {
@@ -415,8 +425,9 @@ fn third_monday_of_month(year: i32, month: u32) -> Result<NaiveDate, HolidayErro
 
 /// Returns the fourth Thursday of a given month and year
 fn fourth_thursday_of_month(year: i32, month: u32) -> Result<NaiveDate, HolidayError> {
-    let first_day = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| HolidayError::InvalidDate(format!("First day of month {}/{}", month, year)))?;
+    let first_day = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| {
+        HolidayError::InvalidDate(format!("First day of month {}/{}", month, year))
+    })?;
 
     // Find the first Thursday
     let days_to_thursday = match first_day.weekday() {
@@ -485,9 +496,18 @@ mod tests {
     #[test]
     fn test_easter_calculation() {
         // Test known Easter dates
-        assert_eq!(calculate_easter(2023).unwrap(), NaiveDate::from_ymd_opt(2023, 4, 9).unwrap());
-        assert_eq!(calculate_easter(2024).unwrap(), NaiveDate::from_ymd_opt(2024, 3, 31).unwrap());
-        assert_eq!(calculate_easter(2025).unwrap(), NaiveDate::from_ymd_opt(2025, 4, 20).unwrap());
+        assert_eq!(
+            calculate_easter(2023).unwrap(),
+            NaiveDate::from_ymd_opt(2023, 4, 9).unwrap()
+        );
+        assert_eq!(
+            calculate_easter(2024).unwrap(),
+            NaiveDate::from_ymd_opt(2024, 3, 31).unwrap()
+        );
+        assert_eq!(
+            calculate_easter(2025).unwrap(),
+            NaiveDate::from_ymd_opt(2025, 4, 20).unwrap()
+        );
     }
 
     #[test]
@@ -506,23 +526,26 @@ mod tests {
 
         // Thanksgiving 2023 (4th Thursday in November)
         let thanksgiving_2023 = fourth_thursday_of_month(2023, 11).unwrap();
-        assert_eq!(thanksgiving_2023, NaiveDate::from_ymd_opt(2023, 11, 23).unwrap());
+        assert_eq!(
+            thanksgiving_2023,
+            NaiveDate::from_ymd_opt(2023, 11, 23).unwrap()
+        );
     }
 
     #[test]
     fn test_market_holiday_calendar() {
         let calendar = MarketHolidayCalendar::new();
-        
+
         // Test 2023 holidays
         let holidays_2023 = calendar.get_holidays_for_year(2023).unwrap();
         assert_eq!(holidays_2023.len(), 9); // All major market holidays
 
         // Check specific holidays
         let holiday_dates: Vec<NaiveDate> = holidays_2023.iter().map(|h| h.observed_date).collect();
-        
+
         // New Year's Day 2023 (observed on Monday Jan 2 because Jan 1 was Sunday)
         assert!(holiday_dates.contains(&NaiveDate::from_ymd_opt(2023, 1, 2).unwrap()));
-        
+
         // Christmas Day 2023 (Monday, no observation change)
         assert!(holiday_dates.contains(&NaiveDate::from_ymd_opt(2023, 12, 25).unwrap()));
     }
@@ -547,12 +570,12 @@ mod tests {
     #[test]
     fn test_business_days_calculation() {
         let calendar = MarketHolidayCalendar::new();
-        
+
         // Test adding business days
         let start_date = NaiveDate::from_ymd_opt(2023, 12, 21).unwrap(); // Thursday
         let result = calendar.add_business_days(start_date, 1);
         assert_eq!(result, NaiveDate::from_ymd_opt(2023, 12, 22).unwrap()); // Friday
-        
+
         // Test adding business days across weekend and holiday
         let result = calendar.add_business_days(start_date, 2);
         assert_eq!(result, NaiveDate::from_ymd_opt(2023, 12, 26).unwrap()); // Tuesday (skips weekend + Christmas)
@@ -561,11 +584,13 @@ mod tests {
     #[test]
     fn test_global_calendar_functions() {
         // Test weekend
-        assert!(!is_business_day(NaiveDate::from_ymd_opt(2023, 7, 1).unwrap())); // Saturday
-        
+        assert!(!is_business_day(
+            NaiveDate::from_ymd_opt(2023, 7, 1).unwrap()
+        )); // Saturday
+
         // Test holiday
         assert!(is_holiday(NaiveDate::from_ymd_opt(2023, 12, 25).unwrap())); // Christmas
-        
+
         // Test weekend function
         assert!(is_weekend(NaiveDate::from_ymd_opt(2023, 7, 2).unwrap())); // Sunday
     }
@@ -573,11 +598,11 @@ mod tests {
     #[test]
     fn test_cache_functionality() {
         let calendar = MarketHolidayCalendar::new();
-        
+
         // Check cache stats after initialization
         let (holiday_count, _) = calendar.cache_stats();
         assert!(holiday_count > 0); // Should have cached several years
-        
+
         // Clear cache and verify
         calendar.clear_cache();
         let (holiday_count_after, business_count_after) = calendar.cache_stats();
@@ -589,17 +614,17 @@ mod tests {
     fn test_performance_characteristics() {
         let calendar = MarketHolidayCalendar::new();
         let test_date = NaiveDate::from_ymd_opt(2023, 7, 4).unwrap();
-        
+
         // First call may be slower due to cache miss
         let start = std::time::Instant::now();
         let is_business = calendar.is_business_day(test_date);
         let first_call_duration = start.elapsed();
-        
+
         // Second call should be much faster due to cache hit
         let start = std::time::Instant::now();
         let is_business_cached = calendar.is_business_day(test_date);
         let second_call_duration = start.elapsed();
-        
+
         assert_eq!(is_business, is_business_cached);
         assert!(second_call_duration < first_call_duration);
         // Should be well under 100μs for cached lookups

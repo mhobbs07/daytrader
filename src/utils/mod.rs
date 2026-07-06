@@ -2,6 +2,7 @@
 
 pub mod error_context;
 pub mod errors;
+pub mod holidays;
 pub mod logging;
 pub mod metrics;
 pub mod performance_monitor;

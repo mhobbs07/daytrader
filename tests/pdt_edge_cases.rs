@@ -8,6 +8,7 @@
 
 use chrono::{Datelike, NaiveDate, Utc, Weekday};
 use daytrader::risk::pdt::{PdtConfig, PdtEnforcer, PdtState};
+use daytrader::utils::holidays::MarketHolidayCalendar;
 use rust_decimal::Decimal;
 
 /// Returns the most recent business day on or before the given date
@@ -293,22 +294,24 @@ async fn test_business_day_calculation_edge_cases() {
 
     let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
     let state = enforcer.get_pdt_state().await;
+    let calendar = enforcer.holiday_calendar();
 
     // Test Friday to Friday calculation
+    // (Dec 2023 window: no NYSE holiday between Dec 8-15, so this matches plain weekday math.)
     let friday = NaiveDate::from_ymd_opt(2023, 12, 15).unwrap(); // Friday
-    let previous_friday = state.calculate_cutoff_date(friday, 5);
+    let previous_friday = state.calculate_cutoff_date(friday, 5, calendar);
     let expected_previous = NaiveDate::from_ymd_opt(2023, 12, 8).unwrap(); // Previous Friday
     assert_eq!(previous_friday, expected_previous);
 
     // Test Monday to Monday
     let monday = NaiveDate::from_ymd_opt(2023, 12, 18).unwrap(); // Monday
-    let previous_monday = state.calculate_cutoff_date(monday, 5);
+    let previous_monday = state.calculate_cutoff_date(monday, 5, calendar);
     let expected_previous_monday = NaiveDate::from_ymd_opt(2023, 12, 11).unwrap();
     assert_eq!(previous_monday, expected_previous_monday);
 
     // Test Wednesday (middle of week)
     let wednesday = NaiveDate::from_ymd_opt(2023, 12, 20).unwrap(); // Wednesday
-    let cutoff = state.calculate_cutoff_date(wednesday, 5);
+    let cutoff = state.calculate_cutoff_date(wednesday, 5, calendar);
     let expected_cutoff = NaiveDate::from_ymd_opt(2023, 12, 13).unwrap(); // Previous Wednesday
     assert_eq!(cutoff, expected_cutoff);
 }
@@ -395,4 +398,175 @@ async fn test_concurrent_pdt_access() {
     let _count = enforcer.count_day_trades().await;
     let _state = enforcer.get_pdt_state().await;
     // If we get here without panicking, concurrent access worked
+}
+
+// =============================================================================
+// B-042: PDT rolling window must skip NYSE market holidays, not just weekends.
+//
+// The tests below use fixed historical/calendar dates (rather than dates
+// relative to `Utc::now()`) so the holiday-spanning windows are deterministic
+// regardless of when the suite runs. Expected cutoffs were independently
+// computed against the NYSE holiday calendar (see commit message / PR
+// description for the walked-back day-by-day derivation) and cross-checked
+// against `MarketHolidayCalendar::is_business_day` below.
+// =============================================================================
+
+/// A rolling window that spans both Christmas Day and New Year's Day must
+/// skip both holidays, not just the weekends around them.
+///
+/// From Thursday Jan 2, 2025, walking back 5 business days:
+///   -1: Tue Dec 31, -2: Mon Dec 30, -3: Fri Dec 27, -4: Thu Dec 26,
+///   (skip holiday Wed Dec 25), -5: Tue Dec 24
+/// Cutoff = Dec 24, 2024. A weekday-only implementation would incorrectly
+/// stop one business day later, at Dec 26, 2024.
+#[tokio::test]
+async fn test_rolling_window_spans_christmas_and_new_year() {
+    let config = PdtConfig {
+        min_equity_threshold: Decimal::new(2500000, 2),
+        max_day_trades_under_threshold: 3,
+        rolling_window_days: 5,
+    };
+    let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
+    let state = enforcer.get_pdt_state().await;
+    let calendar = enforcer.holiday_calendar();
+
+    // Sanity check the calendar itself first.
+    assert!(!calendar.is_business_day(NaiveDate::from_ymd_opt(2024, 12, 25).unwrap()));
+    assert!(!calendar.is_business_day(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()));
+
+    let from_date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(); // Thursday
+    let cutoff = state.calculate_cutoff_date(from_date, 5, calendar);
+    let expected = NaiveDate::from_ymd_opt(2024, 12, 24).unwrap();
+    assert_eq!(
+        cutoff, expected,
+        "cutoff must skip both Christmas Day and New Year's Day"
+    );
+
+    let naive_weekday_only_cutoff = NaiveDate::from_ymd_opt(2024, 12, 26).unwrap();
+    assert_ne!(
+        cutoff, naive_weekday_only_cutoff,
+        "cutoff must differ from a weekday-only (holiday-blind) calculation"
+    );
+
+    // End-to-end: a trade recorded on Christmas Eve (a real business day, one
+    // business day after the cutoff) must be counted in the window, while
+    // one recorded further back (before the true cutoff) must not.
+    enforcer
+        .record_day_trade(NaiveDate::from_ymd_opt(2024, 12, 24).unwrap())
+        .await
+        .unwrap();
+    enforcer
+        .record_day_trade(NaiveDate::from_ymd_opt(2024, 12, 20).unwrap()) // before cutoff
+        .await
+        .unwrap();
+
+    let state = enforcer.get_pdt_state().await;
+    let count = state.total_day_trades_in_window(5, from_date, calendar);
+    assert_eq!(
+        count, 1,
+        "only the trade on/after the holiday-aware cutoff should count"
+    );
+}
+
+/// Thanksgiving week: the rolling window must skip Thanksgiving Day itself
+/// (the 4th Thursday of November), not just the surrounding weekend.
+///
+/// From Tuesday Dec 3, 2024, walking back 5 business days:
+///   -1: Mon Dec 2, -2: Fri Nov 29, -3: Wed Nov 27,
+///   (skip holiday Thu Nov 28), -4: Tue Nov 26, -5: Mon Nov 25
+/// Cutoff = Nov 25, 2024. A weekday-only implementation would incorrectly
+/// stop one business day later, at Nov 26, 2024.
+#[tokio::test]
+async fn test_rolling_window_spans_thanksgiving_week() {
+    let config = PdtConfig {
+        min_equity_threshold: Decimal::new(2500000, 2),
+        max_day_trades_under_threshold: 3,
+        rolling_window_days: 5,
+    };
+    let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
+    let state = enforcer.get_pdt_state().await;
+    let calendar = enforcer.holiday_calendar();
+
+    let thanksgiving_2024 = NaiveDate::from_ymd_opt(2024, 11, 28).unwrap();
+    assert_eq!(thanksgiving_2024.weekday(), Weekday::Thu);
+    assert!(!calendar.is_business_day(thanksgiving_2024));
+
+    let from_date = NaiveDate::from_ymd_opt(2024, 12, 3).unwrap(); // Tuesday
+    let cutoff = state.calculate_cutoff_date(from_date, 5, calendar);
+    let expected = NaiveDate::from_ymd_opt(2024, 11, 25).unwrap();
+    assert_eq!(
+        cutoff, expected,
+        "cutoff must skip Thanksgiving Day (2024-11-28)"
+    );
+
+    let naive_weekday_only_cutoff = NaiveDate::from_ymd_opt(2024, 11, 26).unwrap();
+    assert_ne!(cutoff, naive_weekday_only_cutoff);
+}
+
+/// Weekend-observance case: July 4, 2026 falls on a Saturday, so NYSE
+/// observes Independence Day on Friday, July 3, 2026. The rolling window
+/// must treat the *observed* date as the holiday, not the literal July 4.
+///
+/// From Thursday July 9, 2026, walking back 5 business days:
+///   -1: Wed Jul 8, -2: Tue Jul 7, -3: Mon Jul 6,
+///   (skip weekend Jul 4-5, skip observed holiday Fri Jul 3),
+///   -4: Thu Jul 2, -5: Wed Jul 1
+/// Cutoff = Jul 1, 2026. A weekday-only implementation would incorrectly
+/// stop one business day later, at Jul 2, 2026 (it would count Friday
+/// Jul 3 as a normal trading day).
+#[tokio::test]
+async fn test_rolling_window_handles_july_fourth_weekend_observance() {
+    let config = PdtConfig {
+        min_equity_threshold: Decimal::new(2500000, 2),
+        max_day_trades_under_threshold: 3,
+        rolling_window_days: 5,
+    };
+    let enforcer = PdtEnforcer::new(config, Decimal::new(2000000, 2));
+    let state = enforcer.get_pdt_state().await;
+    let calendar = enforcer.holiday_calendar();
+
+    let july_4_2026 = NaiveDate::from_ymd_opt(2026, 7, 4).unwrap();
+    assert_eq!(july_4_2026.weekday(), Weekday::Sat);
+    let observed_july_3 = NaiveDate::from_ymd_opt(2026, 7, 3).unwrap();
+    assert_eq!(observed_july_3.weekday(), Weekday::Fri);
+
+    // The observed date (Friday) is the holiday; the literal date (Saturday)
+    // is already a non-business day for weekend reasons alone.
+    assert!(!calendar.is_business_day(observed_july_3));
+    assert!(calendar.is_holiday(observed_july_3));
+
+    let from_date = NaiveDate::from_ymd_opt(2026, 7, 9).unwrap(); // Thursday
+    let cutoff = state.calculate_cutoff_date(from_date, 5, calendar);
+    let expected = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+    assert_eq!(
+        cutoff, expected,
+        "cutoff must treat the Friday-observed Jul 3 as the holiday"
+    );
+
+    let naive_weekday_only_cutoff = NaiveDate::from_ymd_opt(2026, 7, 2).unwrap();
+    assert_ne!(cutoff, naive_weekday_only_cutoff);
+}
+
+/// Cross-check that `PdtEnforcer::with_calendar` allows injecting a shared
+/// [`MarketHolidayCalendar`] (e.g. the one owned by application/UI state),
+/// and that its business-day determination matches a freshly constructed
+/// default calendar for the same fixed date.
+#[tokio::test]
+async fn test_with_calendar_constructor_uses_injected_calendar() {
+    let config = PdtConfig {
+        min_equity_threshold: Decimal::new(2500000, 2),
+        max_day_trades_under_threshold: 3,
+        rolling_window_days: 5,
+    };
+    let shared_calendar = std::sync::Arc::new(MarketHolidayCalendar::new());
+    let enforcer =
+        PdtEnforcer::with_calendar(config, Decimal::new(2000000, 2), shared_calendar.clone());
+
+    let state = enforcer.get_pdt_state().await;
+    let calendar = enforcer.holiday_calendar();
+    assert!(std::sync::Arc::ptr_eq(calendar, &shared_calendar));
+
+    let from_date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+    let cutoff = state.calculate_cutoff_date(from_date, 5, calendar);
+    assert_eq!(cutoff, NaiveDate::from_ymd_opt(2024, 12, 24).unwrap());
 }
