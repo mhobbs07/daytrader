@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-04-22
+Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis-and-backlog-completion-strategy.md`)
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -16,49 +16,49 @@ Last Updated: 2026-04-22
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| B-025 | Organize backlog and create frontend refinements | Done | 2026-03-28 | gt__toast__2b1b6675 | Backlog reorganized + critical fixes implemented (B-026/027/028/031/035) |
+| B-030 | Candle chart | In Progress | 2026-07-06 | feat/b030-candle-chart | Wave 1 agent |
+| B-032/B-034 | PDT panel + risk push events | In Progress | 2026-07-06 | feat/b032-b034-risk-ui-events | Wave 1 agent (B-034 salvaged from killed worktree agent-ad83243b) |
+| B-042 | PDT holiday edge cases | In Progress | 2026-07-06 | fix/b042-pdt-holiday-enforcer | Wave 1 agent (salvages stranded commit 20cb752 from feature/b008-pdt-holiday-edge-cases) |
+| B-044 | Alpaca rate limiting | In Progress | 2026-07-06 | feat/b044-alpaca-rate-limiting | Wave 1 agent |
 
 ---
 
 ## Pending Tasks
-
-### Priority: Critical (Blocks Frontend Functioning)
-
-| ID | Task | Priority | Source | Scope |
-|----|------|----------|--------|-------|
-| B-026 | Fix CSS: Add missing dashboard layout and component styles | Critical | codebase audit | `daytrader/src/App.css` |
-| B-027 | Fix MarketData component: add `last` price display, error handling | Critical | codebase audit | `daytrader/src/components/MarketData.tsx` |
-| B-028 | Fix systemStore: call `refreshStatus()` on mount / component init | Critical | codebase audit | `daytrader/src/store/systemStore.ts` |
 
 ### Priority: High (Core Frontend Features)
 
 | ID | Task | Priority | Source | Scope |
 |----|------|----------|--------|-------|
 | B-030 | Add candle chart using `lightweight-charts` to MarketData component | High | plans/tauri-thin-slice-plan.md | `daytrader/src/components/MarketData.tsx` |
-| B-031 | Add ConnectionStatus indicator component | High | plans/tauri-thin-slice-plan.md | `daytrader/src/components/ConnectionStatus.tsx` (new) |
 | B-032 | Add PDT status panel to RiskStatus component | High | codebase audit | `daytrader/src/components/RiskStatus.tsx`, `daytrader/src/store/riskStore.ts` |
-| B-033 | Implement `subscribe_symbol` IPC properly: start mock data streaming on subscribe | High | codebase audit | `daytrader/src-tauri/src/commands/market_data.rs` |
-| B-034 | Wire risk store auto-refresh via Tauri event (not just polling) | High | codebase audit | `daytrader/src/store/riskStore.ts` |
-| B-035 | Expose `get_risk_limits` from actual config (not hardcoded) | High | commands/risk.rs TODO | `daytrader/src-tauri/src/commands/risk.rs`, `src/risk/engine.rs` |
+| B-034 | Wire risk store auto-refresh via Tauri event (not just polling) | High | codebase audit | `daytrader/src/store/riskStore.ts`, `daytrader/src-tauri/src/events.rs` |
+
+### Priority: High (Compliance Correctness — 2026-07-06 audit)
+
+| ID | Task | Priority | Source | Scope |
+|----|------|----------|--------|-------|
+| B-042 | Fix PDT holiday edge cases: wire MarketHolidayCalendar into PdtEnforcer (enforcement is weekday-only; display commands already holiday-aware — inconsistent) | High | 2026-07-06 audit; stranded fix on feature/b008-pdt-holiday-edge-cases (20cb752) | `src/risk/pdt.rs`, `src/utils/holidays.rs` |
+| B-058 | Implement day-trade detection in RiskEngine (currently stubbed to `false`); reconcile RiskEngine vs PdtEnforcer double-tracking; specific RiskViolationType variants | High | risk/engine.rs:254,310,266 TODOs | `src/risk/engine.rs` |
+| B-059 | Remove production-path `.unwrap()`/`.expect()`: risk/limits.rs from_config (panics on NaN/inf config), risk/engine.rs placeholder fallbacks, alpaca/rest.rs client builder | High | 2026-07-06 audit | `src/risk/limits.rs`, `src/risk/engine.rs`, `src/brokers/alpaca/rest.rs` |
+| B-062 | Implement `get_recent_risk_violations` DB query (currently stub returning `[]`; also masks DB errors as "no violations") | High | commands/risk.rs:184,543 TODO | `daytrader/src-tauri/src/commands/risk.rs`, `src/db/` |
 
 ### Priority: Medium (Quality & Completeness)
 
 | ID | Task | Priority | Source | Scope |
 |----|------|----------|--------|-------|
-| B-036 | Add TypeScript types module: `daytrader/src/types/` with market, pattern, system, risk types | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/types/` (new) |
+| B-036 | Add TypeScript types module: `daytrader/src/types/` with market, pattern, system, risk types | Medium | plans/tauri-thin-slice-plan.md; partial commit 7074a2a on worktree-agent-a00587c1 | `daytrader/src/types/` (new) |
 | B-037 | Add React custom hooks: `useMarketData`, `usePatterns`, `useTauriEvents` | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/hooks/` (new) |
 | B-039 | Extend App.tsx to support multi-symbol watchlist (not just AAPL hardcoded) | Medium | codebase audit | `daytrader/src/App.tsx` |
-| B-042 | Fix PDT holiday edge cases in risk/pdt module | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/holidays.rs` |
-| B-043 | Time zone handling (DST transitions) in risk/pdt | Medium | progress-tracking.md | `src/risk/pdt.rs`, `src/utils/` |
-| B-044 | Rate limiting improvements for Alpaca broker | Medium | progress-tracking.md | `src/brokers/alpaca/` |
-| B-045 | Database performance optimization (query indexing) | Medium | progress-tracking.md | `src/db/` |
-| B-046 | Event filtering completion in events/filters | Medium | progress-tracking.md | `src/events/filters.rs` |
+| B-043 | ET session-boundary handling: replace fixed UTC hour offsets with `chrono-tz` America/New_York (open/close off by 1h part of year); note: core timestamps are already all-UTC, classic DST bug not present | Medium | 2026-07-06 audit | `src/risk/`, `src/utils/`, Cargo.toml |
+| B-044 | Alpaca rate limiting: client-side throttle, parse real Retry-After header (hardcoded 60s), exponential WS reconnect backoff (README falsely claims it exists) | Medium | 2026-07-06 audit | `src/brokers/alpaca/` |
+| B-060 | Harden verification pipeline: fix GNU-only `grep -oP` (shows "0 passed" on macOS), add production unwrap/expect check, add std::sync check, gate `npm run build`, known-failures burn-down policy | Medium | 2026-07-06 audit | `scripts/`, `.governance/` |
+| B-063 | Fix `std::sync::RwLock` usage violating concurrency rule | Medium | 2026-07-06 audit | `src/db/mock.rs`, `src/utils/holidays.rs` |
+| B-064 | Dead code cleanup: vestigial `daytrader/src-tauri/src/lib.rs` (`greet`), unused `patternStore.loadStatistics`, unused `get_detected_patterns_for_symbol` (wire up or remove) | Medium | 2026-07-06 audit | `daytrader/` |
 
 ### Priority: Low (Enhancements)
 
 | ID | Task | Priority | Source | Scope |
 |----|------|----------|--------|-------|
-| B-047 | Fix trivial test in `src/risk/mod.rs` (`assert!(true)`) | Low | governance audit | `src/risk/mod.rs` |
 | B-048 | Mock data generator improvements for tests | Low | progress-tracking.md | `tests/` |
 | B-049 | Load testing implementation | Low | progress-tracking.md | `tests/` |
 | B-050 | Release automation pipeline | Low | progress-tracking.md | `.github/workflows/` |
@@ -66,12 +66,15 @@ Last Updated: 2026-04-22
 | B-052 | User acceptance testing (PDT compliance scenarios) | Low | progress-tracking.md | `tests/`, `src/risk/` |
 | B-053 | Interactive Brokers integration | Low | progress-tracking.md | `src/brokers/` |
 | B-054 | Phase 6: Backtesting & validation framework | Low | plans/progress-tracking.md | `tests/`, `src/patterns/` |
+| B-065 | Frontend test coverage (currently zero test files in daytrader/src) | Low | 2026-07-06 audit | `daytrader/src/` |
 
-### Priority: Critical (Blocks Integration Test Compilation)
+### Blocked / Needs Human Decision
 
-| ID | Task | Priority | Source | Scope |
-|----|------|----------|--------|-------|
-| B-055 | Scaffold `migrations/` directory for sqlx integration tests | Critical | integration test failures | `migrations/` (new) |
+| ID | Task | Status | Reason |
+|----|------|--------|--------|
+| B-061 | Implement emergency liquidation logic (risk/engine.rs:589 TODO; `emergency_liquidate_threshold` config exists with no execution path) | Blocked | Auto-liquidation semantics in a real account need human sign-off before implementation |
+| B-057 | Decimal API + private-field drift in integration tests | Abandoned | Branch fix/b057-decimal-privacy is self-declared UNVERIFIED WIP ("do not merge as-is"); its BACKLOG "Done" claim was incorrect. Integration tests pass on staging without it (B-056 superseded). Re-derive only if a concrete need reappears. |
+| — | MCP server suite (fix/review-mcp-security-hardening, 6 servers, +14.7k lines) | Deferred | Not in backlog scope; failed 5 verification checks 2026-05-26; large new attack surface needs dedicated security review track |
 
 ---
 
@@ -101,6 +104,9 @@ Last Updated: 2026-04-22
 | B-041 | Add error boundary component for graceful IPC failure handling | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 + npm run build | ErrorBoundary.tsx created; wraps App in main.tsx; shows clean error UI on IPC crashes |
 | B-047 | Fix trivial test in src/risk/mod.rs (assert!(true)) | 2026-04-22 | feat/techdebt-unblock-sweep | 9/9 pass | Strengthened test to construct RiskEngine; removed stale baseline entry from known_test_issues.txt |
 | B-040 | Add PatternList filter UI (by symbol, signal type, confidence threshold) | 2026-04-22 | feat/techdebt-unblock-sweep | npm run build + verify_agent_work.sh 9/9 | Symbol substring filter, signal type dropdown, confidence threshold slider; filters applied client-side via useMemo |
+| B-033 | subscribe_symbol starts mock data streaming | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 (same commit as B-029) | subscribe_symbol delegates to MockDataDriver (idempotent); unsubscribe_symbol command added and registered; confirmed by 2026-07-06 audit |
+| B-045 | Database query indexing | pre-2026-07 | (already on staging) | 2026-07-06 audit | ~28 CREATE INDEX statements in schema.sql covering all hot paths + programmatic indexes in migrations.rs; closed as already-done |
+| B-046 | Event filtering in events/filters | pre-2026-07 | (already on staging) | 2026-07-06 audit | filters.rs fully implemented (636 lines, composable lazy filters, tests, no TODOs); closed as already-done |
 
 ---
 
