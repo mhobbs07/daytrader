@@ -1,11 +1,26 @@
 import React, { useEffect } from 'react';
 import { useRiskStore } from '../store/riskStore';
 
+/** u32::MAX as sent over Tauri IPC — signals "no PDT limit applies". */
+const PDT_UNLIMITED = 4294967295;
+
+/** Returns 'positive' / 'warning' / 'negative' based on PDT restriction proximity. */
+function pdtSeverity(dayTradeCount: number, maxAllowed: number, isRestricted: boolean): 'positive' | 'warning' | 'negative' {
+  if (isRestricted) {
+    return 'negative';
+  }
+  if (maxAllowed !== PDT_UNLIMITED && dayTradeCount >= maxAllowed - 1) {
+    return 'warning';
+  }
+  return 'positive';
+}
+
 export const RiskStatus: React.FC = () => {
   const {
     riskState,
     riskLimits,
     recentViolations,
+    pdtStatus,
     loading,
     error,
     refreshAll
@@ -82,6 +97,59 @@ export const RiskStatus: React.FC = () => {
               <span className="limit-value">${riskLimits.pdtMinEquity.toFixed(2)}</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {pdtStatus && (
+        <div className="pdt-status">
+          <h4>PDT Status</h4>
+          <div className="pdt-grid">
+            <div className="pdt-item">
+              <span className="pdt-label">Account Equity:</span>
+              <span
+                className={`pdt-value ${pdtStatus.meetsEquityRequirement ? 'positive' : 'negative'}`}
+              >
+                ${pdtStatus.currentEquity.toFixed(2)} / ${pdtStatus.pdtMinEquity.toFixed(2)}
+              </span>
+            </div>
+            <div className="pdt-item">
+              <span className="pdt-label">Day Trades:</span>
+              <span
+                className={`pdt-value ${pdtSeverity(
+                  pdtStatus.dayTradeCount,
+                  pdtStatus.maxDayTradesAllowed,
+                  pdtStatus.isRestricted
+                )}`}
+              >
+                {pdtStatus.dayTradeCount}
+                {pdtStatus.maxDayTradesAllowed !== PDT_UNLIMITED &&
+                  ` / ${pdtStatus.maxDayTradesAllowed}`}
+              </span>
+            </div>
+            <div className="pdt-item">
+              <span className="pdt-label">Rolling Window:</span>
+              <span className="pdt-value">
+                {pdtStatus.rollingWindowStart} to {pdtStatus.rollingWindowEnd}
+              </span>
+            </div>
+            <div className="pdt-item">
+              <span className="pdt-label">Restriction Status:</span>
+              <span
+                className={`pdt-value ${pdtStatus.isRestricted ? 'negative' : 'positive'}`}
+              >
+                {pdtStatus.isRestricted ? '🚫 RESTRICTED' : '✅ CLEAR'}
+              </span>
+            </div>
+          </div>
+          {pdtStatus.warnings.length > 0 && (
+            <div className="pdt-warnings">
+              {pdtStatus.warnings.map((warning, index) => (
+                <div key={index} className="pdt-warning-item">
+                  {warning}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

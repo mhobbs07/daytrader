@@ -418,3 +418,55 @@ fn create_large_position_order(id: &str) -> Arc<Order> {
         updated_at: chrono::Utc::now(),
     })
 }
+
+/// B-034: Verify that RiskViolation events reach a bus subscriber.
+///
+/// The EventBridge subscribes to the same bus and forwards the event to the
+/// Tauri frontend as `risk:violation`. This test confirms that the bus
+/// routing works correctly so the bridge has something to forward.
+#[tokio::test]
+async fn test_risk_violation_reaches_bus_subscriber() {
+    use daytrader::brokers::types::Message;
+    use daytrader::events::types::{RiskViolation, RiskViolationType};
+
+    let event_bus = Arc::new(EventBus::new(100));
+    let mut subscriber = event_bus.subscribe();
+
+    let violation = RiskViolation {
+        violation_type: RiskViolationType::PositionSizeLimit,
+        message: Message::new("test: position size exceeds limit"),
+        timestamp: chrono::Utc::now(),
+        pattern_name: None,
+    };
+
+    // Verify the violation is serialisable (required for Tauri IPC emit)
+    let serialized = serde_json::to_string(&violation)
+        .expect("RiskViolation must be JSON-serialisable for Tauri IPC");
+    assert!(serialized.contains("PositionSizeLimit"));
+
+    // Publish through the bus
+    event_bus.publish(MarketEvent::RiskViolation {
+        violation: violation.clone(),
+    });
+
+    // The EventBridge thread calls blocking_recv() on this same bus; confirm
+    // a normal async subscriber also receives the event.
+    let received = tokio::time::timeout(Duration::from_millis(200), async {
+        loop {
+            match subscriber.recv().await {
+                Ok(MarketEvent::RiskViolation { violation: v }) => return Some(v),
+                Ok(_) => continue,
+                Err(_) => return None,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for RiskViolation event")
+    .expect("no RiskViolation received");
+
+    assert_eq!(
+        received.violation_type,
+        RiskViolationType::PositionSizeLimit,
+        "Received violation type should match published"
+    );
+}
