@@ -8,7 +8,8 @@ This module provides a complete integration with Alpaca Markets for both order e
 - ✅ **WebSocket Client** - Real-time quotes and bars/candles
 - ✅ **Type Safety** - All domain types use newtypes (no raw strings)
 - ✅ **Static Dispatch** - Zero-cost abstractions with generics
-- ✅ **Auto-Reconnect** - WebSocket automatically reconnects on disconnect
+- ✅ **Client-Side Rate Limiting** - Token-bucket limiter throttles REST requests before they hit Alpaca's server-side limit
+- ✅ **Auto-Reconnect with Exponential Backoff** - WebSocket reconnects with a doubling delay (1s -> 60s cap), reset on successful connect
 - ✅ **Paper Trading** - Easy configuration for paper vs live trading
 - ✅ **Comprehensive Tests** - Unit tests for all components
 
@@ -161,6 +162,8 @@ alpaca/
 ├── types.rs        - Alpaca-specific JSON response types
 ├── rest.rs         - REST API client (OrderExecutionProvider)
 ├── websocket.rs    - WebSocket client (MarketDataProvider)
+├── ratelimit.rs    - Token-bucket rate limiter for REST requests
+├── backoff.rs      - Exponential backoff for WebSocket reconnects
 └── mod.rs          - Main AlpacaProvider combining both
 ```
 
@@ -185,29 +188,41 @@ All errors are mapped to `BrokerError`:
 - `OrderRejected` - Order validation failed
 - `InsufficientFunds` - Not enough buying power
 - `SymbolNotFound` - Invalid symbol
-- `RateLimitExceeded` - API rate limit hit
+- `RateLimitExceeded { retry_after }` - API rate limit hit; `retry_after` is parsed from the response's `Retry-After` header (seconds), falling back to a 60-second default only when the header is missing or unparseable
 - `ApiError` - Other API errors
+
+## Rate Limiting
+
+The REST client throttles itself with an in-process token-bucket limiter
+before every request, so it backs off proactively instead of relying on
+the server to reject requests with HTTP 429.
+
+- Default: 200 requests/minute, matching Alpaca's documented free-tier limit
+- Configurable via `RestClient::with_rate_limit(config, RateLimiterConfig { max_requests, refill_period })`
+- Implemented with `tokio::sync::Mutex` and `tokio::time` (see `ratelimit.rs`) — no extra crate dependency
+- If a 429 is still returned (e.g. multiple client instances sharing one account), the real `Retry-After` header is parsed into `BrokerError::RateLimitExceeded`
 
 ## WebSocket Features
 
-### Auto-Reconnect
+### Auto-Reconnect with Exponential Backoff
 
-The WebSocket client automatically reconnects on disconnection with exponential backoff:
+The WebSocket client automatically reconnects on disconnection. The delay
+between attempts starts at 1 second and doubles on each consecutive
+failure, capped at 60 seconds, and resets back to 1 second as soon as a
+connection is re-established (see `backoff.rs`):
 
 ```rust
 // Connection is maintained automatically
 provider.connect_websocket().await?;
 
-// Subscribe to symbols - connection persists across reconnects
+// Subscribe to symbols
 provider.subscribe_quotes(symbols).await?;
 ```
 
-### State Recovery
-
-After reconnection, the client automatically:
-1. Re-authenticates
-2. Re-subscribes to all previously subscribed symbols
-3. Continues receiving updates
+Note: reconnection re-authenticates the session, but does **not** currently
+re-subscribe to previously subscribed symbols automatically — callers that
+need subscriptions to survive a reconnect must call `subscribe_quotes`
+again after `connect_websocket`/`start_stream` reports the stream is back.
 
 ### Heartbeat Monitoring
 
@@ -271,10 +286,14 @@ To work around this, you can:
 ### Rate Limits
 
 Alpaca enforces rate limits:
-- REST API: 200 requests per minute
+- REST API: 200 requests per minute (client-side default; see "Rate Limiting" above)
 - WebSocket: No explicit limit, but excessive subscriptions may be throttled
 
-The client automatically handles rate limit errors with retry logic.
+The REST client proactively throttles itself with the token-bucket limiter
+described above. If a 429 is still received, it is surfaced to the caller
+as `BrokerError::RateLimitExceeded { retry_after }` — the client does not
+automatically retry the request; callers are responsible for deciding
+whether and when to retry.
 
 ## Examples
 

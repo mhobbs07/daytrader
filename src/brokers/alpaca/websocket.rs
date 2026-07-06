@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, interval};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use super::backoff::ReconnectBackoff;
 use super::config::AlpacaConfig;
 use super::types::{AlpacaBar, AlpacaQuote};
 use crate::brokers::traits::{Candle, MarketDataProvider, Quote, Timeframe};
@@ -112,30 +113,43 @@ impl WebSocketClient {
     }
 
     /// Main WebSocket handler loop
+    ///
+    /// Reconnects with exponential backoff (starting at 1s, doubling up to
+    /// a 60s cap) whenever the connection drops with an error. The backoff
+    /// resets to its initial delay after each successful connection, so a
+    /// brief blip doesn't leave subsequent reconnects artificially slow.
     async fn ws_handler(
         config: AlpacaConfig,
         state: Arc<RwLock<WsState>>,
         mut command_rx: mpsc::UnboundedReceiver<WsCommand>,
     ) {
+        let mut backoff = ReconnectBackoff::default_policy();
+
         loop {
-            match Self::connect_and_run(&config, &state, &mut command_rx).await {
+            match Self::connect_and_run(&config, &state, &mut command_rx, &mut backoff).await {
                 Ok(_) => {
                     log::info!("WebSocket connection closed normally");
                     break;
                 }
                 Err(e) => {
-                    log::error!("WebSocket error: {}, reconnecting in 5s...", e);
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let delay = backoff.next_delay();
+                    log::error!("WebSocket error: {}, reconnecting in {:?}...", e, delay);
+                    tokio::time::sleep(delay).await;
                 }
             }
         }
     }
 
     /// Connects to WebSocket and runs until disconnection
+    ///
+    /// Resets `backoff` to its initial delay as soon as the connection and
+    /// authentication succeed, so a long-lived session doesn't leave a
+    /// later reconnect starting from an inflated delay.
     async fn connect_and_run(
         config: &AlpacaConfig,
         state: &Arc<RwLock<WsState>>,
         command_rx: &mut mpsc::UnboundedReceiver<WsCommand>,
+        backoff: &mut ReconnectBackoff,
     ) -> Result<(), BrokerError> {
         // Connect to WebSocket
         let (ws_stream, _) = connect_async(&config.ws_url)
@@ -156,6 +170,11 @@ impl WebSocketClient {
             .send(Message::Text(auth_json))
             .await
             .map_err(|e| BrokerError::ConnectionFailed(e.to_string()))?;
+
+        // Connection and authentication succeeded: reset backoff so the
+        // next disconnect (if any) starts ramping up from the initial
+        // delay again rather than continuing from wherever it left off.
+        backoff.reset();
 
         // Set streaming state
         {
