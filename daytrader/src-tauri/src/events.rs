@@ -101,6 +101,9 @@ impl EventBridge {
             MarketEvent::ConnectionLost { provider, reason } => {
                 app_handle.emit("system:disconnection", reason.as_str())?;
             }
+            MarketEvent::RiskViolation { violation } => {
+                app_handle.emit("risk:violation", &violation)?;
+            }
             _ => {
                 // Other events not needed for thin slice
             }
