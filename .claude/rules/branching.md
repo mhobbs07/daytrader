@@ -23,7 +23,12 @@ main              Protected. Production-ready code. Requires PR + review.
 4. **Feature branches are deleted after merge** to keep the repo clean.
 5. **Swarm worktree branches** merge to their parent feature branch, NOT to staging directly.
 
-## Branch Naming
+## Branch Naming (advisory)
+
+These prefixes are conventions for readability, NOT enforced rules. There is
+no CI or hook validation of branch names (a stale `branch-naming.yml` workflow
+that enforced a different scheme was removed 2026-07-07 by owner decision —
+do not reintroduce enforcement).
 
 | Type | Pattern | Example |
 |------|---------|---------|
