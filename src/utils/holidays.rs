@@ -29,6 +29,17 @@
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+// concurrency-rule exception: `is_business_day` and friends are called from
+// synchronous, non-async methods on `PdtState` (see `src/risk/pdt.rs`) that
+// run while a `tokio::sync::RwLock<PdtState>` write/read guard is already
+// held. Making this cache async (`tokio::sync::RwLock`) would force those
+// `PdtState` methods to become `async fn`, which cascades into every caller
+// that holds the `PdtState` lock guard across the call. `std::sync::RwLock`
+// is safe here because every critical section is a short, non-blocking
+// HashMap read/write with no `.await` inside it — it never holds the lock
+// across an await point, so it cannot block the Tokio runtime. Tracked as a
+// deliberate, documented deviation from the `tokio::sync`-only rule (B-063);
+// left in the production safety baseline rather than removed.
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
