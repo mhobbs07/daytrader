@@ -1,26 +1,12 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import type { PatternSignalResponse, PatternStats } from '../types';
 
 const unlisteners: UnlistenFn[] = [];
 
-interface PatternSignal {
-  symbol: string;
-  pattern_name: string;
-  signal_type: string;
-  confidence: number;
-  detected_at: string;
-  price: number;
-}
-
-interface PatternStats {
-  total_detections: number;
-  patterns_by_type: [string, number][];
-  average_confidence: number;
-}
-
 interface PatternStore {
-  patterns: PatternSignal[];
+  patterns: PatternSignalResponse[];
   statistics: PatternStats | null;
   loadStatistics: () => Promise<void>;
   dispose: () => void;
@@ -30,7 +16,7 @@ export const usePatternStore = create<PatternStore>((set) => {
   // Initialize listener at store creation
   (async () => {
     if (unlisteners.length === 0) {
-      const unlisten = await listen<PatternSignal>('patterns:detected', (event) => {
+      const unlisten = await listen<PatternSignalResponse>('patterns:detected', (event) => {
         usePatternStore.setState(state => ({
           patterns: [event.payload, ...state.patterns].slice(0, 100)
         }));

@@ -1,16 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import type { SystemStatus } from '../types';
 
 let systemIntervalId: number | null = null;
-
-interface SystemStatus {
-  broker_connected: boolean;
-  event_bus_active: boolean;
-  patterns_active: number;
-  events_published: number;
-  events_dropped: number;
-  average_latency_ms: number;
-}
 
 interface SystemStore {
   status: SystemStatus | null;

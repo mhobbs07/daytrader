@@ -1,36 +1,18 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import type { QuoteResponse, CandleResponse, CandleUpdateEventPayload } from '../types';
 
 const unlisteners = new Map<string, UnlistenFn[]>();
 
-interface Quote {
-  symbol: string;
-  bid: number;
-  ask: number;
-  /** Last traded price (midpoint fallback when no trade data). */
-  last: number;
-  timestamp: string;
-}
-
-interface Candle {
-  symbol: string;
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
 interface MarketStore {
-  quotes: Map<string, Quote>;
-  candles: Map<string, Candle[]>;
+  quotes: Map<string, QuoteResponse>;
+  candles: Map<string, CandleResponse[]>;
   subscribeToSymbol: (symbol: string) => Promise<void>;
   unsubscribeFromSymbol: (symbol: string) => void;
   dispose: () => void;
-  getLatestQuote: (symbol: string) => Promise<Quote>;
-  getRecentCandles: (symbol: string, count: number) => Promise<Candle[]>;
+  getLatestQuote: (symbol: string) => Promise<QuoteResponse>;
+  getRecentCandles: (symbol: string, count: number) => Promise<CandleResponse[]>;
 }
 
 export const useMarketStore = create<MarketStore>((set, _get) => ({
@@ -49,7 +31,11 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
 
     const handlers: UnlistenFn[] = [];
 
-    handlers.push(await listen<Quote>('market_data:quote_update', (event) => {
+    // NOTE: the `market_data:quote_update` event payload does not actually
+    // include `symbol` on the wire (see QuoteUpdateEventPayload in
+    // ../types/market.ts) — this cast reflects the pre-existing assumption
+    // in this handler, not a verified wire shape.
+    handlers.push(await listen<QuoteResponse>('market_data:quote_update', (event) => {
       set(state => {
         const newQuotes = new Map(state.quotes);
         newQuotes.set(event.payload.symbol, event.payload);
@@ -57,7 +43,7 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
       });
     }));
 
-    handlers.push(await listen<Candle>('market_data:new_candle', (event) => {
+    handlers.push(await listen<CandleUpdateEventPayload>('market_data:new_candle', (event) => {
       set(state => {
         const newCandles = new Map(state.candles);
         const symbolCandles = newCandles.get(event.payload.symbol) || [];
@@ -88,10 +74,10 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
   },
 
   getLatestQuote: async (symbol: string) => {
-    return invoke<Quote>('get_latest_quote', { symbol });
+    return invoke<QuoteResponse>('get_latest_quote', { symbol });
   },
 
   getRecentCandles: async (symbol: string, count: number) => {
-    return invoke<Candle[]>('get_recent_candles', { symbol, count });
+    return invoke<CandleResponse[]>('get_recent_candles', { symbol, count });
   },
 }));
