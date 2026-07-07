@@ -149,11 +149,17 @@ echo -e "${BLUE}[5/${TOTAL_STEPS}] Running unit tests with mock feature (cargo t
 # pipeline, so it rotted silently for months with compile errors. The feature
 # is a superset of the default `database` feature, so this also re-runs the
 # step-4 tests; the extra lib build is the price of keeping the feature alive.
+# Same cold-cache handling as step 4: the mock feature is a distinct cfg set,
+# so compile untimed first and let the timeout cover only test execution.
+cargo test --lib --features mock --no-run 2>&1 | tail -3
 MOCK_TEST_OUTPUT=$(timeout 120 cargo test --lib --features mock 2>&1)
 MOCK_TEST_STATUS=$?
 MOCK_TEST_PASSED=$(echo "$MOCK_TEST_OUTPUT" | grep -oE '[0-9]+ passed' | awk '{s+=$1} END {print s+0}')
 MOCK_TEST_FAILED=$(echo "$MOCK_TEST_OUTPUT" | grep -oE '[0-9]+ failed' | awk '{s+=$1} END {print s+0}')
-if [ "$MOCK_TEST_STATUS" -eq 0 ]; then
+if [ "$MOCK_TEST_STATUS" -eq 124 ]; then
+    echo -e "  ${RED}Timed out after 120s of test execution (build was already complete)${NC}"
+    step_fail "Mock-feature unit tests (timed out)"
+elif [ "$MOCK_TEST_STATUS" -eq 0 ]; then
     step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed)"
 elif [ "$MOCK_TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
     KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
