@@ -1,10 +1,7 @@
 use crate::mock_driver::MockDataDriver;
 use daytrader::{
     brokers::{Candle, Quote, Symbol, traits::MarketDataProvider},
-    db::{
-        Database,
-        repositories::{PdtRepository, PerformanceRepository},
-    },
+    db::{Database, repositories::PerformanceRepository, traits::PdtRepositoryTrait},
     events::bus::EventBus,
     events::types::PatternSignal,
     patterns::PatternRegistry,
@@ -13,7 +10,6 @@ use daytrader::{
     risk::position_tracker::PositionTracker,
     utils::holidays::MarketHolidayCalendar,
 };
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -119,8 +115,10 @@ pub struct AppState {
     pub holiday_calendar: Arc<MarketHolidayCalendar>,
     // Database integration
     pub database: Option<Arc<Database>>,
-    pub db_pool: Option<SqlitePool>,
-    pub pdt_repository: Option<Arc<PdtRepository>>,
+    /// PDT persistence. No concrete SQLite implementation exists yet (B-066);
+    /// stays `None` so PDT enforcement runs in-memory and history commands
+    /// return their empty-state fallbacks.
+    pub pdt_repository: Option<Arc<dyn PdtRepositoryTrait>>,
     pub performance_repository: Option<Arc<PerformanceRepository>>,
     // Account information
     pub account_id: i64, // Numeric account ID for database operations
@@ -148,7 +146,6 @@ impl AppState {
             holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
             // Database integration (None for basic setup)
             database: None,
-            db_pool: None,
             pdt_repository: None,
             performance_repository: None,
             // Default account ID
@@ -180,7 +177,6 @@ impl AppState {
             holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
             // Database integration (None for basic setup)
             database: None,
-            db_pool: None,
             pdt_repository: None,
             performance_repository: None,
             // Default account ID
@@ -203,14 +199,13 @@ impl AppState {
 
         let db_pool = database.pool.clone();
 
-        // Create PDT enforcer with database support
+        // PDT enforcement runs in-memory: no concrete PdtRepositoryTrait
+        // implementation exists yet (B-066), so state is not persisted across
+        // restarts. Enforcement logic itself is unaffected.
         let pdt_config = PdtConfig::from_config(&config);
-        let pdt_enforcer =
-            PdtEnforcer::new(pdt_config, initial_equity, db_pool.clone(), account_id).await?;
+        let pdt_enforcer = PdtEnforcer::new(pdt_config, initial_equity);
 
-        // Initialize repositories
-        let pdt_repository = Arc::new(PdtRepository::new(db_pool.clone()));
-        let performance_repository = Arc::new(PerformanceRepository::new(db_pool.clone()));
+        let performance_repository = Arc::new(PerformanceRepository::new(db_pool));
 
         Ok(Self {
             event_bus,
@@ -227,8 +222,7 @@ impl AppState {
             holiday_calendar: Arc::new(MarketHolidayCalendar::new()),
             // Database integration
             database: Some(database),
-            db_pool: Some(db_pool),
-            pdt_repository: Some(pdt_repository),
+            pdt_repository: None,
             performance_repository: Some(performance_repository),
             // Account information
             account_id,
@@ -241,7 +235,7 @@ impl AppState {
     }
 
     /// Gets the PDT repository if available
-    pub fn pdt_repository(&self) -> Option<&Arc<PdtRepository>> {
+    pub fn pdt_repository(&self) -> Option<&Arc<dyn PdtRepositoryTrait>> {
         self.pdt_repository.as_ref()
     }
 

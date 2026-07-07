@@ -80,8 +80,11 @@ else
 fi
 
 # ===== Step 2: Compilation =====
-echo -e "${BLUE}[2/${TOTAL_STEPS}] Checking compilation (cargo check)...${NC}"
-if cargo check 2>&1; then
+# --workspace is required: the root is itself a package, so a bare
+# `cargo check` skips daytrader/src-tauri (the app binary sat broken for
+# months without the pipeline noticing).
+echo -e "${BLUE}[2/${TOTAL_STEPS}] Checking compilation (cargo check --workspace)...${NC}"
+if cargo check --workspace 2>&1; then
     step_pass "Compilation"
 else
     step_fail "Compilation"
@@ -92,7 +95,7 @@ fi
 echo -e "${BLUE}[3/${TOTAL_STEPS}] Running linter (cargo clippy)...${NC}"
 # Use -W warnings (warn, don't deny) to avoid blocking on pre-existing warnings.
 # TODO: Tighten to -D warnings once codebase warnings are cleaned up.
-CLIPPY_OUTPUT=$(cargo clippy 2>&1)
+CLIPPY_OUTPUT=$(cargo clippy --workspace 2>&1)
 CLIPPY_ERRORS=$(echo "$CLIPPY_OUTPUT" | grep -c "^error\[" || true)
 if [ "$CLIPPY_ERRORS" -eq 0 ]; then
     CLIPPY_WARNINGS=$(echo "$CLIPPY_OUTPUT" | grep -c "^warning\[" || true)

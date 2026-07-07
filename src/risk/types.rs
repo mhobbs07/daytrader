@@ -517,6 +517,186 @@ pub struct PatternRiskViolation {
     pub suggested_action: Option<String>,
 }
 
+/// Direction of a tracked position for day-trade detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PositionSide {
+    /// Net long (bought to open)
+    Long,
+    /// Net short (sold to open)
+    Short,
+    /// No open quantity
+    Flat,
+}
+
+/// Errors from position lifecycle tracking
+#[derive(Debug, thiserror::Error)]
+pub enum PositionTrackingError {
+    /// Fill quantity must be greater than zero
+    #[error("invalid quantity: {quantity} (must be > 0)")]
+    InvalidQuantity {
+        /// The rejected quantity
+        quantity: u64,
+    },
+    /// Fill price must be positive
+    #[error("invalid price: {price} (must be > 0)")]
+    InvalidPrice {
+        /// The rejected price
+        price: Decimal,
+    },
+}
+
+/// One FIFO lot of an open position, recording when it was opened
+///
+/// Day-trade detection needs to know whether the quantity being closed was
+/// opened on the same trading day, so each opening fill is kept as its own
+/// component until it is consumed by closing fills (FIFO).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PositionComponent {
+    /// Remaining open quantity in this lot
+    pub quantity: u64,
+    /// Fill price the lot was opened at
+    pub price: Decimal,
+    /// Exact time the lot was opened
+    pub opened_at: DateTime<Utc>,
+    /// Trading date the lot was opened (UTC date of `opened_at`)
+    pub opened_date: chrono::NaiveDate,
+}
+
+/// Position lifecycle state for a single symbol, tracked for day-trade detection
+///
+/// Maintains FIFO components so that closing fills can be matched against the
+/// specific lots they close. A close counts as a day trade when any consumed
+/// lot was opened on the same UTC date as the closing fill.
+///
+/// # Examples
+///
+/// ```
+/// use daytrader::risk::types::TrackedPosition;
+/// use daytrader::brokers::types::Symbol;
+/// use daytrader::events::types::OrderSide;
+/// use rust_decimal::Decimal;
+/// use chrono::Utc;
+///
+/// let mut position = TrackedPosition::new(Symbol::new("AAPL").unwrap());
+/// let now = Utc::now();
+/// assert!(!position.update_with_fill(OrderSide::Buy, 100, Decimal::new(15000, 2), now));
+/// assert!(position.update_with_fill(OrderSide::Sell, 100, Decimal::new(15100, 2), now));
+/// assert!(position.is_flat());
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackedPosition {
+    /// Symbol this position is for
+    pub symbol: crate::brokers::types::Symbol,
+    /// Current direction of the position
+    pub side: PositionSide,
+    /// Signed net quantity (positive = long, negative = short, zero = flat)
+    pub net_quantity: i64,
+    /// Open FIFO lots, oldest first
+    pub components: Vec<PositionComponent>,
+}
+
+impl TrackedPosition {
+    /// Creates an empty (flat) tracked position for `symbol`
+    pub fn new(symbol: crate::brokers::types::Symbol) -> Self {
+        Self {
+            symbol,
+            side: PositionSide::Flat,
+            net_quantity: 0,
+            components: Vec::new(),
+        }
+    }
+
+    /// Whether the position has no open quantity
+    pub fn is_flat(&self) -> bool {
+        self.net_quantity == 0
+    }
+
+    /// Whether any open lot was opened on `date`
+    pub fn has_components_opened_on_date(&self, date: chrono::NaiveDate) -> bool {
+        self.components.iter().any(|c| c.opened_date == date)
+    }
+
+    /// Applies a fill to the position and reports whether it completed a day trade
+    ///
+    /// A fill in the position's current direction (or into a flat position)
+    /// opens a new FIFO lot and is never a day trade. A fill in the opposite
+    /// direction consumes lots oldest-first; it is a day trade when any
+    /// consumed lot was opened on the same UTC date as `fill_time`. Quantity
+    /// beyond the open lots reverses the position into a new lot on the other
+    /// side.
+    pub fn update_with_fill(
+        &mut self,
+        side: crate::events::types::OrderSide,
+        quantity: u64,
+        price: Decimal,
+        fill_time: DateTime<Utc>,
+    ) -> bool {
+        use crate::events::types::OrderSide;
+
+        let fill_date = fill_time.date_naive();
+        let opening_side = match side {
+            OrderSide::Buy => PositionSide::Long,
+            OrderSide::Sell => PositionSide::Short,
+        };
+
+        // Opening or adding: same direction as current position, or flat.
+        if self.side == PositionSide::Flat || self.side == opening_side {
+            self.components.push(PositionComponent {
+                quantity,
+                price,
+                opened_at: fill_time,
+                opened_date: fill_date,
+            });
+            self.side = opening_side;
+            self.net_quantity += match side {
+                OrderSide::Buy => quantity as i64,
+                OrderSide::Sell => -(quantity as i64),
+            };
+            return false;
+        }
+
+        // Closing (possibly reversing): consume FIFO lots.
+        let mut remaining = quantity;
+        let mut is_day_trade = false;
+        while remaining > 0 {
+            let Some(front) = self.components.first_mut() else {
+                break;
+            };
+            if front.opened_date == fill_date {
+                is_day_trade = true;
+            }
+            if front.quantity > remaining {
+                front.quantity -= remaining;
+                remaining = 0;
+            } else {
+                remaining -= front.quantity;
+                self.components.remove(0);
+            }
+        }
+
+        self.net_quantity += match side {
+            OrderSide::Buy => quantity as i64,
+            OrderSide::Sell => -(quantity as i64),
+        };
+
+        if self.net_quantity == 0 {
+            self.side = PositionSide::Flat;
+            self.components.clear();
+        } else if remaining > 0 {
+            // Over-close reversed the position: the excess opens on the other side.
+            self.side = opening_side;
+            self.components.push(PositionComponent {
+                quantity: remaining,
+                price,
+                opened_at: fill_time,
+                opened_date: fill_date,
+            });
+        }
+
+        is_day_trade
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

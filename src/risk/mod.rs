@@ -4,6 +4,7 @@ pub mod pattern_limits;
 pub mod pattern_stats;
 pub mod pdt;
 pub mod position_sizing;
+pub mod position_tracker;
 pub mod rules;
 pub mod types;
 

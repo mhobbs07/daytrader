@@ -280,7 +280,7 @@ impl PositionTracker {
         date: chrono::NaiveDate,
     ) -> Result<bool, PositionTrackingError> {
         let positions = self.positions.read().await;
-        
+
         match positions.get(symbol.as_str()) {
             Some(position) => Ok(position.has_components_opened_on_date(date)),
             None => Ok(false), // No position means no components
@@ -350,16 +350,17 @@ impl PositionTracker {
     /// ```
     pub async fn cleanup_old_components(&self) -> usize {
         let mut positions = self.positions.write().await;
-        let cutoff_date = Utc::now().date_naive() - chrono::Duration::days(MAX_POSITION_COMPONENT_AGE_DAYS);
+        let cutoff_date =
+            Utc::now().date_naive() - chrono::Duration::days(MAX_POSITION_COMPONENT_AGE_DAYS);
         let mut total_removed = 0;
 
         for (_symbol, position) in positions.iter_mut() {
             let initial_components = position.components.len();
-            
+
             // Remove components older than cutoff date
-            position.components.retain(|component| {
-                component.opened_date >= cutoff_date
-            });
+            position
+                .components
+                .retain(|component| component.opened_date >= cutoff_date);
 
             let final_components = position.components.len();
             total_removed += initial_components - final_components;
@@ -367,9 +368,7 @@ impl PositionTracker {
             // If we removed components, update the position's net quantity consistency
             if initial_components != final_components {
                 // Recalculate net quantity from remaining components
-                let remaining_quantity: u64 = position.components.iter()
-                    .map(|c| c.quantity)
-                    .sum();
+                let remaining_quantity: u64 = position.components.iter().map(|c| c.quantity).sum();
 
                 if remaining_quantity == 0 && !position.components.is_empty() {
                     // This shouldn't happen with proper FIFO, but handle gracefully
@@ -481,23 +480,17 @@ mod tests {
         let now = Utc::now();
 
         // Buy to open
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::new(15000, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Buy, 100, Decimal::new(15000, 2), now)
+            .await
+            .unwrap();
         assert!(!is_day_trade);
 
         // Sell to close same day
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Sell,
-            100,
-            Decimal::new(15100, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Sell, 100, Decimal::new(15100, 2), now)
+            .await
+            .unwrap();
         assert!(is_day_trade);
 
         // Position should be flat now
@@ -512,23 +505,17 @@ mod tests {
         let now = Utc::now();
 
         // Buy to open 200 shares
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            200,
-            Decimal::new(15000, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Buy, 200, Decimal::new(15000, 2), now)
+            .await
+            .unwrap();
         assert!(!is_day_trade);
 
         // Sell 100 shares same day (partial close)
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Sell,
-            100,
-            Decimal::new(15100, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Sell, 100, Decimal::new(15100, 2), now)
+            .await
+            .unwrap();
         assert!(is_day_trade); // Partial same-day close is still a day trade
 
         // Check remaining position
@@ -545,23 +532,23 @@ mod tests {
         let tomorrow = today + chrono::Duration::days(1);
 
         // Buy today
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::new(15000, 2),
-            today,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Buy, 100, Decimal::new(15000, 2), today)
+            .await
+            .unwrap();
         assert!(!is_day_trade);
 
         // Sell tomorrow (not same day)
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Sell,
-            100,
-            Decimal::new(15100, 2),
-            tomorrow,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(
+                &symbol,
+                OrderSide::Sell,
+                100,
+                Decimal::new(15100, 2),
+                tomorrow,
+            )
+            .await
+            .unwrap();
         assert!(!is_day_trade); // Different days = not a day trade
     }
 
@@ -572,23 +559,17 @@ mod tests {
         let now = Utc::now();
 
         // Sell to open short position
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Sell,
-            100,
-            Decimal::new(15000, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Sell, 100, Decimal::new(15000, 2), now)
+            .await
+            .unwrap();
         assert!(!is_day_trade);
 
         // Buy to cover same day
-        let is_day_trade = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::new(14900, 2),
-            now,
-        ).await.unwrap();
+        let is_day_trade = tracker
+            .process_fill(&symbol, OrderSide::Buy, 100, Decimal::new(14900, 2), now)
+            .await
+            .unwrap();
         assert!(is_day_trade);
 
         // Position should be flat
@@ -603,34 +584,31 @@ mod tests {
         let now = Utc::now();
 
         // Invalid quantity (zero)
-        let result = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            0,
-            Decimal::new(15000, 2),
-            now,
-        ).await;
-        assert!(matches!(result, Err(PositionTrackingError::InvalidQuantity { .. })));
+        let result = tracker
+            .process_fill(&symbol, OrderSide::Buy, 0, Decimal::new(15000, 2), now)
+            .await;
+        assert!(matches!(
+            result,
+            Err(PositionTrackingError::InvalidQuantity { .. })
+        ));
 
         // Invalid price (zero)
-        let result = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::ZERO,
-            now,
-        ).await;
-        assert!(matches!(result, Err(PositionTrackingError::InvalidPrice { .. })));
+        let result = tracker
+            .process_fill(&symbol, OrderSide::Buy, 100, Decimal::ZERO, now)
+            .await;
+        assert!(matches!(
+            result,
+            Err(PositionTrackingError::InvalidPrice { .. })
+        ));
 
         // Invalid price (negative)
-        let result = tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::new(-100, 0),
-            now,
-        ).await;
-        assert!(matches!(result, Err(PositionTrackingError::InvalidPrice { .. })));
+        let result = tracker
+            .process_fill(&symbol, OrderSide::Buy, 100, Decimal::new(-100, 0), now)
+            .await;
+        assert!(matches!(
+            result,
+            Err(PositionTrackingError::InvalidPrice { .. })
+        ));
     }
 
     #[tokio::test]
@@ -641,11 +619,20 @@ mod tests {
         let now = Utc::now();
 
         // Create and close position for AAPL (will be flat)
-        tracker.process_fill(&symbol1, OrderSide::Buy, 100, Decimal::new(15000, 2), now).await.unwrap();
-        tracker.process_fill(&symbol1, OrderSide::Sell, 100, Decimal::new(15100, 2), now).await.unwrap();
+        tracker
+            .process_fill(&symbol1, OrderSide::Buy, 100, Decimal::new(15000, 2), now)
+            .await
+            .unwrap();
+        tracker
+            .process_fill(&symbol1, OrderSide::Sell, 100, Decimal::new(15100, 2), now)
+            .await
+            .unwrap();
 
         // Create open position for GOOGL (will not be flat)
-        tracker.process_fill(&symbol2, OrderSide::Buy, 100, Decimal::new(280000, 2), now).await.unwrap();
+        tracker
+            .process_fill(&symbol2, OrderSide::Buy, 100, Decimal::new(280000, 2), now)
+            .await
+            .unwrap();
 
         assert_eq!(tracker.position_count().await, 2);
 
@@ -667,48 +654,48 @@ mod tests {
         let yesterday = today - chrono::Duration::days(1);
 
         // Open position yesterday
-        tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            100,
-            Decimal::new(15000, 2),
-            yesterday,
-        ).await.unwrap();
+        tracker
+            .process_fill(
+                &symbol,
+                OrderSide::Buy,
+                100,
+                Decimal::new(15000, 2),
+                yesterday,
+            )
+            .await
+            .unwrap();
 
         // Check for yesterday's components
-        let has_yesterday = tracker.has_components_opened_on_date(
-            &symbol,
-            yesterday.date_naive(),
-        ).await.unwrap();
+        let has_yesterday = tracker
+            .has_components_opened_on_date(&symbol, yesterday.date_naive())
+            .await
+            .unwrap();
         assert!(has_yesterday);
 
         // Check for today's components
-        let has_today = tracker.has_components_opened_on_date(
-            &symbol,
-            today.date_naive(),
-        ).await.unwrap();
+        let has_today = tracker
+            .has_components_opened_on_date(&symbol, today.date_naive())
+            .await
+            .unwrap();
         assert!(!has_today);
 
         // Add more position today
-        tracker.process_fill(
-            &symbol,
-            OrderSide::Buy,
-            50,
-            Decimal::new(15100, 2),
-            today,
-        ).await.unwrap();
+        tracker
+            .process_fill(&symbol, OrderSide::Buy, 50, Decimal::new(15100, 2), today)
+            .await
+            .unwrap();
 
         // Now should have both
-        let has_yesterday = tracker.has_components_opened_on_date(
-            &symbol,
-            yesterday.date_naive(),
-        ).await.unwrap();
+        let has_yesterday = tracker
+            .has_components_opened_on_date(&symbol, yesterday.date_naive())
+            .await
+            .unwrap();
         assert!(has_yesterday);
 
-        let has_today = tracker.has_components_opened_on_date(
-            &symbol,
-            today.date_naive(),
-        ).await.unwrap();
+        let has_today = tracker
+            .has_components_opened_on_date(&symbol, today.date_naive())
+            .await
+            .unwrap();
         assert!(has_today);
     }
 }

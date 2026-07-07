@@ -1,7 +1,8 @@
 use crate::state::AppState;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use daytrader::risk::{RiskEngine, engine::RiskState};
 use daytrader::utils::holidays::MarketHolidayCalendar;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
