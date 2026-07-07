@@ -15,17 +15,19 @@
 //! - Type-safe rule evaluation
 //! - Composable risk rules with real-time monitoring
 
-use crate::brokers::types::{Message, Symbol};
+use crate::brokers::types::{Message, OrderId, Symbol};
 use crate::config::RiskConfig;
 use crate::db::{Database, PatternRepository, PerformanceRepository, SignalRepository};
 use crate::events::bus::EventBus;
-use crate::events::types::{MarketEvent, RiskViolation, RiskViolationType};
+use crate::events::types::{MarketEvent, OrderSide, RiskViolation, RiskViolationType};
 use crate::risk::limits::{DailyLossLimits, DailyLossTracker};
 use crate::risk::pdt::{PdtConfig, PdtEnforcer};
 use crate::risk::position_sizing::{PositionSizeLimits, PositionSizer};
+use crate::risk::position_tracker::PositionTracker;
 use crate::risk::rules::{RiskRuleEngine, TradeContext};
 use crate::risk::types::*;
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -40,6 +42,12 @@ pub struct RiskEngine {
     daily_loss_tracker: Arc<DailyLossTracker>,
     position_sizer: Arc<PositionSizer>,
     pdt_enforcer: Arc<PdtEnforcer>,
+    // Position lifecycle tracking for day-trade detection (FIFO lots per symbol)
+    position_tracker: Arc<PositionTracker>,
+    // Metadata for orders awaiting fill, so `update_on_fill` can recover the
+    // symbol/side needed to feed the position tracker (OrderFilled events
+    // only carry the order id and fill, not the originating order).
+    pending_orders: Arc<DashMap<OrderId, (Symbol, OrderSide)>>,
     // Pattern-specific risk management
     pattern_stats_tracker: Arc<RwLock<crate::risk::pattern_stats::PatternStatsTracker>>,
     pattern_risk_evaluator: Arc<RwLock<crate::risk::pattern_limits::PatternRiskEvaluator>>,
@@ -100,6 +108,10 @@ impl RiskEngine {
         let pdt_config = PdtConfig::from_config(&config);
         let pdt_enforcer = Arc::new(PdtEnforcer::new(pdt_config, initial_equity));
 
+        // Position lifecycle tracker for real day-trade detection (FIFO lots per symbol)
+        let position_tracker = Arc::new(PositionTracker::new());
+        let pending_orders = Arc::new(DashMap::new());
+
         // Initialize pattern statistics tracker
         let pattern_stats_tracker = Arc::new(RwLock::new(
             crate::risk::pattern_stats::PatternStatsTracker::new(),
@@ -131,6 +143,8 @@ impl RiskEngine {
             daily_loss_tracker,
             position_sizer,
             pdt_enforcer,
+            position_tracker,
+            pending_orders,
             pattern_stats_tracker,
             pattern_risk_evaluator,
             database,
@@ -151,6 +165,8 @@ impl RiskEngine {
         let daily_loss_tracker = Arc::clone(&self.daily_loss_tracker);
         let position_sizer = Arc::clone(&self.position_sizer);
         let pdt_enforcer = Arc::clone(&self.pdt_enforcer);
+        let position_tracker = Arc::clone(&self.position_tracker);
+        let pending_orders = Arc::clone(&self.pending_orders);
         let pattern_stats_tracker = Arc::clone(&self.pattern_stats_tracker);
         let pattern_risk_evaluator = Arc::clone(&self.pattern_risk_evaluator);
 
@@ -165,6 +181,8 @@ impl RiskEngine {
             daily_loss_tracker,
             position_sizer,
             pdt_enforcer,
+            position_tracker,
+            pending_orders,
             pattern_stats_tracker,
             pattern_risk_evaluator,
             database: self.database.clone(),
@@ -245,13 +263,20 @@ impl RiskEngine {
             return Err("Trading is currently halted due to risk violation".into());
         }
 
+        // Predict whether this order would complete a day trade if filled now.
+        // A closing (or reversing) fill against a position with any lot opened
+        // today counts as a day trade under the PDT rule; this is a read-only
+        // lookahead against the position tracker (no state mutation — the
+        // authoritative update happens in `update_on_fill` once the fill is real).
+        let would_be_day_trade = self.predicts_day_trade(&order.symbol, &order.side).await?;
+
         // Create trade context for risk evaluation
         let context = TradeContext::new(
             order.symbol.to_string(),
             Decimal::from(order.quantity.value()),
             order.price.map(|p| p.value()).unwrap_or(Decimal::ZERO), // Use limit price or assume market order
             current_state.daily_pl, // Use current equity approximation
-            false,                  // TODO: Implement day trade detection
+            would_be_day_trade,
         );
 
         // Evaluate all risk rules
@@ -263,10 +288,13 @@ impl RiskEngine {
                 if matches!(severity, ViolationSeverity::Critical) {
                     let violation = RiskViolation {
                         violation_type: match rule_id {
-                            RiskRuleId::DailyLossLimit => RiskViolationType::Other, // TODO: Add specific types
+                            RiskRuleId::DailyLossLimit => RiskViolationType::DailyLossLimit,
                             RiskRuleId::PositionSizeLimit => RiskViolationType::PositionSizeLimit,
                             RiskRuleId::PdtLimit => RiskViolationType::PdtLimit,
-                            _ => RiskViolationType::Other,
+                            RiskRuleId::PatternSpecificLimit => {
+                                RiskViolationType::PatternPerformanceThreshold
+                            }
+                            RiskRuleId::AccountSafeguard => RiskViolationType::InsufficientFunds,
                         },
                         message: crate::brokers::types::Message::new(
                             evaluation
