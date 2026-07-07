@@ -497,6 +497,13 @@ impl PdtEnforcer {
         // Persist to database if available
         #[cfg(any(feature = "database", feature = "mock"))]
         if let Some(ref repository) = self.repository {
+            // Market open/close for `trade_date`, DST-correct (America/New_York
+            // via the IANA tz database rather than a fixed UTC offset).
+            let open_time = crate::utils::market_hours::market_open_utc(trade_date)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            let close_time = crate::utils::market_hours::market_close_utc(trade_date)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
             // Create a minimal trade record for database storage
             let trade_record = crate::db::models::DayTradeRecord {
                 id: 0,
@@ -507,8 +514,8 @@ impl PdtEnforcer {
                 ),
                 symbol: "UNKNOWN".to_string(),
                 quantity: 1,
-                open_time: trade_date.and_hms_opt(9, 30, 0).unwrap().and_utc(),
-                close_time: trade_date.and_hms_opt(16, 0, 0).unwrap().and_utc(),
+                open_time,
+                close_time,
                 open_price: 0.0,
                 close_price: 0.0,
                 realized_pl: 0.0,

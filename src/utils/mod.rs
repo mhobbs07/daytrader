@@ -4,6 +4,7 @@ pub mod error_context;
 pub mod errors;
 pub mod holidays;
 pub mod logging;
+pub mod market_hours;
 pub mod metrics;
 pub mod performance_monitor;
 pub mod retry;

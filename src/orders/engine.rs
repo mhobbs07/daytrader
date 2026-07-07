@@ -169,7 +169,15 @@ impl OrderEngine {
         debug!("Order parameters validated");
 
         // 2. Check market hours (simplified - assume always open for now)
-        // TODO: Implement proper market hours checking
+        // TODO: Implement proper market hours checking. A DST-correct,
+        // America/New_York session-boundary helper now exists at
+        // `utils::market_hours::is_market_hours` (see B-043). Wiring it in
+        // here directly against `Utc::now()` was not done in B-043 because
+        // `place_order` has no injectable clock: existing tests
+        // (`test_place_market_order` etc.) call it unconditionally and
+        // would become flaky, failing whenever the suite runs outside
+        // 9:30-16:00 ET. Wire this up together with a clock abstraction
+        // (or a `#[cfg(test)]` bypass) rather than as a one-line change.
         debug!("Market hours check passed (placeholder)");
 
         // 3. Get account info and validate buying power

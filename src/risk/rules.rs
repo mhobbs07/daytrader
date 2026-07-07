@@ -42,7 +42,7 @@
 
 use crate::brokers::types::PatternName;
 use crate::config::RiskConfig;
-use crate::risk::limits::{DailyLossLimits, DailyLossTracker};
+use crate::risk::limits::DailyLossTracker;
 use crate::risk::pattern_limits::{PatternRiskConfig, PatternRiskEvaluator};
 use crate::risk::pdt::{PdtConfig, PdtEnforcer};
 use crate::risk::position_sizing::{PositionSizeLimits, PositionSizer};
@@ -472,9 +472,11 @@ impl RiskRuleEngine {
     pub fn new(config: RiskConfig) -> Self {
         let mut rules: Vec<Box<dyn RiskRule>> = Vec::new();
 
-        // Initialize daily loss limits
-        let daily_limits = DailyLossLimits::from_config(&config, Decimal::ZERO);
-        let daily_tracker = Arc::new(DailyLossTracker::new(daily_limits));
+        // Initialize daily loss limits. `DailyLossTracker::from_config`
+        // fails safe on invalid config (NaN/inf/negative dollar or percent
+        // limits): it starts the tracker already halted instead of
+        // panicking or silently running with a wrong limit.
+        let daily_tracker = Arc::new(DailyLossTracker::from_config(&config, Decimal::ZERO));
         rules.push(Box::new(DailyLossLimitRule::new(Arc::clone(
             &daily_tracker,
         ))));

@@ -43,6 +43,13 @@ impl DollarAmount {
         Ok(Self(value))
     }
 
+    /// Returns the zero dollar amount. Infallible: zero is always
+    /// non-negative, so this never fails the way `new` can.
+    #[inline]
+    pub fn zero() -> Self {
+        Self(Decimal::ZERO)
+    }
+
     /// Returns the dollar amount value
     #[inline]
     pub fn value(&self) -> Decimal {
@@ -93,6 +100,13 @@ impl Percentage {
             return Err("Percentage must be between 0.0 and 100.0");
         }
         Ok(Self(value))
+    }
+
+    /// Returns the zero percentage. Infallible: zero is always within the
+    /// valid 0.0..=100.0 range, so this never fails the way `new` can.
+    #[inline]
+    pub fn zero() -> Self {
+        Self(Decimal::ZERO)
     }
 
     /// Returns the percentage value
