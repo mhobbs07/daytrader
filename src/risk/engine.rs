@@ -29,6 +29,7 @@ use crate::risk::types::*;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -219,6 +220,12 @@ impl RiskEngine {
                 self.evaluate_pattern_risk_on_detection(&signal).await?;
             }
             MarketEvent::OrderPlaced { order } => {
+                // Remember the symbol/side for this order so `update_on_fill`
+                // can recover them later — `OrderFilled` only carries the
+                // order id and fill, not the originating order.
+                self.pending_orders
+                    .insert(order.id.clone(), (order.symbol.clone(), order.side.clone()));
+
                 // Pre-trade risk validation
                 self.validate_order_placement(&order).await?;
             }
@@ -249,6 +256,57 @@ impl RiskEngine {
         }
 
         Ok(())
+    }
+
+    /// Predicts whether filling `order_side` for `symbol` right now would
+    /// complete a day trade, without mutating any tracked position state.
+    ///
+    /// This mirrors the FIFO same-day-open/close logic in
+    /// [`crate::risk::types::TrackedPosition::update_with_fill`] but only
+    /// reads the tracker: a fill in the same direction as the current
+    /// position (or into a flat position) always opens a new lot and can
+    /// never be a day trade; a fill in the opposite direction closes
+    /// existing lots FIFO and is a day trade if any lot it would consume
+    /// was opened today.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the underlying position lookup fails.
+    async fn predicts_day_trade(
+        &self,
+        symbol: &Symbol,
+        order_side: &OrderSide,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let Some(position) = self.position_tracker.get_position(symbol).await else {
+            // No tracked position: this fill would open a new position, never a day trade.
+            return Ok(false);
+        };
+
+        let opening_side = match order_side {
+            OrderSide::Buy => crate::risk::types::PositionSide::Long,
+            OrderSide::Sell => crate::risk::types::PositionSide::Short,
+        };
+
+        // Same direction as the current position (or flat): this fill opens
+        // or adds to a lot, it does not close anything.
+        if position.side == crate::risk::types::PositionSide::Flat || position.side == opening_side
+        {
+            return Ok(false);
+        }
+
+        // Opposite direction: this fill would close existing FIFO lots. It is
+        // a day trade if any lot opened today would be consumed. Since the
+        // FIFO queue is consumed oldest-first and we don't know the fill
+        // quantity here (this runs pre-trade, before the exact fill is
+        // known), a same-day lot anywhere in the position is a sufficient
+        // signal — any close touches the front of the queue first, and if a
+        // same-day lot exists it will be reached unless the order is smaller
+        // than the older, cross-day lots ahead of it. Position sizing risk
+        // rules already validate order quantity against the position, so
+        // conservatively predicting a day trade here (rather than assuming
+        // none) is the safe direction for PDT compliance.
+        let today = Utc::now().date_naive();
+        Ok(position.has_components_opened_on_date(today))
     }
 
     /// Validates order placement against risk rules
@@ -332,13 +390,47 @@ impl RiskEngine {
         order_id: crate::brokers::types::OrderId,
         fill: &crate::events::types::Fill,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut current_state = self.state.write().await;
+        // Recover the symbol/side this fill belongs to. `OrderFilled` events
+        // only carry the fill itself, so the placement-time metadata cached
+        // in `pending_orders` is the only place this is available.
+        if let Some((_, (symbol, side))) = self.pending_orders.remove(&order_id) {
+            // Authoritative day-trade detection: feed the real fill into the
+            // FIFO position tracker and record a day trade only when it
+            // actually completes one (same-day open + close). This replaces
+            // the pre-trade `predicts_day_trade` lookahead with the ground
+            // truth, and is the single source of truth fed to the PDT
+            // enforcer so the two counters never diverge.
+            let is_day_trade = self
+                .position_tracker
+                .process_fill(
+                    &symbol,
+                    side,
+                    u64::from(fill.filled_quantity.value()),
+                    fill.filled_price.value(),
+                    fill.filled_at,
+                )
+                .await?;
 
-        // Update day trade count if applicable (simplified - assume all fills are day trades for now)
-        // TODO: Implement proper day trade detection based on position lifecycle
-        self.pdt_enforcer
-            .record_day_trade(Utc::now().date_naive())
-            .await;
+            if is_day_trade {
+                self.pdt_enforcer
+                    .record_day_trade(fill.filled_at.date_naive())
+                    .await?;
+            }
+        } else {
+            // We should always have placement metadata for a fill we
+            // process, but if it's missing (e.g. engine restart mid-order)
+            // fail safe: without position lifecycle context we cannot rule
+            // out a day trade, and PDT compliance must never be bypassed.
+            tracing::warn!(
+                order_id = %order_id,
+                "No pending order metadata for fill; conservatively recording as a day trade"
+            );
+            self.pdt_enforcer
+                .record_day_trade(fill.filled_at.date_naive())
+                .await?;
+        }
+
+        let mut current_state = self.state.write().await;
 
         // Update daily P&L (realized P&L from commissions)
         let pl_change = fill.commission; // Negative for losses, positive for profits
@@ -406,21 +498,23 @@ impl RiskEngine {
         let mut stats_tracker = self.pattern_stats_tracker.write().await;
         stats_tracker.record_signal(&signal.pattern_name);
 
-        // Persist signal to database if available
+        // Persist the signal detection to database if available. This stores
+        // exactly the fields the risk engine actually observes on the event
+        // (see `PatternSignal` in events::types) rather than fabricating a
+        // full patterns::signals::TradingSignal, which would require values
+        // (signal direction, market context) this layer doesn't have.
         if let Some(ref signal_repo) = self.signal_repo {
-            let trading_signal = crate::patterns::signals::TradingSignal::new(
-                crate::brokers::types::Symbol::new(signal.symbol.as_str())
-                    .unwrap_or_else(|_| crate::brokers::types::Symbol::new("UNKNOWN").unwrap()),
-                crate::events::types::SignalType::Buy, // Default, should be determined from signal
-                crate::brokers::types::Confidence::new(signal.confidence.value())
-                    .unwrap_or_else(|_| crate::brokers::types::Confidence::new(0.5).unwrap()),
-                crate::brokers::types::Price::new(rust_decimal::Decimal::ZERO).unwrap(), // Placeholder
-                crate::patterns::signals::MarketContext::new(
-                    crate::patterns::types::TrendContext::Sideways { volatility: 0.5 },
-                ),
-            );
-
-            if let Err(e) = signal_repo.store_signal(&trading_signal).await {
+            if let Err(e) = signal_repo
+                .store_signal_detection(
+                    signal.symbol.as_str(),
+                    signal.pattern_name.as_str(),
+                    signal.signal_type.as_str(),
+                    signal.confidence.value(),
+                    signal.detected_at,
+                    signal.price.value().to_f64().unwrap_or(0.0),
+                )
+                .await
+            {
                 tracing::warn!("Failed to persist signal to database: {}", e);
             }
         }
@@ -759,5 +853,268 @@ mod tests {
             pattern_performance_thresholds:
                 crate::risk::types::PatternPerformanceThresholds::default(),
         }
+    }
+
+    /// Builds a minimal `Order` for placement/fill tests
+    fn create_test_order(
+        id: &str,
+        symbol: &str,
+        side: OrderSide,
+    ) -> Arc<crate::events::types::Order> {
+        Arc::new(crate::events::types::Order {
+            id: crate::brokers::types::OrderId::new(id),
+            symbol: Symbol::new(symbol).unwrap(),
+            side,
+            order_type: crate::events::types::OrderType::Market,
+            quantity: crate::brokers::types::Quantity::new(100).unwrap(),
+            price: None,
+            status: crate::events::types::OrderStatus::Submitted,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    /// Builds a `Fill` for a given order at a given fill time
+    fn create_test_fill(
+        order_id: &str,
+        price: Decimal,
+        filled_at: DateTime<Utc>,
+    ) -> crate::events::types::Fill {
+        crate::events::types::Fill {
+            order_id: crate::brokers::types::OrderId::new(order_id),
+            filled_quantity: crate::brokers::types::Quantity::new(100).unwrap(),
+            filled_price: crate::brokers::types::Price::new(price).unwrap(),
+            filled_at,
+            commission: Decimal::ZERO,
+        }
+    }
+
+    /// Places an order (registering it in `pending_orders`, mirroring what
+    /// `process_event` does for `MarketEvent::OrderPlaced`) without running
+    /// full risk-rule evaluation, so tests can drive `update_on_fill`
+    /// directly against a known order/side.
+    fn register_pending_order(engine: &RiskEngine, order: &crate::events::types::Order) {
+        engine
+            .pending_orders
+            .insert(order.id.clone(), (order.symbol.clone(), order.side.clone()));
+    }
+
+    #[tokio::test]
+    async fn test_predicts_day_trade_flat_position_returns_false() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(5000000, 2));
+
+        let symbol = Symbol::new("AAPL").unwrap();
+        let result = engine
+            .predicts_day_trade(&symbol, &OrderSide::Buy)
+            .await
+            .unwrap();
+        assert!(
+            !result,
+            "no tracked position means opening, never a day trade"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_predicts_day_trade_same_day_open_returns_true() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(5000000, 2));
+
+        let symbol = Symbol::new("AAPL").unwrap();
+        // Open a long position today via the tracker directly.
+        engine
+            .position_tracker
+            .process_fill(
+                &symbol,
+                OrderSide::Buy,
+                100,
+                Decimal::new(15000, 2),
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        // A sell (closing) order against a same-day lot should predict a day trade.
+        let result = engine
+            .predicts_day_trade(&symbol, &OrderSide::Sell)
+            .await
+            .unwrap();
+        assert!(result, "closing a same-day lot should predict a day trade");
+
+        // A further buy (adding to the position) should not.
+        let result = engine
+            .predicts_day_trade(&symbol, &OrderSide::Buy)
+            .await
+            .unwrap();
+        assert!(!result, "adding to an existing position is not a day trade");
+    }
+
+    #[tokio::test]
+    async fn test_predicts_day_trade_different_day_returns_false() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(5000000, 2));
+
+        let symbol = Symbol::new("AAPL").unwrap();
+        let yesterday = Utc::now() - chrono::Duration::days(1);
+        engine
+            .position_tracker
+            .process_fill(
+                &symbol,
+                OrderSide::Buy,
+                100,
+                Decimal::new(15000, 2),
+                yesterday,
+            )
+            .await
+            .unwrap();
+
+        let result = engine
+            .predicts_day_trade(&symbol, &OrderSide::Sell)
+            .await
+            .unwrap();
+        assert!(
+            !result,
+            "closing a lot opened on a prior day is not a day trade"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_same_day_open_close_increments_pdt_count() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(2000000, 2));
+
+        let now = Utc::now();
+
+        // Open long today.
+        let open_order = create_test_order("order-1", "AAPL", OrderSide::Buy);
+        register_pending_order(&engine, &open_order);
+        let open_fill = create_test_fill("order-1", Decimal::new(15000, 2), now);
+        engine
+            .update_on_fill(open_order.id.clone(), &open_fill)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            engine.pdt_enforcer.count_day_trades().await,
+            0,
+            "opening a position is never a day trade"
+        );
+
+        // Close it same day.
+        let close_order = create_test_order("order-2", "AAPL", OrderSide::Sell);
+        register_pending_order(&engine, &close_order);
+        let close_fill = create_test_fill("order-2", Decimal::new(15100, 2), now);
+        engine
+            .update_on_fill(close_order.id.clone(), &close_fill)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            engine.pdt_enforcer.count_day_trades().await,
+            1,
+            "same-day open+close must be recorded as one day trade"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_different_day_close_does_not_increment_pdt_count() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(2000000, 2));
+
+        let yesterday = Utc::now() - chrono::Duration::days(1);
+        let today = Utc::now();
+
+        // Open long yesterday.
+        let open_order = create_test_order("order-1", "AAPL", OrderSide::Buy);
+        register_pending_order(&engine, &open_order);
+        let open_fill = create_test_fill("order-1", Decimal::new(15000, 2), yesterday);
+        engine
+            .update_on_fill(open_order.id.clone(), &open_fill)
+            .await
+            .unwrap();
+
+        // Close it today.
+        let close_order = create_test_order("order-2", "AAPL", OrderSide::Sell);
+        register_pending_order(&engine, &close_order);
+        let close_fill = create_test_fill("order-2", Decimal::new(15100, 2), today);
+        engine
+            .update_on_fill(close_order.id.clone(), &close_fill)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            engine.pdt_enforcer.count_day_trades().await,
+            0,
+            "closing a position opened on a prior day must not count as a day trade"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_short_round_trip_counts_as_day_trade() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(2000000, 2));
+
+        let now = Utc::now();
+
+        // Sell to open a short position today.
+        let open_order = create_test_order("order-1", "TSLA", OrderSide::Sell);
+        register_pending_order(&engine, &open_order);
+        let open_fill = create_test_fill("order-1", Decimal::new(25000, 2), now);
+        engine
+            .update_on_fill(open_order.id.clone(), &open_fill)
+            .await
+            .unwrap();
+
+        assert_eq!(engine.pdt_enforcer.count_day_trades().await, 0);
+
+        // Buy to cover same day.
+        let cover_order = create_test_order("order-2", "TSLA", OrderSide::Buy);
+        register_pending_order(&engine, &cover_order);
+        let cover_fill = create_test_fill("order-2", Decimal::new(24900, 2), now);
+        engine
+            .update_on_fill(cover_order.id.clone(), &cover_fill)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            engine.pdt_enforcer.count_day_trades().await,
+            1,
+            "same-day short open + cover must be recorded as one day trade"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_on_fill_removes_pending_order_metadata() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(2000000, 2));
+
+        let order = create_test_order("order-1", "AAPL", OrderSide::Buy);
+        register_pending_order(&engine, &order);
+        assert!(engine.pending_orders.contains_key(&order.id));
+
+        let fill = create_test_fill("order-1", Decimal::new(15000, 2), Utc::now());
+        engine
+            .update_on_fill(order.id.clone(), &fill)
+            .await
+            .unwrap();
+
+        assert!(
+            !engine.pending_orders.contains_key(&order.id),
+            "pending order metadata should be consumed once the fill is processed"
+        );
     }
 }
