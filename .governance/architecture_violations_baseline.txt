@@ -1,0 +1,26 @@
+# Architecture violations baseline — pre-existing debt discovered 2026-07-06
+# when verify_architecture.sh was tightened to detect inline qualified paths
+# (previously only `use crate::<module>` statements were matched, so these
+# hid for months).
+#
+# Format: "src_module -> forbidden_module | count"
+# This is a RATCHET: counts may shrink, never grow. New violations on these
+# edges above the ceiling fail the pipeline; any violation on an unlisted
+# edge fails immediately. Lower the count here in the same commit that
+# removes violations. Remediation program tracked as backlog B-070:
+#   - patterns <-> risk is CIRCULAR (signals.rs holds Arc<RiskEngine>;
+#     risk/engine.rs constructs patterns::TradingSignal)
+#   - db -> risk/orders/positions inverts infrastructure/business layering
+#     (From impls and repository parameter types belong to upper layers or
+#     the infrastructure/ bridge)
+#   - domain -> db contradicts "domain fully isolated" (conversions belong
+#     in infrastructure/)
+#   - events -> patterns: MarketEvent embeds patterns::TradingSignal
+
+events -> patterns | 1
+db -> risk | 7
+db -> orders | 2
+db -> positions | 16
+risk -> patterns | 3
+patterns -> risk | 11
+domain -> db | 12
