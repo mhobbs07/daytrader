@@ -10,6 +10,8 @@ use crate::orders::broker_adapter::BrokerAdapter;
 use crate::orders::tracker::OrderTracker;
 use crate::orders::types::{ManagedOrder, OrderConfig, OrderError, OrderRequest};
 use crate::risk::engine::RiskEngine;
+use crate::utils::clock::{Clock, SystemClock};
+use crate::utils::market_hours::is_market_open;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -81,6 +83,8 @@ pub struct OrderEngine {
     order_counter: Arc<AtomicU64>,
     /// Account ID for database operations
     account_id: i64,
+    /// Time source for market-hours checks (injectable for deterministic tests)
+    clock: Arc<dyn Clock>,
 }
 
 impl OrderEngine {
@@ -116,7 +120,18 @@ impl OrderEngine {
             config,
             order_counter: Arc::new(AtomicU64::new(0)),
             account_id,
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Replaces the engine's time source
+    ///
+    /// Production uses the default [`SystemClock`]; tests inject a
+    /// [`crate::utils::clock::FixedClock`] pinned inside market hours so
+    /// order placement is deterministic regardless of when the suite runs.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Gets access to the broker provider
@@ -168,17 +183,20 @@ impl OrderEngine {
         request.validate()?;
         debug!("Order parameters validated");
 
-        // 2. Check market hours (simplified - assume always open for now)
-        // TODO: Implement proper market hours checking. A DST-correct,
-        // America/New_York session-boundary helper now exists at
-        // `utils::market_hours::is_market_hours` (see B-043). Wiring it in
-        // here directly against `Utc::now()` was not done in B-043 because
-        // `place_order` has no injectable clock: existing tests
-        // (`test_place_market_order` etc.) call it unconditionally and
-        // would become flaky, failing whenever the suite runs outside
-        // 9:30-16:00 ET. Wire this up together with a clock abstraction
-        // (or a `#[cfg(test)]` bypass) rather than as a one-line change.
-        debug!("Market hours check passed (placeholder)");
+        // 2. Check market hours, weekends, and holidays (fail closed: if the
+        // check errors we cannot prove the market is open, so the order is
+        // rejected)
+        match is_market_open(self.clock.now()) {
+            Ok(true) => debug!("Market hours check passed"),
+            Ok(false) => {
+                warn!(symbol = %request.symbol, "Order rejected: market is closed");
+                return Err(OrderError::MarketClosed);
+            }
+            Err(e) => {
+                error!(error = %e, "Market hours check failed; rejecting order");
+                return Err(OrderError::MarketClosed);
+            }
+        }
 
         // 3. Get account info and validate buying power
         let account = self.broker.get_account().await?;
@@ -531,7 +549,16 @@ mod tests {
     use crate::config::RiskConfig;
     use crate::orders::broker_adapter::MockBrokerAdapter;
     use crate::risk::types::AccountId;
+    use crate::utils::clock::FixedClock;
+    use chrono::TimeZone;
     use std::collections::HashMap;
+
+    /// Wednesday 2024-06-12 15:00 UTC == 11:00 EDT — inside market hours
+    fn open_market_clock() -> Arc<FixedClock> {
+        Arc::new(FixedClock::new(
+            Utc.with_ymd_and_hms(2024, 6, 12, 15, 0, 0).unwrap(),
+        ))
+    }
 
     // Mock OrderExecutionProvider for testing
     struct MockOrderExecutionProvider {
@@ -678,6 +705,7 @@ mod tests {
             1, // account_id
             OrderConfig::default(),
         )
+        .with_clock(open_market_clock())
     }
 
     #[tokio::test]
@@ -700,6 +728,70 @@ mod tests {
 
         assert!(order.pre_trade_validation_passed);
         assert!(order.broker_order_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_place_order_market_closed_weekend_rejected() {
+        // Saturday 2024-06-15 15:00 UTC — market is closed
+        let engine = create_test_engine()
+            .await
+            .with_clock(Arc::new(FixedClock::new(
+                Utc.with_ymd_and_hms(2024, 6, 15, 15, 0, 0).unwrap(),
+            )));
+
+        let request = OrderRequest::builder()
+            .symbol(Symbol::new("AAPL").unwrap())
+            .side(OrderSide::Buy)
+            .order_type(OrderType::Market)
+            .quantity(Quantity::new(100).unwrap())
+            .build()
+            .unwrap();
+
+        let result = engine.place_order(request).await;
+        assert!(matches!(result.unwrap_err(), OrderError::MarketClosed));
+    }
+
+    #[tokio::test]
+    async fn test_place_order_market_closed_holiday_rejected() {
+        // Independence Day 2024 (Thursday July 4) 15:00 UTC == 11:00 EDT —
+        // in-session wall time but a market holiday
+        let engine = create_test_engine()
+            .await
+            .with_clock(Arc::new(FixedClock::new(
+                Utc.with_ymd_and_hms(2024, 7, 4, 15, 0, 0).unwrap(),
+            )));
+
+        let request = OrderRequest::builder()
+            .symbol(Symbol::new("AAPL").unwrap())
+            .side(OrderSide::Buy)
+            .order_type(OrderType::Market)
+            .quantity(Quantity::new(100).unwrap())
+            .build()
+            .unwrap();
+
+        let result = engine.place_order(request).await;
+        assert!(matches!(result.unwrap_err(), OrderError::MarketClosed));
+    }
+
+    #[tokio::test]
+    async fn test_place_order_market_closed_after_hours_rejected() {
+        // Wednesday 2024-06-12 21:00 UTC == 17:00 EDT — after the close
+        let engine = create_test_engine()
+            .await
+            .with_clock(Arc::new(FixedClock::new(
+                Utc.with_ymd_and_hms(2024, 6, 12, 21, 0, 0).unwrap(),
+            )));
+
+        let request = OrderRequest::builder()
+            .symbol(Symbol::new("AAPL").unwrap())
+            .side(OrderSide::Buy)
+            .order_type(OrderType::Market)
+            .quantity(Quantity::new(100).unwrap())
+            .build()
+            .unwrap();
+
+        let result = engine.place_order(request).await;
+        assert!(matches!(result.unwrap_err(), OrderError::MarketClosed));
     }
 
     #[tokio::test]
@@ -774,7 +866,8 @@ mod tests {
             db_pool,
             1,
             OrderConfig::default(),
-        );
+        )
+        .with_clock(open_market_clock());
 
         // Try to buy $2000 worth of stock with only $1000
         let request = OrderRequest::builder()

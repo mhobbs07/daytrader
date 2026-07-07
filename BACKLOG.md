@@ -16,7 +16,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
+| B-072 | Market-hours check in order engine (DST-correct, injectable clock) | Done | 2026-07-07 | claude/serene-pasteur-af8a90 | Follow-up to B-043; see Completed Tasks |
 
 ---
 
@@ -100,6 +100,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-043 | DST-correct market session boundaries | 2026-07-07 | fix/b043-et-session-boundaries (PR #20) + fix/b043-review-followups (PR #26) | verify full | utils/market_hours.rs via chrono-tz America/New_York; fixed limits.rs, pdt.rs, execution/rules.rs call sites; follow-up: ET trading_date consistency, sticky invalid-config halt, direction-aware ambiguity |
 | B-059 | Production unwrap/expect removal | 2026-07-07 | PRs #13/#20/#22 (split by file owner) | verify full + ratchet | alpaca/rest.rs expect (PR #13), limits.rs try_from_config with fail-safe halt (PR #20), engine.rs placeholder fallbacks eliminated (PR #22); baseline entries removed |
 | B-058 | Real day-trade detection in RiskEngine | 2026-07-07 | fix/b058-risk-engine-day-trades (PR #22) | verify full (312 unit tests) | predicts_day_trade pre-trade lookahead + PositionTracker::process_fill ground truth feeding PdtEnforcer (single counter); specific RiskViolationType variants; risk->patterns architecture edge eliminated (baseline 3 to 0); pending-order lifecycle incl. cancel/reject cleanup |
+| B-072 | Market-hours check in order engine | 2026-07-07 | claude/serene-pasteur-af8a90 (PR #25) | verify_agent_work.sh full pass | utils/market_hours::is_market_open (B-043 session check + holidays::is_business_day) + utils/clock (Clock trait, SystemClock/FixedClock); place_order step 2 rejects with MarketClosed on closed market/weekend/holiday or check error (fail closed); engine tests pinned to fixed in-session clock |
 
 ---
 
