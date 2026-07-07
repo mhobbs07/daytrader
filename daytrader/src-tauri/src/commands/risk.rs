@@ -182,16 +182,42 @@ pub async fn get_recent_risk_violations(
 ) -> Result<Vec<RiskViolationResponse>, String> {
     debug!("Getting recent risk violations");
 
-    // TODO: Implement actual risk violation retrieval from database
-    // For now, return empty array but with proper error handling structure
-    // This will be enhanced once we have database integration in the state
+    const RECENT_VIOLATIONS_LIMIT: i32 = 50;
 
-    match get_violations_from_database().await {
-        Ok(violations) => Ok(violations),
+    let Some(performance_repository) = state.performance_repository() else {
+        // Mock mode: no database is configured at all, so "no violations" is
+        // the correct answer rather than an error condition.
+        debug!("No database configured, returning empty risk violations list");
+        return Ok(vec![]);
+    };
+
+    match performance_repository
+        .get_recent_risk_violations(state.account_id, RECENT_VIOLATIONS_LIMIT)
+        .await
+    {
+        Ok(events) => Ok(events.into_iter().map(risk_event_to_response).collect()),
         Err(e) => {
-            warn!("Failed to retrieve risk violations: {}", e);
-            Ok(vec![]) // Return empty array on failure for now
+            // A real database is configured but the query failed: surface the
+            // error to the frontend instead of masking an outage as "no
+            // violations" (an empty list here would be misleading on a risk
+            // dashboard).
+            error!("Failed to retrieve risk violations: {}", e);
+            Err(format!("Failed to retrieve risk violations: {}", e))
         }
+    }
+}
+
+/// Maps a persisted risk event row to the frontend violation response shape.
+fn risk_event_to_response(event: daytrader::db::models::RiskEvent) -> RiskViolationResponse {
+    RiskViolationResponse {
+        violation_type: event
+            .violation_type
+            .unwrap_or_else(|| event.event_type.clone()),
+        message: event.message,
+        timestamp: event.timestamp.to_rfc3339(),
+        severity: event.severity.unwrap_or_else(|| "moderate".to_string()),
+        suggested_action: None,
+        pattern_name: event.pattern_name,
     }
 }
 
@@ -538,13 +564,6 @@ pub async fn get_business_day_info(
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-async fn get_violations_from_database()
--> Result<Vec<RiskViolationResponse>, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Implement database query for risk violations
-    // This will require database integration in the AppState
-    Ok(vec![])
-}
 
 fn is_weekday(date: chrono::NaiveDate) -> bool {
     let weekday = date.weekday();
