@@ -1,34 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { useMarketStore } from '../store/marketStore';
+import React from 'react';
+import { useMarketData } from '../hooks';
 import { CandleChart } from './CandleChart';
 
 export const MarketData: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { quotes, getLatestQuote, subscribeToSymbol } = useMarketStore();
-  const [error, setError] = useState<string | null>(null);
-  const [initializing, setInitializing] = useState(true);
-  const quote = quotes.get(symbol);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const init = async () => {
-      try {
-        await subscribeToSymbol(symbol);
-        await getLatestQuote(symbol);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load market data');
-        }
-      } finally {
-        if (!cancelled) {
-          setInitializing(false);
-        }
-      }
-    };
-
-    init();
-    return () => { cancelled = true; };
-  }, [symbol]);
+  const { quote, initializing, error } = useMarketData(symbol);
 
   if (initializing && !quote) {
     return (
