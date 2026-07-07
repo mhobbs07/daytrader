@@ -8,7 +8,6 @@ unwrap	daytrader/src-tauri/src/main.rs	10
 unwrap	daytrader/src-tauri/src/mock_driver.rs	5
 unwrap	src/brokers/alpaca/rest.rs	1
 unwrap	src/brokers/mock.rs	7
-unwrap	src/db/mock.rs	10
 unwrap	src/db/repositories.rs	1
 unwrap	src/patterns/candlestick.rs	3
 unwrap	src/patterns/engulfing.rs	2
@@ -26,5 +25,4 @@ unwrap	src/utils/holidays.rs	1
 std_sync	daytrader/src-tauri/src/events.rs	6
 std_sync	daytrader/src-tauri/src/main.rs	2
 std_sync	daytrader/src-tauri/src/state.rs	8
-std_sync	src/db/mock.rs	1
 std_sync	src/utils/holidays.rs	1

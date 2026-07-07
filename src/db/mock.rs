@@ -8,7 +8,8 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::db::models::*;
 use crate::db::traits::*;
@@ -37,7 +38,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         &self,
         day_trade: &DayTradeRecord,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let mut trades = self.day_trades.write().unwrap();
+        let mut trades = self.day_trades.write().await;
         let account_trades = trades.entry(day_trade.account_id).or_insert_with(Vec::new);
         let id = (account_trades.len() + 1) as i64;
         let mut trade_with_id = day_trade.clone();
@@ -51,7 +52,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         &self,
         event: &PdtAuditEvent,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let mut events = self.audit_events.write().unwrap();
+        let mut events = self.audit_events.write().await;
         let id = (events.len() + 1) as i64;
         let mut event_with_id = event.clone();
         // Note: This assumes PdtAuditEvent has an id field
@@ -63,7 +64,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         &self,
         pdt_tracking: &PdtTracking,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut tracking = self.tracking.write().unwrap();
+        let mut tracking = self.tracking.write().await;
         tracking.insert(pdt_tracking.account_id, pdt_tracking.clone());
         Ok(())
     }
@@ -74,7 +75,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         start_date: NaiveDate,
         end_date: NaiveDate,
     ) -> Result<Vec<DayTradeRecord>, Box<dyn std::error::Error + Send + Sync>> {
-        let trades = self.day_trades.read().unwrap();
+        let trades = self.day_trades.read().await;
         if let Some(account_trades) = trades.get(&account_id) {
             let filtered: Vec<DayTradeRecord> = account_trades
                 .iter()
@@ -96,7 +97,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         window_start: NaiveDate,
         window_end: NaiveDate,
     ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
-        let trades = self.day_trades.read().unwrap();
+        let trades = self.day_trades.read().await;
         if let Some(account_trades) = trades.get(&account_id) {
             let count = account_trades
                 .iter()
@@ -115,7 +116,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         &self,
         account_id: i64,
     ) -> Result<Option<PdtTracking>, Box<dyn std::error::Error + Send + Sync>> {
-        let tracking = self.tracking.read().unwrap();
+        let tracking = self.tracking.read().await;
         Ok(tracking.get(&account_id).cloned())
     }
 
@@ -125,7 +126,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         start_date: NaiveDate,
         end_date: NaiveDate,
     ) -> Result<Vec<PdtTracking>, Box<dyn std::error::Error + Send + Sync>> {
-        let tracking = self.tracking.read().unwrap();
+        let tracking = self.tracking.read().await;
         if let Some(account_tracking) = tracking.get(&account_id) {
             if account_tracking.trading_date >= start_date
                 && account_tracking.trading_date <= end_date
@@ -144,7 +145,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         account_id: i64,
         limit: Option<i32>,
     ) -> Result<Vec<PdtAuditEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        let events = self.audit_events.read().unwrap();
+        let events = self.audit_events.read().await;
         let filtered: Vec<PdtAuditEvent> = events
             .iter()
             .filter(|event| event.account_id == account_id)
@@ -161,7 +162,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         event_type: &str,
         limit: Option<i32>,
     ) -> Result<Vec<PdtAuditEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        let events = self.audit_events.read().unwrap();
+        let events = self.audit_events.read().await;
         let filtered: Vec<PdtAuditEvent> = events
             .iter()
             .filter(|event| event.account_id == account_id && event.event_type == event_type)
@@ -177,7 +178,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
         account_id: i64,
         date_range_days: i32,
     ) -> Result<DayTradeSummary, Box<dyn std::error::Error + Send + Sync>> {
-        let trades = self.day_trades.read().unwrap();
+        let trades = self.day_trades.read().await;
         let account_trades = trades.get(&account_id).unwrap_or(&vec![]);
 
         let total_trades = account_trades.len() as i32;
@@ -243,4 +244,92 @@ impl PdtRepositoryTrait for MockPdtRepository {
 #[cfg(feature = "mock")]
 pub fn create_mock_pdt_repository() -> Box<dyn PdtRepositoryTrait> {
     Box::new(MockPdtRepository::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Confirms the `tokio::sync::RwLock` conversion (B-063) still lets
+    /// concurrent async callers record and read day trades without a
+    /// blocking `std::sync` lock or a poisoned-lock unwrap.
+    #[tokio::test]
+    async fn test_record_and_read_day_trades_concurrently() {
+        let repo = MockPdtRepository::new();
+        let account_id = 42;
+        let today = Utc::now().date_naive();
+
+        let now = Utc::now();
+        let trade = DayTradeRecord {
+            id: 0,
+            account_id,
+            trade_id: "trade-1".to_string(),
+            symbol: "AAPL".to_string(),
+            quantity: 10,
+            open_time: now,
+            close_time: now,
+            open_price: 100.0,
+            close_price: 101.0,
+            realized_pl: 10.0,
+            commission: 0.0,
+            pattern_name: None,
+            is_validated: true,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.record_day_trade(&trade)
+            .await
+            .expect("record day trade");
+
+        let trades = repo
+            .get_day_trades_in_range(account_id, today, today)
+            .await
+            .expect("read day trades");
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].symbol, "AAPL");
+    }
+
+    /// Reproduces the write-then-read pattern PdtEnforcer relies on: several
+    /// concurrent writers must not deadlock or panic on a poisoned lock.
+    #[tokio::test]
+    async fn test_concurrent_writers_do_not_deadlock() {
+        let repo = Arc::new(MockPdtRepository::new());
+        let account_id = 7;
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let repo = Arc::clone(&repo);
+            handles.push(tokio::spawn(async move {
+                let event = PdtAuditEvent {
+                    id: 0,
+                    account_id,
+                    event_type: "day_trade".to_string(),
+                    event_date: Utc::now().date_naive(),
+                    day_trade_count: Some(i),
+                    equity_value: 25000.0,
+                    min_equity_threshold: None,
+                    max_day_trades_allowed: None,
+                    is_restricted: false,
+                    violation_details: None,
+                    trade_reference: None,
+                    message: format!("event {i}"),
+                    metadata: None,
+                    created_at: Utc::now(),
+                };
+                repo.record_audit_event(&event).await
+            }));
+        }
+
+        for handle in handles {
+            handle.await.expect("task join").expect("record event");
+        }
+
+        let events = repo
+            .get_audit_events(account_id, None)
+            .await
+            .expect("read audit events");
+        assert_eq!(events.len(), 10);
+    }
 }

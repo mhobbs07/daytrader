@@ -734,6 +734,28 @@ impl PerformanceRepository {
         Ok(events)
     }
 
+    /// Gets the most recent risk violation events for an account, newest first.
+    ///
+    /// Filters `risk_events` to rows with `event_type = 'RiskViolation'` for the
+    /// given `account_id`. Used to power the risk dashboard's violation feed.
+    pub async fn get_recent_risk_violations(
+        &self,
+        account_id: i64,
+        limit: i32,
+    ) -> Result<Vec<RiskEvent>, sqlx::Error> {
+        let events = sqlx::query_as::<_, RiskEvent>(
+            "SELECT * FROM risk_events \
+             WHERE account_id = ? AND event_type = 'RiskViolation' \
+             ORDER BY timestamp DESC LIMIT ?",
+        )
+        .bind(account_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(events)
+    }
+
     /// Gets performance summary for all patterns
     pub async fn get_performance_summary(&self) -> Result<SystemPerformance, sqlx::Error> {
         let row = sqlx::query!(
