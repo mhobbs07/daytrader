@@ -115,11 +115,18 @@ echo -e "${BLUE}[4/${TOTAL_STEPS}] Running unit tests (cargo test --lib)...${NC}
 # when ANY test binary was ok even if another failed, and grep -oP is GNU-only
 # (always reported "0 passed" on macOS).
 KNOWN_ISSUES_FILE=".governance/known_test_issues.txt"
+# Compile test binaries untimed first: on a cold build cache (fresh worktree)
+# compilation alone exceeds the timeout, failing the run with exit 124 even
+# though every test passes. The timeout below then covers only test execution.
+cargo test --lib --no-run 2>&1 | tail -3
 TEST_OUTPUT=$(timeout 120 cargo test --lib 2>&1)
 TEST_STATUS=$?
 TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ passed' | awk '{s+=$1} END {print s+0}')
 TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ failed' | awk '{s+=$1} END {print s+0}')
-if [ "$TEST_STATUS" -eq 0 ]; then
+if [ "$TEST_STATUS" -eq 124 ]; then
+    echo -e "  ${RED}Timed out after 120s of test execution (build was already complete)${NC}"
+    step_fail "Unit tests (timed out)"
+elif [ "$TEST_STATUS" -eq 0 ]; then
     step_pass "Unit tests (${TEST_PASSED} passed)"
 elif [ "$TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
     KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
