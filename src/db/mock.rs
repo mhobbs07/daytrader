@@ -179,7 +179,8 @@ impl PdtRepositoryTrait for MockPdtRepository {
         date_range_days: i32,
     ) -> Result<DayTradeSummary, Box<dyn std::error::Error + Send + Sync>> {
         let trades = self.day_trades.read().await;
-        let account_trades = trades.get(&account_id).unwrap_or(&vec![]);
+        let empty = Vec::new();
+        let account_trades = trades.get(&account_id).unwrap_or(&empty);
 
         let total_trades = account_trades.len() as i32;
         let winning_trades = account_trades
@@ -216,6 +217,7 @@ impl PdtRepositoryTrait for MockPdtRepository {
             max_loss,
             unique_symbols: account_trades
                 .iter()
+                .map(|t| &t.symbol)
                 .collect::<std::collections::HashSet<_>>()
                 .len() as i32,
             trading_days: account_trades
@@ -331,5 +333,73 @@ mod tests {
             .await
             .expect("read audit events");
         assert_eq!(events.len(), 10);
+    }
+
+    fn day_trade(account_id: i64, symbol: &str, day: u32, realized_pl: f64) -> DayTradeRecord {
+        use chrono::TimeZone;
+        let close_time = Utc.with_ymd_and_hms(2026, 7, day, 15, 30, 0).unwrap();
+        DayTradeRecord {
+            id: 0,
+            account_id,
+            trade_id: format!("trade-{symbol}-{day}"),
+            symbol: symbol.to_string(),
+            quantity: 10,
+            open_time: close_time - chrono::Duration::hours(2),
+            close_time,
+            open_price: 100.0,
+            close_price: 100.0 + realized_pl / 10.0,
+            realized_pl,
+            commission: 1.0,
+            pattern_name: None,
+            is_validated: true,
+            created_at: close_time,
+            updated_at: close_time,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_day_trade_summary_no_trades_returns_zeroed_summary() {
+        let repo = MockPdtRepository::new();
+        let summary = repo.get_day_trade_summary(42, 30).await.unwrap();
+
+        assert_eq!(summary.account_id, 42);
+        assert_eq!(summary.date_range_days, 30);
+        assert_eq!(summary.total_trades, 0);
+        assert_eq!(summary.winning_trades, 0);
+        assert_eq!(summary.losing_trades, 0);
+        assert_eq!(summary.unique_symbols, 0);
+        assert_eq!(summary.trading_days, 0);
+        assert_eq!(summary.total_profit_loss, 0.0);
+        assert_eq!(summary.win_rate, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_day_trade_summary_multiple_trades_counts_unique_symbols() {
+        let repo = MockPdtRepository::new();
+        repo.record_day_trade(&day_trade(1, "AAPL", 1, 100.0))
+            .await
+            .unwrap();
+        repo.record_day_trade(&day_trade(1, "AAPL", 2, -50.0))
+            .await
+            .unwrap();
+        repo.record_day_trade(&day_trade(1, "MSFT", 2, 25.0))
+            .await
+            .unwrap();
+        // Trades for another account must not leak into the summary.
+        repo.record_day_trade(&day_trade(2, "TSLA", 1, 500.0))
+            .await
+            .unwrap();
+
+        let summary = repo.get_day_trade_summary(1, 30).await.unwrap();
+
+        assert_eq!(summary.total_trades, 3);
+        assert_eq!(summary.unique_symbols, 2);
+        assert_eq!(summary.trading_days, 2);
+        assert_eq!(summary.winning_trades, 2);
+        assert_eq!(summary.losing_trades, 1);
+        assert_eq!(summary.total_profit_loss, 75.0);
+        assert_eq!(summary.max_profit, 100.0);
+        assert_eq!(summary.max_loss, -50.0);
+        assert_eq!(summary.win_rate, 2.0 / 3.0);
     }
 }
