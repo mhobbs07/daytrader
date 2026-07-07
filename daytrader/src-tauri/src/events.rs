@@ -70,12 +70,14 @@ impl EventBridge {
                     ask_size: quote.ask_size.value(),
                     timestamp: quote.timestamp,
                 };
+                // Emit to frontend with the symbol included (the inner Quote
+                // struct has no symbol field, which the frontend keys on)
+                let payload = crate::commands::market_data::QuoteResponse::from(&broker_quote);
                 // Update cache
                 if let Ok(mut cache) = market_cache.lock() {
                     cache.update_quote(symbol.to_string(), broker_quote);
                 }
-                // Emit to frontend
-                app_handle.emit("market_data:quote_update", &quote)?;
+                app_handle.emit("market_data:quote_update", payload)?;
             }
             MarketEvent::PatternDetected { signal } => {
                 // Update cache
