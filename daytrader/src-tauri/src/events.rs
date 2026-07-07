@@ -52,19 +52,9 @@ impl EventBridge {
     ) -> Result<(), tauri::Error> {
         match event {
             MarketEvent::NewCandle { symbol, candle } => {
-                // Convert events::Candle to brokers::Candle for cache
-                let broker_candle = daytrader::brokers::traits::Candle {
-                    symbol: candle.symbol.clone(),
-                    timestamp: candle.timestamp,
-                    open: candle.open,
-                    high: candle.high,
-                    low: candle.low,
-                    close: candle.close,
-                    volume: candle.volume,
-                };
-                // Update cache
+                // Update cache (Candle is one type shared by brokers and events)
                 if let Ok(mut cache) = market_cache.lock() {
-                    cache.add_candle(symbol.to_string(), broker_candle);
+                    cache.add_candle(symbol.to_string(), (*candle).clone());
                 }
                 // Emit to frontend
                 app_handle.emit("market_data:new_candle", &*candle)?;

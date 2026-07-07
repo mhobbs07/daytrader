@@ -16,28 +16,16 @@ Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| B-030 | Candle chart | In Progress | 2026-07-06 | feat/b030-candle-chart | Wave 1 agent |
-| B-032/B-034 | PDT panel + risk push events | In Progress | 2026-07-06 | feat/b032-b034-risk-ui-events | Wave 1 agent (B-034 salvaged from killed worktree agent-ad83243b) |
-| B-042 | PDT holiday edge cases | In Progress | 2026-07-06 | fix/b042-pdt-holiday-enforcer | Wave 1 agent (salvages stranded commit 20cb752 from feature/b008-pdt-holiday-edge-cases) |
-| B-044 | Alpaca rate limiting | In Progress | 2026-07-06 | feat/b044-alpaca-rate-limiting | Wave 1 agent |
+| B-069 | Fix Tauri app binary compilation (23 errors invisible to pipeline) | In Progress | 2026-07-06 | fix/tauri-app-compile | Unified duplicate Candle type; wired holidays + position_tracker modules; pipeline now checks --workspace |
 
 ---
 
 ## Pending Tasks
 
-### Priority: High (Core Frontend Features)
-
-| ID | Task | Priority | Source | Scope |
-|----|------|----------|--------|-------|
-| B-030 | Add candle chart using `lightweight-charts` to MarketData component | High | plans/tauri-thin-slice-plan.md | `daytrader/src/components/MarketData.tsx` |
-| B-032 | Add PDT status panel to RiskStatus component | High | codebase audit | `daytrader/src/components/RiskStatus.tsx`, `daytrader/src/store/riskStore.ts` |
-| B-034 | Wire risk store auto-refresh via Tauri event (not just polling) | High | codebase audit | `daytrader/src/store/riskStore.ts`, `daytrader/src-tauri/src/events.rs` |
-
 ### Priority: High (Compliance Correctness — 2026-07-06 audit)
 
 | ID | Task | Priority | Source | Scope |
 |----|------|----------|--------|-------|
-| B-042 | Fix PDT holiday edge cases: wire MarketHolidayCalendar into PdtEnforcer (enforcement is weekday-only; display commands already holiday-aware — inconsistent) | High | 2026-07-06 audit; stranded fix on feature/b008-pdt-holiday-edge-cases (20cb752) | `src/risk/pdt.rs`, `src/utils/holidays.rs` |
 | B-058 | Implement day-trade detection in RiskEngine (currently stubbed to `false`); reconcile RiskEngine vs PdtEnforcer double-tracking; specific RiskViolationType variants | High | risk/engine.rs:254,310,266 TODOs | `src/risk/engine.rs` |
 | B-059 | Remove production-path `.unwrap()`/`.expect()`: risk/limits.rs from_config (panics on NaN/inf config), risk/engine.rs placeholder fallbacks, alpaca/rest.rs client builder | High | 2026-07-06 audit | `src/risk/limits.rs`, `src/risk/engine.rs`, `src/brokers/alpaca/rest.rs` |
 | B-062 | Implement `get_recent_risk_violations` DB query (currently stub returning `[]`; also masks DB errors as "no violations") | High | commands/risk.rs:184,543 TODO | `daytrader/src-tauri/src/commands/risk.rs`, `src/db/` |
@@ -50,7 +38,9 @@ Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis
 | B-037 | Add React custom hooks: `useMarketData`, `usePatterns`, `useTauriEvents` | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/hooks/` (new) |
 | B-039 | Extend App.tsx to support multi-symbol watchlist (not just AAPL hardcoded) | Medium | codebase audit | `daytrader/src/App.tsx` |
 | B-043 | ET session-boundary handling: replace fixed UTC hour offsets with `chrono-tz` America/New_York (open/close off by 1h part of year); note: core timestamps are already all-UTC, classic DST bug not present | Medium | 2026-07-06 audit | `src/risk/`, `src/utils/`, Cargo.toml |
-| B-044 | Alpaca rate limiting: client-side throttle, parse real Retry-After header (hardcoded 60s), exponential WS reconnect backoff (README falsely claims it exists) | Medium | 2026-07-06 audit | `src/brokers/alpaca/` |
+| B-066 | Implement concrete SQLite `PdtRepositoryTrait` and wire into AppState/PdtEnforcer (PDT enforcement currently in-memory only; day-trade history and audit commands return empty fallbacks) | Medium | 2026-07-06 tauri compile fix | `src/db/`, `daytrader/src-tauri/src/state.rs` |
+| B-067 | Unify Quote types (`brokers::traits::Quote` has symbol/last/u32 sizes vs `events::types::Quote` with Quantity sizes) or document the boundary mapping as intentional | Medium | 2026-07-06 Candle-unification analysis | `src/brokers/traits.rs`, `src/events/types.rs` |
+| B-068 | Run doctests in the verification pipeline (`cargo test --doc`); the deleted events::Candle doc example could never compile and was never caught | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
 | B-060 | Harden verification pipeline: fix GNU-only `grep -oP` (shows "0 passed" on macOS), add production unwrap/expect check, add std::sync check, gate `npm run build`, known-failures burn-down policy | Medium | 2026-07-06 audit | `scripts/`, `.governance/` |
 | B-063 | Fix `std::sync::RwLock` usage violating concurrency rule | Medium | 2026-07-06 audit | `src/db/mock.rs`, `src/utils/holidays.rs` |
 | B-064 | Dead code cleanup: vestigial `daytrader/src-tauri/src/lib.rs` (`greet`), unused `patternStore.loadStatistics`, unused `get_detected_patterns_for_symbol` (wire up or remove) | Medium | 2026-07-06 audit | `daytrader/` |
@@ -107,6 +97,12 @@ Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis
 | B-033 | subscribe_symbol starts mock data streaming | 2026-04-22 | feat/techdebt-unblock-sweep | verify_agent_work.sh 9/9 (same commit as B-029) | subscribe_symbol delegates to MockDataDriver (idempotent); unsubscribe_symbol command added and registered; confirmed by 2026-07-06 audit |
 | B-045 | Database query indexing | pre-2026-07 | (already on staging) | 2026-07-06 audit | ~28 CREATE INDEX statements in schema.sql covering all hot paths + programmatic indexes in migrations.rs; closed as already-done |
 | B-046 | Event filtering in events/filters | pre-2026-07 | (already on staging) | 2026-07-06 audit | filters.rs fully implemented (636 lines, composable lazy filters, tests, no TODOs); closed as already-done |
+| B-060 | Harden verification pipeline | 2026-07-06 | fix/b060-verify-pipeline-hardening (PR #10) | full pipeline 8/8 | Exit-code-based unit-test gate, portable counting, working-tree-aware skips, DATABASE_URL auto-provisioning, production-safety baseline check, frontend build gate |
+| B-030 | Candle chart via lightweight-charts | 2026-07-06 | feat/b030-candle-chart (PR #11) | verify 7/7 + npm build | CandleChart.tsx (v4 API), backfill via get_recent_candles, live updates from store, ResizeObserver |
+| B-032 | PDT status panel | 2026-07-06 | feat/b032-b034-risk-ui-events (PR #12) | verify 8/8 + npm build | riskStore.pdtStatus + fetchPdtStatus; RiskStatus PDT panel with green/yellow/red severity |
+| B-034 | Risk store auto-refresh via push events | 2026-07-06 | feat/b032-b034-risk-ui-events (PR #12) | verify 8/8 + npm build | EventBridge forwards RiskViolation as risk:violation; riskStore listens + refreshes; 30s polling fallback kept |
+| B-042 | PDT holiday enforcement | 2026-07-06 | fix/b042-pdt-holiday-enforcer (PR #14) | verify 8/8 | MarketHolidayCalendar threaded through PdtState window logic; holiday edge-case tests (Christmas/New Year, Thanksgiving, Jul 4 observance); also exported orphaned utils::holidays module |
+| B-044 | Alpaca rate limiting | 2026-07-06 | feat/b044-alpaca-rate-limiting (PR #13) | verify 8/8 | Token bucket (200 req/min default), real Retry-After parsing, exponential WS reconnect backoff, README corrected |
 
 ---
 

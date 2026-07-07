@@ -255,6 +255,15 @@ impl MarketHolidayCalendar {
         }
     }
 
+    /// Returns the name of the holiday observed on `date`, if any
+    pub fn get_holiday_name(&self, date: NaiveDate) -> Option<String> {
+        let holidays = self.get_holidays_for_year(date.year()).ok()?;
+        holidays
+            .iter()
+            .find(|h| h.observed_date == date)
+            .map(|h| h.name.clone())
+    }
+
     /// Checks if a date is a business day (not weekend and not holiday)
     pub fn is_business_day(&self, date: NaiveDate) -> bool {
         // Check cache first

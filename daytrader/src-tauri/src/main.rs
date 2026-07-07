@@ -128,7 +128,7 @@ fn main() {
     let initial_equity = Decimal::new(5000000, 2); // $50,000.00
     let risk_engine = Arc::new(RiskEngine::new(
         config.risk,
-        Arc::clone(&event_bus),
+        Arc::new(event_bus.clone()),
         account_id,
         initial_equity,
     ));
@@ -160,38 +160,38 @@ fn main() {
             info!("Pattern detection service started");
 
             while let Ok(event) = rx.recv().await {
-                if let MarketEvent::NewCandle { symbol, candle } = event {
-                    // Get recent candles for pattern detection
-                    if let Ok(mut cache) = market_cache.lock() {
-                        if let Ok(recent_candles) = cache.get_recent_candles(&symbol, 50) {
-                            // Run pattern detection on the recent candles
-                            match pattern_registry.detect_all(&recent_candles, None).await {
-                                patterns => {
-                                    for pattern_result in patterns {
-                                        // Create pattern signal
-                                        let signal = PatternSignal {
-                                            symbol: symbol.clone(),
-                                            pattern_name: pattern_result.pattern_name,
-                                            signal_type: pattern_result.signal_type,
-                                            confidence: pattern_result.confidence,
-                                            detected_at: pattern_result.detected_at,
-                                            price: pattern_result.price_level,
-                                        };
+                if let MarketEvent::NewCandle { symbol, candle: _ } = event {
+                    // Snapshot candles inside the lock, then release it before
+                    // awaiting: the std MutexGuard must not live across .await.
+                    let recent_candles = match market_cache.lock() {
+                        Ok(cache) => cache.get_recent_candles(&symbol, 50).unwrap_or_default(),
+                        Err(_) => continue,
+                    };
+                    if recent_candles.is_empty() {
+                        continue;
+                    }
 
-                                        // Publish pattern detected event
-                                        let _ = event_bus
-                                            .publish(MarketEvent::PatternDetected { signal });
+                    let patterns = pattern_registry.detect_all(&recent_candles, None).await;
+                    for pattern_result in patterns {
+                        debug!(
+                            "Pattern detected: {} for {} with confidence {:.2}",
+                            pattern_result.pattern_name.as_str(),
+                            symbol.as_str(),
+                            pattern_result.confidence.value()
+                        );
 
-                                        debug!(
-                                            "Pattern detected: {} for {} with confidence {:.2}",
-                                            pattern_result.pattern_name.as_str(),
-                                            symbol.as_str(),
-                                            pattern_result.confidence.value()
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                        // Create pattern signal
+                        let signal = PatternSignal {
+                            symbol: symbol.clone(),
+                            pattern_name: pattern_result.pattern_name,
+                            signal_type: pattern_result.signal_type,
+                            confidence: pattern_result.confidence,
+                            detected_at: pattern_result.detected_at,
+                            price: pattern_result.price_level,
+                        };
+
+                        // Publish pattern detected event
+                        let _ = event_bus.publish(MarketEvent::PatternDetected { signal });
                     }
                 }
             }

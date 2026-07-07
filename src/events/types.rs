@@ -223,63 +223,11 @@ pub enum MarketEvent {
 // Helper Types
 // ============================================================================
 
-/// Candlestick data structure
-///
-/// Represents OHLCV data for a specific time period.
-///
-/// # Examples
-///
-/// ```
-/// use daytrader::events::types::Candle;
-/// use daytrader::brokers::types::Price;
-/// use rust_decimal::Decimal;
-/// use chrono::Utc;
-///
-/// let candle = Candle {
-///     timestamp: Utc::now(),
-///     open: Price::new(Decimal::new(15000, 2)).unwrap(),
-///     high: Price::new(Decimal::new(15100, 2)).unwrap(),
-///     low: Price::new(Decimal::new(14900, 2)).unwrap(),
-///     close: Price::new(Decimal::new(15050, 2)).unwrap(),
-///     volume: 1_000_000,
-/// };
-/// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Candle {
-    pub symbol: Symbol,
-    pub timestamp: DateTime<Utc>,
-    pub open: Price,
-    pub high: Price,
-    pub low: Price,
-    pub close: Price,
-    pub volume: u64,
-}
-
-impl Candle {
-    /// Returns true if this is a bullish candle (close > open)
-    #[inline]
-    pub fn is_bullish(&self) -> bool {
-        self.close > self.open
-    }
-
-    /// Returns true if this is a bearish candle (close < open)
-    #[inline]
-    pub fn is_bearish(&self) -> bool {
-        self.close < self.open
-    }
-
-    /// Returns the body size (absolute difference between open and close)
-    #[inline]
-    pub fn body_size(&self) -> Decimal {
-        (self.close.value() - self.open.value()).abs()
-    }
-
-    /// Returns the total range (high - low)
-    #[inline]
-    pub fn range(&self) -> Decimal {
-        self.high.value() - self.low.value()
-    }
-}
+// Candle is defined once in the brokers foundation layer (it is the same
+// OHLCV data whether it arrives from a broker API or travels on the event
+// bus). Re-exported here so event consumers keep the
+// `events::types::Candle` import path.
+pub use crate::brokers::traits::Candle;
 
 /// Quote data (bid/ask prices)
 ///
