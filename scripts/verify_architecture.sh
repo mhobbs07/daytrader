@@ -20,8 +20,13 @@ if [ ! -f "Cargo.toml" ]; then
 fi
 
 EXCEPTIONS_FILE=".governance/architecture_exceptions.txt"
+# Known pre-existing violations (discovered 2026-07-06 when detection was
+# tightened to catch inline qualified paths). Format: "src -> target | count".
+# This is a ratchet: counts may shrink, never grow. Tracked by B-070.
+BASELINE_FILE=".governance/architecture_violations_baseline.txt"
 VIOLATIONS=0
 EXCEPTIONS_USED=0
+BASELINED=0
 
 echo -e "${BLUE}=== Architecture Boundary Verification ===${NC}"
 echo ""
@@ -35,6 +40,20 @@ is_exception() {
     fi
     # Match "source -> target" in exceptions file (ignoring comments)
     grep -v '^#' "$EXCEPTIONS_FILE" 2>/dev/null | grep -q "^${src_module} -> ${target}" 2>/dev/null
+}
+
+# Helper: baselined violation ceiling for source -> target (prints count, or 0)
+baseline_count() {
+    local src_module="$1"
+    local target="$2"
+    if [ ! -f "$BASELINE_FILE" ]; then
+        echo 0
+        return
+    fi
+    grep -v '^#' "$BASELINE_FILE" 2>/dev/null \
+        | grep "^${src_module} -> ${target} |" \
+        | awk -F'|' '{gsub(/ /,"",$2); print $2}' \
+        | head -1 | grep -E '^[0-9]+$' || echo 0
 }
 
 # Helper: check forbidden dependency
@@ -68,9 +87,12 @@ check_forbidden_dep() {
             search_content=$(cat "$rs_file" 2>/dev/null)
         fi
 
-        # Search for the forbidden import
+        # Search for the forbidden dependency. Match any qualified path, not
+        # just `use` statements — inline `crate::<module>::Type::new(...)`
+        # calls are imports too (a risk->patterns violation hid this way for
+        # months). Comment lines are excluded so docs can mention modules.
         local matches
-        matches=$(echo "$search_content" | grep -n "use crate::${forbidden}" 2>/dev/null || true)
+        matches=$(echo "$search_content" | grep -n "crate::${forbidden}::" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*//' || true)
         if [ -n "$matches" ]; then
             while IFS= read -r match; do
                 [ -z "$match" ] && continue
@@ -88,11 +110,28 @@ check_forbidden_dep() {
 
         local count
         count=$(echo -e "$found_violations" | grep -c . 2>/dev/null || echo 0)
+
+        # Known pre-existing debt: pass at or below the baselined ceiling.
+        local ceiling
+        ceiling=$(baseline_count "$src_module" "$forbidden")
+        if [ "$count" -le "$ceiling" ]; then
+            BASELINED=$((BASELINED + 1))
+            if [ "$count" -lt "$ceiling" ]; then
+                echo -e "${YELLOW}KNOWN DEBT: ${desc} improved to ${count} (baseline ${ceiling}) — ratchet the baseline down${NC}"
+            else
+                echo -e "${YELLOW}KNOWN DEBT: ${desc} (${count}, baselined — see B-070)${NC}"
+            fi
+            return
+        fi
+
         VIOLATIONS=$((VIOLATIONS + count))
-        echo -e "${RED}VIOLATION: ${desc} (${count} occurrence(s))${NC}"
+        echo -e "${RED}VIOLATION: ${desc} (${count} occurrence(s), baseline ${ceiling})${NC}"
+        # `|| true`: the loop's last [ -n ] test fails on the trailing blank
+        # line, and under set -e that silently killed the script mid-scan the
+        # first time a violation was ever printed.
         echo -e "$found_violations" | while IFS= read -r line; do
             [ -n "$line" ] && echo -e "  ${RED}  ${line}${NC}"
-        done
+        done || true
     fi
 }
 
@@ -172,6 +211,7 @@ echo ""
 echo -e "${BLUE}=== Architecture Summary ===${NC}"
 echo -e "  Violations:       ${VIOLATIONS}"
 echo -e "  Exceptions used:  ${EXCEPTIONS_USED}"
+echo -e "  Baselined (B-070): ${BASELINED}"
 
 if [ "$VIOLATIONS" -gt 0 ]; then
     echo ""
