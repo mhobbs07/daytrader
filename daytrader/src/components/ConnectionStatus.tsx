@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { useTauriEvents } from '../hooks';
 import { useSystemStore } from '../store/systemStore';
 
 type ConnectionState = 'connected' | 'disconnected' | 'unknown';
@@ -8,21 +8,14 @@ export const ConnectionStatus: React.FC = () => {
   const { status } = useSystemStore();
   const [connectionState, setConnectionState] = useState<ConnectionState>('unknown');
 
-  useEffect(() => {
-    // Listen for push events from the backend event bridge
-    const unlistenConnected = listen<string>('system:connection', () => {
-      setConnectionState('connected');
-    });
+  // Listen for push events from the backend event bridge
+  useTauriEvents<string>('system:connection', () => {
+    setConnectionState('connected');
+  });
 
-    const unlistenDisconnected = listen<string>('system:disconnection', () => {
-      setConnectionState('disconnected');
-    });
-
-    return () => {
-      unlistenConnected.then(fn => fn());
-      unlistenDisconnected.then(fn => fn());
-    };
-  }, []);
+  useTauriEvents<string>('system:disconnection', () => {
+    setConnectionState('disconnected');
+  });
 
   // Sync with polled system status as fallback
   useEffect(() => {

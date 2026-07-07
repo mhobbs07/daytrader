@@ -193,8 +193,79 @@ button:disabled {
 }
 
 /* ============================================================
+   Watchlist Component
+   ============================================================ */
+
+.watchlist-bar {
+  padding: 0.75rem 1.5rem 0;
+}
+
+.watchlist-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.watchlist-input {
+  min-width: 180px;
+  text-transform: uppercase;
+}
+
+.watchlist-error {
+  color: var(--color-red);
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+
+.watchlist-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0.6rem 0 0;
+}
+
+.watchlist-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px var(--color-shadow);
+}
+
+.watchlist-chip-remove {
+  border: none;
+  border-radius: 50%;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  background-color: transparent;
+}
+
+.watchlist-chip-remove:hover:not(:disabled) {
+  color: var(--color-red);
+  background-color: var(--color-surface-hover);
+  border-color: transparent;
+}
+
+/* ============================================================
    Market Data Component
    ============================================================ */
+
+.market-data-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
 
 .market-data-card {
   background-color: var(--color-surface);

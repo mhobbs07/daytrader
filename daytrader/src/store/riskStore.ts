@@ -1,66 +1,22 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-
-interface RiskState {
-  accountId: string;
-  tradingDate: string;
-  dailyPl: number;
-  dayTradeCount: number;
-  isTradingHalted: boolean;
-  lastUpdated: string;
-}
-
-interface RiskLimits {
-  maxDailyLossDollars: number;
-  maxDailyLossPercent: number;
-  maxPositionSizeDollars: number;
-  maxPositionSizePercent: number;
-  maxConcurrentPositions: number;
-  enforcePdtRule: boolean;
-  pdtMinEquity: number;
-  maxDayTradesUnderPdt: number;
-}
-
-interface RiskViolation {
-  violationType: string;
-  message: string;
-  timestamp: string;
-  severity: string;
-  suggestedAction?: string;
-}
-
-interface PdtStatus {
-  accountId: string;
-  currentEquity: number;
-  pdtMinEquity: number;
-  meetsEquityRequirement: boolean;
-  dayTradeCount: number;
-  maxDayTradesAllowed: number;
-  remainingDayTrades: number;
-  isRestricted: boolean;
-  rollingWindowStart: string;
-  rollingWindowEnd: string;
-  businessDaysRemaining: number;
-  warnings: string[];
-}
-
-/** Payload emitted by the Rust EventBridge on `risk:violation`. */
-interface RiskViolationPayload {
-  violation_type: string;
-  message: string;
-  timestamp: string;
-  pattern_name: string | null;
-}
+import type {
+  RiskStateResponse,
+  RiskLimitsResponse,
+  RiskViolationResponse,
+  RiskViolationEventPayload,
+  PdtStatusResponse,
+} from '../types';
 
 let riskIntervalId: number | null = null;
 let riskViolationUnlisten: UnlistenFn | null = null;
 
 interface RiskStore {
-  riskState: RiskState | null;
-  riskLimits: RiskLimits | null;
-  recentViolations: RiskViolation[];
-  pdtStatus: PdtStatus | null;
+  riskState: RiskStateResponse | null;
+  riskLimits: RiskLimitsResponse | null;
+  recentViolations: RiskViolationResponse[];
+  pdtStatus: PdtStatusResponse | null;
   loading: boolean;
   error: string | null;
 
@@ -85,7 +41,7 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
   fetchRiskState: async () => {
     try {
       set({ loading: true, error: null });
-      const riskState = await invoke<RiskState>('get_risk_state');
+      const riskState = await invoke<RiskStateResponse>('get_risk_state');
       set({ riskState, loading: false });
     } catch (error) {
       set({
@@ -98,7 +54,7 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
   fetchRiskLimits: async () => {
     try {
       set({ loading: true, error: null });
-      const riskLimits = await invoke<RiskLimits>('get_risk_limits');
+      const riskLimits = await invoke<RiskLimitsResponse>('get_risk_limits');
       set({ riskLimits, loading: false });
     } catch (error) {
       set({
@@ -111,7 +67,7 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
   fetchRecentViolations: async () => {
     try {
       set({ loading: true, error: null });
-      const recentViolations = await invoke<RiskViolation[]>('get_recent_risk_violations');
+      const recentViolations = await invoke<RiskViolationResponse[]>('get_recent_risk_violations');
       set({ recentViolations, loading: false });
     } catch (error) {
       set({
@@ -124,7 +80,7 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
   fetchPdtStatus: async () => {
     try {
       set({ loading: true, error: null });
-      const pdtStatus = await invoke<PdtStatus>('get_pdt_status');
+      const pdtStatus = await invoke<PdtStatusResponse>('get_pdt_status');
       set({ pdtStatus, loading: false });
     } catch (error) {
       set({
@@ -151,7 +107,7 @@ export const useRiskStore = create<RiskStore>((set, get) => ({
       riskViolationUnlisten = null;
     }
 
-    riskViolationUnlisten = await listen<RiskViolationPayload>('risk:violation', () => {
+    riskViolationUnlisten = await listen<RiskViolationEventPayload>('risk:violation', () => {
       // A violation just arrived — immediately refresh all risk data
       useRiskStore.getState().refreshAll();
     });

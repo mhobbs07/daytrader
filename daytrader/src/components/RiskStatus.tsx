@@ -52,23 +52,23 @@ export const RiskStatus: React.FC = () => {
         <div className="risk-metrics">
           <div className="metric-group">
             <h4>Daily P&L</h4>
-            <div className={`metric-value ${riskState.dailyPl >= 0 ? 'positive' : 'negative'}`}>
-              ${riskState.dailyPl.toFixed(2)}
+            <div className={`metric-value ${riskState.daily_pl >= 0 ? 'positive' : 'negative'}`}>
+              ${riskState.daily_pl.toFixed(2)}
             </div>
           </div>
 
           <div className="metric-group">
             <h4>Trading Status</h4>
-            <div className={`status-indicator ${riskState.isTradingHalted ? 'halted' : 'active'}`}>
-              {riskState.isTradingHalted ? '🚫 HALTED' : '✅ ACTIVE'}
+            <div className={`status-indicator ${riskState.is_trading_halted ? 'halted' : 'active'}`}>
+              {riskState.is_trading_halted ? '🚫 HALTED' : '✅ ACTIVE'}
             </div>
           </div>
 
           <div className="metric-group">
             <h4>Day Trades</h4>
             <div className="metric-value">
-              {riskState.dayTradeCount}
-              {riskLimits && ` / ${riskLimits.maxDayTradesUnderPdt}`}
+              {riskState.day_trade_count}
+              {riskLimits && ` / ${riskLimits.max_day_trades_under_pdt}`}
             </div>
           </div>
         </div>
@@ -80,21 +80,21 @@ export const RiskStatus: React.FC = () => {
           <div className="limits-grid">
             <div className="limit-item">
               <span className="limit-label">Daily Loss Limit:</span>
-              <span className="limit-value">${riskLimits.maxDailyLossDollars.toFixed(2)}</span>
+              <span className="limit-value">${riskLimits.max_daily_loss_dollars.toFixed(2)}</span>
             </div>
             <div className="limit-item">
               <span className="limit-label">Max Position Size:</span>
-              <span className="limit-value">${riskLimits.maxPositionSizeDollars.toFixed(2)}</span>
+              <span className="limit-value">${riskLimits.max_position_size_dollars.toFixed(2)}</span>
             </div>
             <div className="limit-item">
               <span className="limit-label">PDT Rule:</span>
               <span className="limit-value">
-                {riskLimits.enforcePdtRule ? 'Enabled' : 'Disabled'}
+                {riskLimits.enforce_pdt_rule ? 'Enabled' : 'Disabled'}
               </span>
             </div>
             <div className="limit-item">
               <span className="limit-label">Min Equity:</span>
-              <span className="limit-value">${riskLimits.pdtMinEquity.toFixed(2)}</span>
+              <span className="limit-value">${riskLimits.pdt_min_equity.toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -107,37 +107,37 @@ export const RiskStatus: React.FC = () => {
             <div className="pdt-item">
               <span className="pdt-label">Account Equity:</span>
               <span
-                className={`pdt-value ${pdtStatus.meetsEquityRequirement ? 'positive' : 'negative'}`}
+                className={`pdt-value ${pdtStatus.meets_equity_requirement ? 'positive' : 'negative'}`}
               >
-                ${pdtStatus.currentEquity.toFixed(2)} / ${pdtStatus.pdtMinEquity.toFixed(2)}
+                ${pdtStatus.current_equity.toFixed(2)} / ${pdtStatus.pdt_min_equity.toFixed(2)}
               </span>
             </div>
             <div className="pdt-item">
               <span className="pdt-label">Day Trades:</span>
               <span
                 className={`pdt-value ${pdtSeverity(
-                  pdtStatus.dayTradeCount,
-                  pdtStatus.maxDayTradesAllowed,
-                  pdtStatus.isRestricted
+                  pdtStatus.day_trade_count,
+                  pdtStatus.max_day_trades_allowed,
+                  pdtStatus.is_restricted
                 )}`}
               >
-                {pdtStatus.dayTradeCount}
-                {pdtStatus.maxDayTradesAllowed !== PDT_UNLIMITED &&
-                  ` / ${pdtStatus.maxDayTradesAllowed}`}
+                {pdtStatus.day_trade_count}
+                {pdtStatus.max_day_trades_allowed !== PDT_UNLIMITED &&
+                  ` / ${pdtStatus.max_day_trades_allowed}`}
               </span>
             </div>
             <div className="pdt-item">
               <span className="pdt-label">Rolling Window:</span>
               <span className="pdt-value">
-                {pdtStatus.rollingWindowStart} to {pdtStatus.rollingWindowEnd}
+                {pdtStatus.rolling_window_start} to {pdtStatus.rolling_window_end}
               </span>
             </div>
             <div className="pdt-item">
               <span className="pdt-label">Restriction Status:</span>
               <span
-                className={`pdt-value ${pdtStatus.isRestricted ? 'negative' : 'positive'}`}
+                className={`pdt-value ${pdtStatus.is_restricted ? 'negative' : 'positive'}`}
               >
-                {pdtStatus.isRestricted ? '🚫 RESTRICTED' : '✅ CLEAR'}
+                {pdtStatus.is_restricted ? '🚫 RESTRICTED' : '✅ CLEAR'}
               </span>
             </div>
           </div>
@@ -159,7 +159,7 @@ export const RiskStatus: React.FC = () => {
           <div className="violations-list">
             {recentViolations.slice(0, 3).map((violation, index) => (
               <div key={index} className={`violation-item ${violation.severity.toLowerCase()}`}>
-                <div className="violation-type">{violation.violationType}</div>
+                <div className="violation-type">{violation.violation_type}</div>
                 <div className="violation-message">{violation.message}</div>
                 <div className="violation-time">
                   {new Date(violation.timestamp).toLocaleTimeString()}

@@ -1,36 +1,23 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import type {
+  QuoteResponse,
+  CandleResponse,
+  QuoteUpdateEventPayload,
+  CandleUpdateEventPayload,
+} from '../types';
 
 const unlisteners = new Map<string, UnlistenFn[]>();
 
-interface Quote {
-  symbol: string;
-  bid: number;
-  ask: number;
-  /** Last traded price (midpoint fallback when no trade data). */
-  last: number;
-  timestamp: string;
-}
-
-interface Candle {
-  symbol: string;
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
 interface MarketStore {
-  quotes: Map<string, Quote>;
-  candles: Map<string, Candle[]>;
+  quotes: Map<string, QuoteResponse>;
+  candles: Map<string, CandleResponse[]>;
   subscribeToSymbol: (symbol: string) => Promise<void>;
   unsubscribeFromSymbol: (symbol: string) => void;
   dispose: () => void;
-  getLatestQuote: (symbol: string) => Promise<Quote>;
-  getRecentCandles: (symbol: string, count: number) => Promise<Candle[]>;
+  getLatestQuote: (symbol: string) => Promise<QuoteResponse>;
+  getRecentCandles: (symbol: string, count: number) => Promise<CandleResponse[]>;
 }
 
 export const useMarketStore = create<MarketStore>((set, _get) => ({
@@ -49,19 +36,44 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
 
     const handlers: UnlistenFn[] = [];
 
-    handlers.push(await listen<Quote>('market_data:quote_update', (event) => {
+    // The `market_data:quote_update` payload does not include `symbol` on
+    // the wire (see QuoteUpdateEventPayload in ../types/market.ts), so we
+    // key the update by the symbol this listener was registered for rather
+    // than reading it off the payload. A concurrent fix to events.rs may add
+    // `symbol` to the payload later, at which point this can switch back to
+    // reading it from the event.
+    handlers.push(await listen<QuoteUpdateEventPayload>('market_data:quote_update', (event) => {
+      const quote: QuoteResponse = {
+        symbol,
+        bid: Number(event.payload.bid),
+        ask: Number(event.payload.ask),
+        last: Number(event.payload.bid),
+        timestamp: event.payload.timestamp,
+      };
       set(state => {
         const newQuotes = new Map(state.quotes);
-        newQuotes.set(event.payload.symbol, event.payload);
+        newQuotes.set(symbol, quote);
         return { quotes: newQuotes };
       });
     }));
 
-    handlers.push(await listen<Candle>('market_data:new_candle', (event) => {
+    // `open`/`high`/`low`/`close` arrive as Decimal-serialised strings (see
+    // CandleUpdateEventPayload) and must be converted to numbers to match
+    // CandleResponse, the shape the rest of the app (CandleChart) expects.
+    handlers.push(await listen<CandleUpdateEventPayload>('market_data:new_candle', (event) => {
+      const candle: CandleResponse = {
+        symbol: event.payload.symbol,
+        timestamp: event.payload.timestamp,
+        open: Number(event.payload.open),
+        high: Number(event.payload.high),
+        low: Number(event.payload.low),
+        close: Number(event.payload.close),
+        volume: event.payload.volume,
+      };
       set(state => {
         const newCandles = new Map(state.candles);
-        const symbolCandles = newCandles.get(event.payload.symbol) || [];
-        newCandles.set(event.payload.symbol, [...symbolCandles, event.payload]);
+        const symbolCandles = newCandles.get(candle.symbol) || [];
+        newCandles.set(candle.symbol, [...symbolCandles, candle]);
         return { candles: newCandles };
       });
     }));
@@ -88,10 +100,10 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
   },
 
   getLatestQuote: async (symbol: string) => {
-    return invoke<Quote>('get_latest_quote', { symbol });
+    return invoke<QuoteResponse>('get_latest_quote', { symbol });
   },
 
   getRecentCandles: async (symbol: string, count: number) => {
-    return invoke<Candle[]>('get_recent_candles', { symbol, count });
+    return invoke<CandleResponse[]>('get_recent_candles', { symbol, count });
   },
 }));

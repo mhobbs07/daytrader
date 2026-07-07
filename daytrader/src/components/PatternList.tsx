@@ -1,35 +1,19 @@
-import React, { useMemo, useState } from 'react';
-import { usePatternStore } from '../store/patternStore';
+import React, { useState } from 'react';
+import { usePatterns } from '../hooks';
+import type { SignalType } from '../types';
 
 export const PatternList: React.FC = () => {
-  const { patterns } = usePatternStore();
-
   // Filter state (local to component)
   const [symbolFilter, setSymbolFilter] = useState('');
-  const [signalTypeFilter, setSignalTypeFilter] = useState('All');
+  const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | 'All'>('All');
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.0);
 
-  // Apply filters using useMemo
-  const filteredPatterns = useMemo(() => {
-    return patterns.filter(pattern => {
-      // Symbol filter (case-insensitive substring match)
-      if (symbolFilter && !pattern.symbol.toLowerCase().includes(symbolFilter.toLowerCase())) {
-        return false;
-      }
-
-      // Signal type filter
-      if (signalTypeFilter !== 'All' && pattern.signal_type !== signalTypeFilter) {
-        return false;
-      }
-
-      // Confidence threshold filter
-      if (pattern.confidence < confidenceThreshold) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [patterns, symbolFilter, signalTypeFilter, confidenceThreshold]);
+  const patterns = usePatterns();
+  const filteredPatterns = usePatterns({
+    symbol: symbolFilter,
+    signalType: signalTypeFilter === 'All' ? undefined : signalTypeFilter,
+    minConfidence: confidenceThreshold,
+  });
 
   return (
     <div className="pattern-list">
@@ -55,7 +39,7 @@ export const PatternList: React.FC = () => {
           <select
             id="signal-type-filter"
             value={signalTypeFilter}
-            onChange={(e) => setSignalTypeFilter(e.target.value)}
+            onChange={(e) => setSignalTypeFilter(e.target.value as SignalType | 'All')}
             aria-label="Filter patterns by signal type"
             className="filter-select"
           >
