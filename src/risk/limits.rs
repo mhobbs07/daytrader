@@ -32,10 +32,43 @@
 
 use crate::config::RiskConfig;
 use crate::risk::types::{DollarAmount, Percentage, RiskEvaluation, ViolationSeverity};
-use chrono::{DateTime, NaiveTime, Timelike, Utc};
+use crate::utils::market_hours;
+use chrono::{DateTime, Utc};
+use chrono_tz::America::New_York;
 use rust_decimal::Decimal;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::sync::RwLock;
+use tracing::error;
+
+/// Errors constructing [`DailyLossLimits`] from a [`RiskConfig`].
+///
+/// `RiskConfig` values are deserialized from user-editable config files as
+/// `f64`, so they can carry `NaN`, infinities, or out-of-range values that
+/// have no valid `Decimal` or domain-newtype representation. This error
+/// makes those cases explicit instead of panicking at startup.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum DailyLossLimitsError {
+    /// `max_daily_loss_dollars` was NaN, infinite, or otherwise not
+    /// representable as a `Decimal`.
+    #[error("max_daily_loss_dollars ({0}) is not a finite, representable decimal value")]
+    InvalidMaxLossDollars(String),
+
+    /// `max_daily_loss_dollars` converted to a `Decimal` but failed newtype
+    /// validation (e.g. negative).
+    #[error("max_daily_loss_dollars is invalid: {0}")]
+    MaxLossDollarsOutOfRange(&'static str),
+
+    /// `max_daily_loss_percent` was NaN, infinite, or otherwise not
+    /// representable as a `Decimal`.
+    #[error("max_daily_loss_percent ({0}) is not a finite, representable decimal value")]
+    InvalidMaxLossPercent(String),
+
+    /// `max_daily_loss_percent` converted to a `Decimal` but failed newtype
+    /// validation (e.g. negative or over 100%).
+    #[error("max_daily_loss_percent is invalid: {0}")]
+    MaxLossPercentOutOfRange(&'static str),
+}
 
 /// Daily loss limits configuration
 ///
@@ -50,17 +83,83 @@ pub struct DailyLossLimits {
 }
 
 impl DailyLossLimits {
-    /// Creates limits from RiskConfig
-    pub fn from_config(config: &RiskConfig, starting_balance: Decimal) -> Self {
-        Self {
-            max_loss_dollars: DollarAmount::new(
-                Decimal::try_from(config.max_daily_loss_dollars).unwrap(),
-            )
-            .unwrap(),
-            max_loss_percent: Percentage::new(
-                Decimal::try_from(config.max_daily_loss_percent).unwrap(),
-            )
-            .unwrap(),
+    /// Creates limits from `RiskConfig`, validating the config-supplied
+    /// `f64` values rather than panicking on `NaN`/infinite/negative input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DailyLossLimitsError`] if either `max_daily_loss_dollars`
+    /// or `max_daily_loss_percent` is NaN, infinite, negative, or (for the
+    /// percentage) greater than 100.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use daytrader::config::RiskConfig;
+    /// use daytrader::risk::limits::DailyLossLimits;
+    ///
+    /// let mut config = RiskConfig::default();
+    /// config.max_daily_loss_dollars = 500.0;
+    /// config.max_daily_loss_percent = 2.0;
+    /// let limits = DailyLossLimits::try_from_config(&config).unwrap();
+    /// assert_eq!(limits.max_loss_dollars.value().to_string(), "500");
+    ///
+    /// // NaN is rejected instead of panicking.
+    /// config.max_daily_loss_dollars = f64::NAN;
+    /// assert!(DailyLossLimits::try_from_config(&config).is_err());
+    /// ```
+    pub fn try_from_config(config: &RiskConfig) -> Result<Self, DailyLossLimitsError> {
+        let max_loss_dollars_decimal =
+            Decimal::try_from(config.max_daily_loss_dollars).map_err(|_| {
+                DailyLossLimitsError::InvalidMaxLossDollars(
+                    config.max_daily_loss_dollars.to_string(),
+                )
+            })?;
+        let max_loss_dollars = DollarAmount::new(max_loss_dollars_decimal)
+            .map_err(DailyLossLimitsError::MaxLossDollarsOutOfRange)?;
+
+        let max_loss_percent_decimal =
+            Decimal::try_from(config.max_daily_loss_percent).map_err(|_| {
+                DailyLossLimitsError::InvalidMaxLossPercent(
+                    config.max_daily_loss_percent.to_string(),
+                )
+            })?;
+        let max_loss_percent = Percentage::new(max_loss_percent_decimal)
+            .map_err(DailyLossLimitsError::MaxLossPercentOutOfRange)?;
+
+        Ok(Self {
+            max_loss_dollars,
+            max_loss_percent,
+        })
+    }
+
+    /// Creates limits from RiskConfig.
+    ///
+    /// This is a non-panicking, infallible wrapper around
+    /// [`Self::try_from_config`] kept for callers that cannot propagate a
+    /// `Result` (constructors that must return `Self`). If the config is
+    /// invalid, this logs the error and falls back to maximally
+    /// conservative limits (zero — which callers must treat as "halt
+    /// immediately", not "unlimited"); pair with
+    /// [`DailyLossTracker::from_config`], which does exactly that by
+    /// starting the tracker in a halted state on invalid config.
+    ///
+    /// Prefer [`Self::try_from_config`] in new code so invalid config is a
+    /// startup error rather than a silent fallback.
+    pub fn from_config(config: &RiskConfig, _starting_balance: Decimal) -> Self {
+        match Self::try_from_config(config) {
+            Ok(limits) => limits,
+            Err(err) => {
+                error!(
+                    error = %err,
+                    "invalid daily loss limits config; falling back to zero limits \
+                     (caller must halt trading rather than treat this as unlimited)"
+                );
+                Self {
+                    max_loss_dollars: DollarAmount::zero(),
+                    max_loss_percent: Percentage::zero(),
+                }
+            }
         }
     }
 
@@ -161,11 +260,41 @@ impl DailyLossTracker {
         }
     }
 
-    /// Creates a tracker from RiskConfig
+    /// Creates a tracker from RiskConfig.
+    ///
+    /// This constructor cannot propagate a `Result` — callers (e.g.
+    /// `RiskEngine::new`) require an infallible `Self`. If the config's
+    /// `max_daily_loss_dollars`/`max_daily_loss_percent` are invalid (NaN,
+    /// infinite, or negative), this fails safe: the returned tracker starts
+    /// **already halted**, so `check_daily_loss_limit` and
+    /// `should_halt_trading` immediately block trading instead of silently
+    /// running with a wrong (zero, i.e. "unlimited") loss limit. The error
+    /// is logged via `tracing::error!` for operators to catch at startup.
+    ///
+    /// Prefer [`DailyLossLimits::try_from_config`] plus [`Self::new`] in new
+    /// code so invalid config is a startup error instead of a runtime halt.
     pub fn from_config(config: &RiskConfig, starting_balance: Decimal) -> Self {
-        let limits = DailyLossLimits::from_config(config, starting_balance);
+        let (limits, is_halted) = match DailyLossLimits::try_from_config(config) {
+            Ok(limits) => (limits, false),
+            Err(err) => {
+                error!(
+                    error = %err,
+                    "invalid daily loss limits config; starting daily loss tracker \
+                     halted rather than trading with an incorrect limit"
+                );
+                (
+                    DailyLossLimits {
+                        max_loss_dollars: DollarAmount::zero(),
+                        max_loss_percent: Percentage::zero(),
+                    },
+                    true,
+                )
+            }
+        };
+
         let mut state = DailyPnlState::new(starting_balance);
         state.starting_balance = starting_balance;
+        state.is_halted = is_halted;
 
         Self {
             limits,
@@ -374,7 +503,11 @@ impl DailyLossTracker {
         self.state.read().await.clone()
     }
 
-    /// Checks if it's time for daily reset (9:30 AM ET)
+    /// Checks if it's time for daily reset (9:30 AM ET, DST-correct)
+    ///
+    /// Uses [`market_hours::market_open_utc`] (America/New_York via the IANA
+    /// tz database) rather than a fixed UTC offset, so the check is correct
+    /// year-round instead of drifting by an hour for roughly half the year.
     ///
     /// # Arguments
     ///
@@ -382,27 +515,39 @@ impl DailyLossTracker {
     ///
     /// # Returns
     ///
-    /// `true` if it's time for daily reset
+    /// `true` if it's time for daily reset. Returns `false` (does not reset)
+    /// if the market-open boundary cannot be computed for the current
+    /// Eastern-time calendar date — this should not happen for any real
+    /// calendar date, but a failed computation must never be silently
+    /// treated as "always reset".
     pub async fn should_reset_daily(&self, current_time: DateTime<Utc>) -> bool {
-        // Market open is 9:30 AM ET
-        let market_open_et = NaiveTime::from_hms_opt(9, 30, 0).unwrap();
+        let et_date = current_time.with_timezone(&New_York).date_naive();
 
-        // Convert current time to ET (assuming EST, UTC-5; in production, handle DST)
-        let current_et = current_time.naive_utc() - chrono::Duration::hours(5);
-        let current_naive_et = current_et.time();
-        let current_date = current_time.date_naive();
+        let market_open = match market_hours::market_open_utc(et_date) {
+            Ok(open) => open,
+            Err(err) => {
+                error!(
+                    error = %err,
+                    date = %et_date,
+                    "failed to compute market open for daily reset check; skipping reset"
+                );
+                return false;
+            }
+        };
 
         let state = self.state.read().await;
         let last_reset_date = state.trading_date;
 
-        // Reset if current date is after last reset date and time is at or after market open
-        current_date > last_reset_date && current_naive_et >= market_open_et
+        // Reset if the ET trading date has advanced past the last reset date
+        // and the current instant is at or after that date's market open.
+        et_date > last_reset_date && current_time >= market_open
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use rust_decimal::Decimal;
 
     fn create_test_limits() -> DailyLossLimits {
@@ -514,5 +659,210 @@ mod tests {
         let result = tracker.check_daily_loss_limit(Decimal::new(-100, 0)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Trading is halted"));
+    }
+
+    fn valid_risk_config() -> RiskConfig {
+        RiskConfig {
+            max_daily_loss_dollars: 500.0,
+            max_daily_loss_percent: 2.0,
+            ..RiskConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_try_from_config_valid_values_succeeds() {
+        let config = valid_risk_config();
+        let limits = DailyLossLimits::try_from_config(&config).unwrap();
+        assert_eq!(limits.max_loss_dollars.value(), Decimal::new(500, 0));
+        assert_eq!(limits.max_loss_percent.value(), Decimal::new(2, 0));
+    }
+
+    #[test]
+    fn test_try_from_config_nan_dollars_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::NAN;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::InvalidMaxLossDollars(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_infinite_dollars_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::INFINITY;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::InvalidMaxLossDollars(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_negative_infinite_dollars_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::NEG_INFINITY;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::InvalidMaxLossDollars(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_negative_dollars_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = -100.0;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::MaxLossDollarsOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_nan_percent_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_percent = f64::NAN;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::InvalidMaxLossPercent(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_infinite_percent_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_percent = f64::INFINITY;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::InvalidMaxLossPercent(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_negative_percent_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_percent = -5.0;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::MaxLossPercentOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn test_try_from_config_percent_over_100_returns_error() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_percent = 150.0;
+        let result = DailyLossLimits::try_from_config(&config);
+        assert!(matches!(
+            result,
+            Err(DailyLossLimitsError::MaxLossPercentOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn test_from_config_nan_does_not_panic_and_returns_zero_limits() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::NAN;
+        // Must not panic; falls back to zero (paired with a halted tracker
+        // in `DailyLossTracker::from_config`, see below).
+        let limits = DailyLossLimits::from_config(&config, Decimal::ZERO);
+        assert_eq!(limits.max_loss_dollars.value(), Decimal::ZERO);
+        assert_eq!(limits.max_loss_percent.value(), Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn test_daily_loss_tracker_from_config_valid_starts_unhalted() {
+        let config = valid_risk_config();
+        let tracker = DailyLossTracker::from_config(&config, Decimal::new(1000000, 2));
+
+        let state = tracker.get_daily_state().await;
+        assert!(!state.is_halted);
+    }
+
+    #[tokio::test]
+    async fn test_daily_loss_tracker_from_config_nan_starts_halted() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::NAN;
+
+        // Must not panic, and must fail safe: trading halted immediately
+        // rather than silently running with a zero ("unlimited") limit.
+        let tracker = DailyLossTracker::from_config(&config, Decimal::new(1000000, 2));
+        let state = tracker.get_daily_state().await;
+        assert!(state.is_halted);
+
+        let result = tracker.check_daily_loss_limit(Decimal::new(-100, 0)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_daily_loss_tracker_from_config_infinite_percent_starts_halted() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_percent = f64::INFINITY;
+
+        let tracker = DailyLossTracker::from_config(&config, Decimal::new(1000000, 2));
+        let state = tracker.get_daily_state().await;
+        assert!(state.is_halted);
+    }
+
+    #[tokio::test]
+    async fn test_should_reset_daily_winter_boundary_minutes() {
+        let limits = create_test_limits();
+        let tracker = DailyLossTracker::new(limits);
+
+        // Force last reset date behind the check date so only the time
+        // boundary is under test.
+        {
+            let mut state = tracker.state.write().await;
+            state.trading_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 14).unwrap();
+        }
+
+        // 9:29 ET (14:29 UTC) on Jan 16, 2024 (EST, UTC-5) — before open.
+        let before_open = Utc.with_ymd_and_hms(2024, 1, 16, 14, 29, 0).unwrap();
+        assert!(!tracker.should_reset_daily(before_open).await);
+
+        // 9:30 ET (14:30 UTC) — at open, should reset.
+        let at_open = Utc.with_ymd_and_hms(2024, 1, 16, 14, 30, 0).unwrap();
+        assert!(tracker.should_reset_daily(at_open).await);
+    }
+
+    #[tokio::test]
+    async fn test_should_reset_daily_summer_boundary_minutes() {
+        let limits = create_test_limits();
+        let tracker = DailyLossTracker::new(limits);
+
+        {
+            let mut state = tracker.state.write().await;
+            state.trading_date = chrono::NaiveDate::from_ymd_opt(2024, 7, 14).unwrap();
+        }
+
+        // 9:29 ET (13:29 UTC) on Jul 16, 2024 (EDT, UTC-4) — before open.
+        let before_open = Utc.with_ymd_and_hms(2024, 7, 16, 13, 29, 0).unwrap();
+        assert!(!tracker.should_reset_daily(before_open).await);
+
+        // 9:30 ET (13:30 UTC) — at open, should reset.
+        let at_open = Utc.with_ymd_and_hms(2024, 7, 16, 13, 30, 0).unwrap();
+        assert!(tracker.should_reset_daily(at_open).await);
+    }
+
+    #[tokio::test]
+    async fn test_should_reset_daily_same_trading_date_does_not_reset() {
+        let limits = create_test_limits();
+        let tracker = DailyLossTracker::new(limits);
+
+        let today_et = chrono::NaiveDate::from_ymd_opt(2024, 1, 16).unwrap();
+        {
+            let mut state = tracker.state.write().await;
+            state.trading_date = today_et;
+        }
+
+        // Even well after market open on the *same* ET date, no reset is due.
+        let later_same_day = Utc.with_ymd_and_hms(2024, 1, 16, 18, 0, 0).unwrap();
+        assert!(!tracker.should_reset_daily(later_same_day).await);
     }
 }

@@ -172,35 +172,69 @@ impl EntryRule for NoDuplicatePositionRule {
 }
 
 /// Market hours rule (only trade during specified hours)
-pub struct MarketHoursRule {
-    start_hour: u32,
-    end_hour: u32,
+///
+/// Two modes:
+/// - [`MarketHoursRule::new`] compares the raw UTC hour of
+///   [`EntryContext::current_time`] against `[start_hour, end_hour)`. This
+///   is timezone-naive by design — callers pass UTC hour bounds directly.
+/// - [`MarketHoursRule::standard_hours`] checks the real NYSE/NASDAQ regular
+///   session (9:30 AM - 4:00 PM America/New_York), DST-correct via
+///   [`crate::utils::market_hours::is_market_hours`]. Prefer this over
+///   `new(9, 16)`, which previously compared UTC hour 9-16 against a
+///   session documented as "EST" — those are not the same window, and were
+///   off by 4-5 hours depending on the season.
+pub enum MarketHoursRule {
+    /// Raw UTC-hour bounds, `[start_hour, end_hour)`.
+    UtcHourRange { start_hour: u32, end_hour: u32 },
+    /// The real DST-correct NYSE/NASDAQ regular session.
+    StandardEasternSession,
 }
 
 impl MarketHoursRule {
     pub fn new(start_hour: u32, end_hour: u32) -> Self {
-        Self {
+        Self::UtcHourRange {
             start_hour,
             end_hour,
         }
     }
 
-    /// Creates rule for standard market hours (9:30 AM - 4:00 PM EST)
+    /// Creates a rule for the real market session: 9:30 AM - 4:00 PM
+    /// America/New_York, correct across the DST transition (UTC-5 in
+    /// winter, UTC-4 in summer).
     pub fn standard_hours() -> Self {
-        Self::new(9, 16) // Simplified to hours only
+        Self::StandardEasternSession
     }
 }
 
 impl EntryRule for MarketHoursRule {
     fn evaluate(&self, _signal: &TradingSignal, context: &EntryContext) -> RuleEvaluation {
-        let hour = context.current_time.hour();
-        if hour >= self.start_hour && hour < self.end_hour {
-            RuleEvaluation::Pass
-        } else {
-            RuleEvaluation::Fail(format!(
-                "Outside market hours (current: {}:00, allowed: {}:00-{}:00)",
-                hour, self.start_hour, self.end_hour
-            ))
+        match self {
+            Self::UtcHourRange {
+                start_hour,
+                end_hour,
+            } => {
+                let hour = context.current_time.hour();
+                if hour >= *start_hour && hour < *end_hour {
+                    RuleEvaluation::Pass
+                } else {
+                    RuleEvaluation::Fail(format!(
+                        "Outside market hours (current: {}:00 UTC, allowed: {}:00-{}:00 UTC)",
+                        hour, start_hour, end_hour
+                    ))
+                }
+            }
+            Self::StandardEasternSession => {
+                match crate::utils::market_hours::is_market_hours(context.current_time) {
+                    Ok(true) => RuleEvaluation::Pass,
+                    Ok(false) => RuleEvaluation::Fail(format!(
+                        "Outside standard market hours (current: {} UTC, session: 9:30-16:00 America/New_York)",
+                        context.current_time
+                    )),
+                    Err(err) => {
+                        RuleEvaluation::Fail(format!("Could not determine market hours: {err}"))
+                    }
+                }
+            }
         }
     }
 
@@ -629,5 +663,77 @@ mod tests {
 
         let result = engine.evaluate_entry(&signal, &context);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_market_hours_rule_utc_hour_range_within_bounds_passes() {
+        let rule = MarketHoursRule::new(9, 16);
+        let signal = create_test_signal();
+        // create_test_context uses 14:30 UTC, which is within [9, 16).
+        let context = create_test_context();
+
+        let result = rule.evaluate(&signal, &context);
+        assert!(result.passed());
+    }
+
+    #[test]
+    fn test_market_hours_rule_utc_hour_range_outside_bounds_fails() {
+        let rule = MarketHoursRule::new(9, 16);
+        let signal = create_test_signal();
+        let mut context = create_test_context();
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 2, 0, 0).unwrap();
+
+        let result = rule.evaluate(&signal, &context);
+        assert!(result.failed());
+    }
+
+    #[test]
+    fn test_market_hours_rule_standard_hours_winter_dst_boundary() {
+        // January 2, 2026 is EST (UTC-5): 9:30 ET open = 14:30 UTC.
+        let rule = MarketHoursRule::standard_hours();
+        let signal = create_test_signal();
+        let mut context = create_test_context();
+
+        // Just before open (9:29 ET = 14:29 UTC) fails.
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 14, 29, 0).unwrap();
+        assert!(rule.evaluate(&signal, &context).failed());
+
+        // At open (9:30 ET = 14:30 UTC) passes.
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 14, 30, 0).unwrap();
+        assert!(rule.evaluate(&signal, &context).passed());
+    }
+
+    #[test]
+    fn test_market_hours_rule_standard_hours_summer_dst_boundary() {
+        // July 6, 2026 is EDT (UTC-4): 9:30 ET open = 13:30 UTC. A fixed
+        // UTC-5 offset would incorrectly report the market as still closed
+        // an hour after it actually opened.
+        let rule = MarketHoursRule::standard_hours();
+        let signal = create_test_signal();
+        let mut context = create_test_context();
+
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 7, 6, 13, 29, 0).unwrap();
+        assert!(rule.evaluate(&signal, &context).failed());
+
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 7, 6, 13, 30, 0).unwrap();
+        assert!(rule.evaluate(&signal, &context).passed());
+    }
+
+    #[test]
+    fn test_market_hours_rule_standard_hours_after_close_fails() {
+        // 4:00 PM ET close on Jan 2, 2026 (EST) = 21:00 UTC, exclusive.
+        let rule = MarketHoursRule::standard_hours();
+        let signal = create_test_signal();
+        let mut context = create_test_context();
+        context.current_time =
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 2, 21, 0, 0).unwrap();
+
+        let result = rule.evaluate(&signal, &context);
+        assert!(result.failed());
     }
 }

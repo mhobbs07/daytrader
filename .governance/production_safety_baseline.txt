@@ -15,10 +15,9 @@ unwrap	src/patterns/indicators.rs	2
 unwrap	src/patterns/registry.rs	2
 unwrap	src/patterns/signals.rs	2
 unwrap	src/risk/engine.rs	3
-unwrap	src/risk/limits.rs	5
 unwrap	src/risk/pattern_limits.rs	13
 unwrap	src/risk/pattern_stats.rs	1
-unwrap	src/risk/pdt.rs	4
+unwrap	src/risk/pdt.rs	1
 unwrap	src/risk/position_sizing.rs	6
 unwrap	src/risk/types.rs	12
 unwrap	src/utils/holidays.rs	1
