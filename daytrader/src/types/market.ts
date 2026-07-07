@@ -52,21 +52,53 @@ export interface CandleResponse {
  * the event bridge (`daytrader/src-tauri/src/events.rs`) emits the inner
  * `Quote` value from `MarketEvent::QuoteUpdate { symbol, quote }` without the
  * `symbol` field attached. Until that backend gap is fixed, this payload does
- * NOT include `symbol` on the wire even though marketStore keys the update by
- * `event.payload.symbol`. Kept separate from `QuoteResponse` so this
- * discrepancy is visible at the type level rather than silently assumed.
+ * NOT include `symbol` on the wire — marketStore must key updates by the
+ * symbol it subscribed for, not by a field on the payload. A concurrent
+ * session is fixing this gap in events.rs; once `symbol` is added to the
+ * wire payload, this type should gain a `readonly symbol: string` field.
+ *
+ * `bid`/`ask` are `Price(Decimal)` newtypes. `rust_decimal`'s default serde
+ * impl (no `serde-float` feature) serialises `Decimal` as a JSON **string**
+ * (e.g. `"150.50"`), not a number — unlike `QuoteResponse` above, which the
+ * Tauri command explicitly converts to `f64` before returning. Consumers
+ * must `Number(...)`/`parseFloat` these fields.
  */
 export interface QuoteUpdateEventPayload {
   readonly timestamp: string;
-  readonly bid: number;
-  readonly ask: number;
+  /** Decimal serialised as a string, e.g. "150.50" — see note above. */
+  readonly bid: string;
+  /** Decimal serialised as a string, e.g. "150.55" — see note above. */
+  readonly ask: string;
   readonly bid_size: number;
   readonly ask_size: number;
 }
 
 /**
  * Payload pushed on the `market_data:new_candle` Tauri event.
- * Mirrors `daytrader::brokers::traits::Candle`, re-exported as
- * `events::types::Candle`. Field-for-field identical to `CandleResponse`.
+ * Mirrors `daytrader::brokers::traits::Candle` (re-exported as
+ * `events::types::Candle`), which the event bridge emits *directly*
+ * (`app_handle.emit("market_data:new_candle", &*candle)`) rather than
+ * through a hand-built response struct.
+ *
+ * Unlike `CandleResponse` (produced by the `get_recent_candles` command,
+ * which explicitly converts each `Price` to `f64`), the raw `Candle` struct
+ * has `open`/`high`/`low`/`close` typed as `Price(Decimal)`. `rust_decimal`'s
+ * default serde impl serialises `Decimal` as a JSON **string**, not a
+ * number. `volume: u64` serialises as a plain number (no wrapper). Consumers
+ * must `Number(...)`/`parseFloat` the OHLC fields before using them.
  */
-export type CandleUpdateEventPayload = CandleResponse;
+export interface CandleUpdateEventPayload {
+  /** Ticker symbol */
+  readonly symbol: string;
+  /** @iso8601 Candle open time */
+  readonly timestamp: string;
+  /** Decimal serialised as a string — see note above. */
+  readonly open: string;
+  /** Decimal serialised as a string — see note above. */
+  readonly high: string;
+  /** Decimal serialised as a string — see note above. */
+  readonly low: string;
+  /** Decimal serialised as a string — see note above. */
+  readonly close: string;
+  readonly volume: number;
+}

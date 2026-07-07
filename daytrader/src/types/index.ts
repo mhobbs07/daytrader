@@ -19,6 +19,7 @@ export type {
 export type {
   SignalType,
   PatternSignalResponse,
+  PatternSignalEventPayload,
   PatternStats,
 } from './patterns';
 

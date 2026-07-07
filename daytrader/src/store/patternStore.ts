@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import type { PatternSignalResponse, PatternStats } from '../types';
+import type { PatternSignalResponse, PatternSignalEventPayload, PatternStats } from '../types';
 
 const unlisteners: UnlistenFn[] = [];
 
@@ -16,9 +16,16 @@ export const usePatternStore = create<PatternStore>((set) => {
   // Initialize listener at store creation
   (async () => {
     if (unlisteners.length === 0) {
-      const unlisten = await listen<PatternSignalResponse>('patterns:detected', (event) => {
+      // `price` arrives as a Decimal-serialised string (see
+      // PatternSignalEventPayload) and must be converted to a number to
+      // match PatternSignalResponse, the shape PatternList expects.
+      const unlisten = await listen<PatternSignalEventPayload>('patterns:detected', (event) => {
+        const signal: PatternSignalResponse = {
+          ...event.payload,
+          price: Number(event.payload.price),
+        };
         usePatternStore.setState(state => ({
-          patterns: [event.payload, ...state.patterns].slice(0, 100)
+          patterns: [signal, ...state.patterns].slice(0, 100)
         }));
       });
       unlisteners.push(unlisten);

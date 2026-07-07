@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import type { QuoteResponse, CandleResponse, CandleUpdateEventPayload } from '../types';
+import type {
+  QuoteResponse,
+  CandleResponse,
+  QuoteUpdateEventPayload,
+  CandleUpdateEventPayload,
+} from '../types';
 
 const unlisteners = new Map<string, UnlistenFn[]>();
 
@@ -31,23 +36,44 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
 
     const handlers: UnlistenFn[] = [];
 
-    // NOTE: the `market_data:quote_update` event payload does not actually
-    // include `symbol` on the wire (see QuoteUpdateEventPayload in
-    // ../types/market.ts) — this cast reflects the pre-existing assumption
-    // in this handler, not a verified wire shape.
-    handlers.push(await listen<QuoteResponse>('market_data:quote_update', (event) => {
+    // The `market_data:quote_update` payload does not include `symbol` on
+    // the wire (see QuoteUpdateEventPayload in ../types/market.ts), so we
+    // key the update by the symbol this listener was registered for rather
+    // than reading it off the payload. A concurrent fix to events.rs may add
+    // `symbol` to the payload later, at which point this can switch back to
+    // reading it from the event.
+    handlers.push(await listen<QuoteUpdateEventPayload>('market_data:quote_update', (event) => {
+      const quote: QuoteResponse = {
+        symbol,
+        bid: Number(event.payload.bid),
+        ask: Number(event.payload.ask),
+        last: Number(event.payload.bid),
+        timestamp: event.payload.timestamp,
+      };
       set(state => {
         const newQuotes = new Map(state.quotes);
-        newQuotes.set(event.payload.symbol, event.payload);
+        newQuotes.set(symbol, quote);
         return { quotes: newQuotes };
       });
     }));
 
+    // `open`/`high`/`low`/`close` arrive as Decimal-serialised strings (see
+    // CandleUpdateEventPayload) and must be converted to numbers to match
+    // CandleResponse, the shape the rest of the app (CandleChart) expects.
     handlers.push(await listen<CandleUpdateEventPayload>('market_data:new_candle', (event) => {
+      const candle: CandleResponse = {
+        symbol: event.payload.symbol,
+        timestamp: event.payload.timestamp,
+        open: Number(event.payload.open),
+        high: Number(event.payload.high),
+        low: Number(event.payload.low),
+        close: Number(event.payload.close),
+        volume: event.payload.volume,
+      };
       set(state => {
         const newCandles = new Map(state.candles);
-        const symbolCandles = newCandles.get(event.payload.symbol) || [];
-        newCandles.set(event.payload.symbol, [...symbolCandles, event.payload]);
+        const symbolCandles = newCandles.get(candle.symbol) || [];
+        newCandles.set(candle.symbol, [...symbolCandles, candle]);
         return { candles: newCandles };
       });
     }));

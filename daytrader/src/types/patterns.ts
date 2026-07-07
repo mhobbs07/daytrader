@@ -13,10 +13,10 @@
 export type SignalType = 'Buy' | 'Sell';
 
 /**
- * Response element from the `get_detected_patterns_for_symbol` command, and
- * also the payload pushed on the `patterns:detected` Tauri event (the event
- * bridge emits the same `PatternSignal` domain type this response mirrors).
- * Mirrors `PatternSignalResponse` in patterns.rs.
+ * Response element from the `get_detected_patterns_for_symbol` command.
+ * Mirrors `PatternSignalResponse` in patterns.rs, which explicitly converts
+ * `Confidence`/`Price` newtypes to `f64` before returning — both fields are
+ * plain JSON numbers on this wire shape.
  */
 export interface PatternSignalResponse {
   /** Ticker symbol */
@@ -31,6 +31,32 @@ export interface PatternSignalResponse {
   readonly detected_at: string;
   /** Price at detection time */
   readonly price: number;
+}
+
+/**
+ * Payload pushed on the `patterns:detected` Tauri event.
+ *
+ * NOTE: unlike `PatternSignalResponse` above, the event bridge
+ * (`daytrader/src-tauri/src/events.rs`) emits the raw domain
+ * `daytrader::events::types::PatternSignal` directly
+ * (`app_handle.emit("patterns:detected", &signal)`) rather than through the
+ * `patterns.rs` command's hand-built response struct. That domain type keeps
+ * `price` as a `Price(Decimal)` newtype, which `rust_decimal`'s default
+ * serde impl serialises as a JSON **string**, not a number — `confidence`
+ * (`Confidence(f64)`) and `symbol`/`pattern_name` (single-field newtypes
+ * over `String`) serialise transparently as a number and strings
+ * respectively, matching `PatternSignalResponse`. Only `price` differs.
+ * Consumers must `Number(...)`/`parseFloat` the `price` field.
+ */
+export interface PatternSignalEventPayload {
+  readonly symbol: string;
+  readonly pattern_name: string;
+  readonly signal_type: SignalType;
+  readonly confidence: number;
+  /** @iso8601 When the pattern was detected */
+  readonly detected_at: string;
+  /** Decimal serialised as a string, e.g. "150.50" — see note above. */
+  readonly price: string;
 }
 
 /**
