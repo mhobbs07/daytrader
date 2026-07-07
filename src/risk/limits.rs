@@ -188,11 +188,21 @@ pub struct DailyPnlState {
     pub last_updated: DateTime<Utc>,
 }
 
+/// Current Eastern-time trading date.
+///
+/// `trading_date` must always be an ET date: `should_reset_daily` compares
+/// it against an ET-derived date, and a UTC date diverges from ET between
+/// 8 PM ET and midnight ET (initializing then would stamp *tomorrow's*
+/// date and silently skip the next morning's reset).
+fn current_et_trading_date() -> chrono::NaiveDate {
+    Utc::now().with_timezone(&New_York).date_naive()
+}
+
 impl DailyPnlState {
     /// Creates a new daily P&L state
     pub fn new(starting_balance: Decimal) -> Self {
         Self {
-            trading_date: Utc::now().date_naive(),
+            trading_date: current_et_trading_date(),
             starting_balance,
             realized_pl: Decimal::ZERO,
             unrealized_pl: Decimal::ZERO,
@@ -248,6 +258,11 @@ impl DailyPnlState {
 pub struct DailyLossTracker {
     limits: DailyLossLimits,
     state: Arc<RwLock<DailyPnlState>>,
+    /// True when the tracker was built from invalid config and fail-safed
+    /// into a halt. Kept on the tracker (not the resettable state) so
+    /// `reset_daily_limits` cannot clear the halt while the config is
+    /// still invalid.
+    config_invalid: bool,
 }
 
 impl DailyLossTracker {
@@ -257,6 +272,7 @@ impl DailyLossTracker {
         Self {
             limits,
             state: Arc::new(RwLock::new(DailyPnlState::new(starting_balance))),
+            config_invalid: false,
         }
     }
 
@@ -299,6 +315,7 @@ impl DailyLossTracker {
         Self {
             limits,
             state: Arc::new(RwLock::new(state)),
+            config_invalid: is_halted,
         }
     }
 
@@ -489,12 +506,14 @@ impl DailyLossTracker {
     pub async fn reset_daily_limits(&self, new_starting_balance: Decimal) {
         let mut state = self.state.write().await;
 
-        // Reset for new trading day
-        state.trading_date = Utc::now().date_naive();
+        // Reset for new trading day (ET date — see current_et_trading_date)
+        state.trading_date = current_et_trading_date();
         state.starting_balance = new_starting_balance;
         state.realized_pl = Decimal::ZERO;
         state.unrealized_pl = Decimal::ZERO;
-        state.is_halted = false;
+        // A fail-safe halt from invalid config is sticky: the config is
+        // still invalid after a daily reset, so the halt must survive it.
+        state.is_halted = self.config_invalid;
         state.last_updated = Utc::now();
     }
 

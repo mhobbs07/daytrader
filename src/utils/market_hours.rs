@@ -66,7 +66,7 @@ pub enum MarketHoursError {
 /// (this cannot happen for 9:30 AM under current US DST rules, but the
 /// check is exhaustive rather than assumed).
 pub fn market_open_utc(date: NaiveDate) -> Result<DateTime<Utc>, MarketHoursError> {
-    local_et_to_utc(date, MARKET_OPEN_ET)
+    local_et_to_utc(date, MARKET_OPEN_ET, AmbiguousResolution::Earliest)
 }
 
 /// Returns the UTC instant corresponding to 4:00 PM America/New_York on `date`.
@@ -78,7 +78,7 @@ pub fn market_open_utc(date: NaiveDate) -> Result<DateTime<Utc>, MarketHoursErro
 /// Returns [`MarketHoursError`] if the composed local time is invalid or
 /// falls in a DST transition gap.
 pub fn market_close_utc(date: NaiveDate) -> Result<DateTime<Utc>, MarketHoursError> {
-    local_et_to_utc(date, MARKET_CLOSE_ET)
+    local_et_to_utc(date, MARKET_CLOSE_ET, AmbiguousResolution::Latest)
 }
 
 /// Returns `true` if `instant` falls within regular trading hours
@@ -99,11 +99,28 @@ pub fn is_market_hours(instant: DateTime<Utc>) -> Result<bool, MarketHoursError>
     Ok(instant >= open && instant < close)
 }
 
+/// How to resolve an ambiguous (fall-back, repeated-hour) local time.
+///
+/// The conservative direction depends on which session boundary is being
+/// computed: the *earliest* instant for an open keeps the session from
+/// starting late, while the *latest* instant for a close keeps it from
+/// ending early. Neither branch is reachable for the current 9:30/16:00
+/// constants (the US fall-back window is 1:00–2:00 AM ET), but the helper
+/// must stay correct if it is ever reused for other wall-clock times.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AmbiguousResolution {
+    /// Resolve to the first (pre-transition) occurrence.
+    Earliest,
+    /// Resolve to the second (post-transition) occurrence.
+    Latest,
+}
+
 /// Converts a `(hour, minute, second)` wall-clock time on `date` in
 /// America/New_York to a UTC instant, resolving DST via the IANA tz database.
 fn local_et_to_utc(
     date: NaiveDate,
     (hour, minute, second): (u32, u32, u32),
+    ambiguous: AmbiguousResolution,
 ) -> Result<DateTime<Utc>, MarketHoursError> {
     let naive_time = NaiveTime::from_hms_opt(hour, minute, second)
         .ok_or(MarketHoursError::InvalidTime(hour, minute, second))?;
@@ -111,10 +128,10 @@ fn local_et_to_utc(
 
     match New_York.from_local_datetime(&naive_dt) {
         LocalResult::Single(et_dt) => Ok(et_dt.with_timezone(&Utc)),
-        // Ambiguous (fall-back "repeats an hour") — pick the earlier
-        // (first) occurrence, which is the conservative choice for a
-        // market-open boundary: it is >= the first valid instant either way.
-        LocalResult::Ambiguous(earliest, _latest) => Ok(earliest.with_timezone(&Utc)),
+        LocalResult::Ambiguous(earliest, latest) => Ok(match ambiguous {
+            AmbiguousResolution::Earliest => earliest.with_timezone(&Utc),
+            AmbiguousResolution::Latest => latest.with_timezone(&Utc),
+        }),
         LocalResult::None => Err(MarketHoursError::AmbiguousOrInvalidLocalTime(
             naive_time, date,
         )),
@@ -125,6 +142,28 @@ fn local_et_to_utc(
 mod tests {
     use super::*;
     use chrono::Datelike;
+
+    #[test]
+    fn test_local_et_to_utc_ambiguous_fall_back_resolves_by_direction() {
+        // 2026-11-01 is the US fall-back date: 1:30 AM ET occurs twice
+        // (once at UTC-4, once at UTC-5, one hour apart).
+        let date = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+        let earliest = local_et_to_utc(date, (1, 30, 0), AmbiguousResolution::Earliest).unwrap();
+        let latest = local_et_to_utc(date, (1, 30, 0), AmbiguousResolution::Latest).unwrap();
+        assert_eq!(latest - earliest, chrono::Duration::hours(1));
+        assert!(earliest < latest);
+    }
+
+    #[test]
+    fn test_local_et_to_utc_spring_forward_gap_is_error() {
+        // 2026-03-08 is the US spring-forward date: 2:30 AM ET does not exist.
+        let date = NaiveDate::from_ymd_opt(2026, 3, 8).unwrap();
+        let result = local_et_to_utc(date, (2, 30, 0), AmbiguousResolution::Earliest);
+        assert!(matches!(
+            result,
+            Err(MarketHoursError::AmbiguousOrInvalidLocalTime(_, _))
+        ));
+    }
 
     #[test]
     fn test_market_open_utc_winter_est_is_utc_minus_5() {
