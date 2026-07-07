@@ -60,12 +60,17 @@ impl EventBridge {
                 app_handle.emit("market_data:new_candle", &*candle)?;
             }
             MarketEvent::QuoteUpdate { symbol, quote } => {
-                // Convert events::Quote to brokers::Quote for cache
+                // Convert events::Quote to brokers::Quote for cache.
+                // events::Quote carries no last-trade price; use the bid/ask
+                // midpoint as the documented proxy rather than the bid, which
+                // downstream consumers would mistake for a real trade price.
+                let last =
+                    daytrader::brokers::types::Price::new(quote.mid_price()).unwrap_or(quote.bid);
                 let broker_quote = daytrader::brokers::traits::Quote {
                     symbol: symbol.clone(),
                     bid: quote.bid,
                     ask: quote.ask,
-                    last: quote.bid, // Use bid as last price for now
+                    last,
                     bid_size: quote.bid_size.value(),
                     ask_size: quote.ask_size.value(),
                     timestamp: quote.timestamp,
