@@ -436,3 +436,36 @@ async fn test_signal_data_integrity() {
 
     assert!(valid_result.is_ok(), "Valid signal should be accepted");
 }
+
+#[tokio::test]
+async fn test_store_signal_detection_persists_event_fields() {
+    let pool = setup_test_db().await;
+    let repo = SignalRepository::new(pool.clone());
+
+    let detected_at = Utc::now();
+    let id = repo
+        .store_signal_detection("AAPL", "hammer", "buy", 0.82, detected_at, 185.5)
+        .await
+        .expect("store_signal_detection should insert a row");
+    assert!(id > 0, "insert should return a row id");
+
+    let row = sqlx::query!(
+        "SELECT symbol, pattern_name, signal_type, confidence, detected_at, \
+         candle_timestamp, price_at_detection, acted_upon \
+         FROM pattern_signals WHERE id = ?",
+        id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("inserted row should be readable");
+
+    assert_eq!(row.symbol, "AAPL");
+    assert_eq!(row.pattern_name, "hammer");
+    assert_eq!(row.signal_type, "buy");
+    assert!((row.confidence.unwrap_or(0.0) - 0.82).abs() < f64::EPSILON);
+    assert!((row.price_at_detection - 185.5).abs() < f64::EPSILON);
+    // Documented approximation: candle_timestamp mirrors detected_at because
+    // candle data isn't available at the detection-event layer.
+    assert_eq!(row.candle_timestamp, row.detected_at);
+    assert_eq!(row.acted_upon, Some(false));
+}

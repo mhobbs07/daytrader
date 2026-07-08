@@ -8,8 +8,11 @@
 # edges above the ceiling fail the pipeline; any violation on an unlisted
 # edge fails immediately. Lower the count here in the same commit that
 # removes violations. Remediation program tracked as backlog B-070:
-#   - patterns <-> risk is CIRCULAR (signals.rs holds Arc<RiskEngine>;
-#     risk/engine.rs constructs patterns::TradingSignal)
+#   - patterns -> risk remains (signals.rs holds Arc<RiskEngine>); the risk ->
+#     patterns half of the former cycle was removed under B-058: the risk
+#     engine no longer constructs patterns::signals::TradingSignal — it
+#     persists detected signals via a new db::SignalRepository method that
+#     takes plain event fields instead
 #   - db -> risk/orders/positions inverts infrastructure/business layering
 #     (From impls and repository parameter types belong to upper layers or
 #     the infrastructure/ bridge)
@@ -21,6 +24,5 @@ events -> patterns | 1
 db -> risk | 7
 db -> orders | 2
 db -> positions | 16
-risk -> patterns | 3
 patterns -> risk | 11
 domain -> db | 12

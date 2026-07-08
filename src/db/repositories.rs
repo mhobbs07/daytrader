@@ -234,6 +234,47 @@ impl SignalRepository {
         Ok(result.last_insert_rowid())
     }
 
+    /// Stores a detected pattern signal from its raw event fields
+    ///
+    /// Unlike [`Self::store_signal`], this does not require constructing a
+    /// full `patterns::signals::TradingSignal` (which carries pattern-engine
+    /// internals like signal components and market context that a detection
+    /// event does not have). Callers that only observe a
+    /// `events::types::PatternSignal` — e.g. the risk engine recording
+    /// signal detections for statistics — can persist exactly the fields
+    /// they actually have, with `candle_timestamp` approximated as
+    /// `detected_at` since candle data isn't available at that layer.
+    pub async fn store_signal_detection(
+        &self,
+        symbol: &str,
+        pattern_name: &str,
+        signal_type: &str,
+        confidence: f64,
+        detected_at: DateTime<Utc>,
+        price_at_detection: f64,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO pattern_signals (
+                symbol, pattern_name, signal_type, confidence, detected_at,
+                candle_timestamp, price_at_detection, acted_upon
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            symbol,
+            pattern_name,
+            signal_type,
+            confidence,
+            detected_at,
+            detected_at,
+            price_at_detection,
+            false,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
     /// Updates signal with order information
     pub async fn update_signal_with_order(
         &self,
