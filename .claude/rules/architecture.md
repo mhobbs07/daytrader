@@ -12,7 +12,7 @@ The dependency graph flows strictly downward. Higher layers depend on lower laye
 ```
 Orchestration:  execution -> orders
 Business Logic: risk, patterns, positions
-Infrastructure: config, events, db, domain, infrastructure
+Infrastructure: config, events, db
 Foundation:     utils, brokers
 ```
 

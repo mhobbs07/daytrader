@@ -227,7 +227,6 @@ fn main() {
             commands::market_data::get_recent_candles,
             commands::market_data::subscribe_symbol,
             commands::market_data::unsubscribe_symbol,
-            commands::patterns::get_detected_patterns_for_symbol,
             commands::patterns::get_pattern_statistics,
             commands::risk::get_risk_state,
             commands::risk::get_risk_limits,

@@ -18,7 +18,3 @@ utils -> brokers | BrokerError in utils/errors.rs references broker type names (
 
 # Positions tracker needs order types for fill processing
 positions -> orders | PositionTracker processes FillInfo and ManagedOrder from order lifecycle
-
-# Infrastructure layer bridges domain and db
-infrastructure -> db | Repository implementations wrap database operations
-infrastructure -> domain | Repository implementations fulfill domain port contracts

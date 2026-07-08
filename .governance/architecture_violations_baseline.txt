@@ -16,13 +16,12 @@
 #   - db -> risk/orders/positions inverts infrastructure/business layering
 #     (From impls and repository parameter types belong to upper layers or
 #     the infrastructure/ bridge)
-#   - domain -> db contradicts "domain fully isolated" (conversions belong
-#     in infrastructure/)
 #   - events -> patterns: MarketEvent embeds patterns::TradingSignal
+# (domain -> db entries removed 2026-07-07: the never-compiled domain/ and
+# infrastructure/ modules were deleted under B-064)
 
 events -> patterns | 1
 db -> risk | 7
 db -> orders | 2
 db -> positions | 16
 patterns -> risk | 11
-domain -> db | 12

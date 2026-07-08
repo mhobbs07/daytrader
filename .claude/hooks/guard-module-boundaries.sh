@@ -38,7 +38,6 @@ fi
 get_forbidden() {
   case "$1" in
     utils)          echo "risk|orders|positions|execution|patterns|events|config|db" ;;
-    domain)         echo "orders|risk|patterns|execution|positions|events|config|db|brokers|utils" ;;
     events)         echo "risk|orders|positions|execution|patterns|config|db" ;;
     config)         echo "orders|positions|execution|patterns|events|db" ;;
     db)             echo "risk|orders|positions|execution" ;;
@@ -46,7 +45,6 @@ get_forbidden() {
     patterns)       echo "orders|positions|execution|risk" ;;
     positions)      echo "execution|risk|patterns" ;;
     orders)         echo "execution|patterns" ;;
-    infrastructure) echo "risk|orders|positions|execution|patterns|events" ;;
     *)              echo "" ;;
   esac
 }
