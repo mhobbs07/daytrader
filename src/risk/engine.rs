@@ -235,6 +235,14 @@ impl RiskEngine {
                 // Record pattern trade outcome if applicable
                 self.record_pattern_trade_outcome(order_id, &fill).await?;
             }
+            MarketEvent::OrderCancelled { order_id, .. }
+            | MarketEvent::OrderRejected { order_id, .. } => {
+                // Terminal non-fill states: reclaim the placement metadata,
+                // otherwise every cancelled/rejected order leaks an entry
+                // and pending_orders grows without bound in a long-running
+                // process.
+                self.pending_orders.remove(&order_id);
+            }
             MarketEvent::PositionUpdated { position } => {
                 // Update P&L tracking
                 self.update_position_pl(&position).await?;
@@ -392,8 +400,15 @@ impl RiskEngine {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Recover the symbol/side this fill belongs to. `OrderFilled` events
         // only carry the fill itself, so the placement-time metadata cached
-        // in `pending_orders` is the only place this is available.
-        if let Some((_, (symbol, side))) = self.pending_orders.remove(&order_id) {
+        // in `pending_orders` is the only place this is available. Read
+        // without removing: `process_fill` is fallible, and reclaiming the
+        // entry before it succeeds would strand a retried fill in the
+        // metadata-less fallback below.
+        let metadata = self
+            .pending_orders
+            .get(&order_id)
+            .map(|entry| entry.value().clone());
+        if let Some((symbol, side)) = metadata {
             // Authoritative day-trade detection: feed the real fill into the
             // FIFO position tracker and record a day trade only when it
             // actually completes one (same-day open + close). This replaces
@@ -411,6 +426,9 @@ impl RiskEngine {
                 )
                 .await?;
 
+            // Fill accepted by the tracker — now the metadata can go.
+            self.pending_orders.remove(&order_id);
+
             if is_day_trade {
                 self.pdt_enforcer
                     .record_day_trade(fill.filled_at.date_naive())
@@ -421,9 +439,17 @@ impl RiskEngine {
             // process, but if it's missing (e.g. engine restart mid-order)
             // fail safe: without position lifecycle context we cannot rule
             // out a day trade, and PDT compliance must never be bypassed.
+            // The position tracker cannot be updated without symbol/side,
+            // so its view of this symbol is now stale — log every detail
+            // needed for manual reconciliation.
             tracing::warn!(
                 order_id = %order_id,
-                "No pending order metadata for fill; conservatively recording as a day trade"
+                filled_quantity = fill.filled_quantity.value(),
+                filled_price = %fill.filled_price.value(),
+                filled_at = %fill.filled_at,
+                "No pending order metadata for fill; conservatively recording \
+                 a day trade. Position tracker NOT updated for this fill — \
+                 its state for the affected symbol is stale until reconciled"
             );
             self.pdt_enforcer
                 .record_day_trade(fill.filled_at.date_naive())
@@ -1115,6 +1141,43 @@ mod tests {
         assert!(
             !engine.pending_orders.contains_key(&order.id),
             "pending order metadata should be consumed once the fill is processed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_and_rejected_orders_reclaim_pending_metadata() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let account_id = AccountId::new("test-account");
+        let engine = RiskEngine::new(config, event_bus, account_id, Decimal::new(5000000, 2));
+
+        let cancelled = create_test_order("order-cancel", "AAPL", OrderSide::Buy);
+        let rejected = create_test_order("order-reject", "MSFT", OrderSide::Sell);
+        register_pending_order(&engine, &cancelled);
+        register_pending_order(&engine, &rejected);
+
+        engine
+            .process_event(crate::events::types::MarketEvent::OrderCancelled {
+                order_id: cancelled.id.clone(),
+                reason: crate::brokers::types::Reason::new("user cancelled"),
+            })
+            .await
+            .unwrap();
+        engine
+            .process_event(crate::events::types::MarketEvent::OrderRejected {
+                order_id: rejected.id.clone(),
+                reason: crate::brokers::types::Reason::new("insufficient funds"),
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            !engine.pending_orders.contains_key(&cancelled.id),
+            "cancelled order must not leak pending metadata"
+        );
+        assert!(
+            !engine.pending_orders.contains_key(&rejected.id),
+            "rejected order must not leak pending metadata"
         );
     }
 }
