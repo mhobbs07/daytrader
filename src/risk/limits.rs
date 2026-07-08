@@ -652,6 +652,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reset_daily_limits_invalid_config_halt_is_sticky() {
+        let mut config = valid_risk_config();
+        config.max_daily_loss_dollars = f64::NAN;
+        let tracker = DailyLossTracker::from_config(&config, Decimal::new(1000000, 2));
+
+        // Fail-safe: invalid config starts the tracker halted...
+        assert!(tracker.get_daily_state().await.is_halted);
+
+        // ...and a daily reset must NOT clear that halt, because the
+        // config is still invalid after the reset.
+        tracker.reset_daily_limits(Decimal::new(2000000, 2)).await;
+        assert!(tracker.get_daily_state().await.is_halted);
+    }
+
+    #[tokio::test]
     async fn test_percentage_limit_calculation() {
         let starting_balance = Decimal::new(1000000, 2); // $10,000.00
         let limits = DailyLossLimits {
