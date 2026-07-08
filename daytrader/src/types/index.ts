@@ -40,3 +40,9 @@ export type {
   HolidayInfo,
   BusinessDayInfoResponse,
 } from './risk';
+
+export type {
+  ExecutionStatusResponse,
+  OrderResponse,
+  PositionResponse,
+} from './execution';

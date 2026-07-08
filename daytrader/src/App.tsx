@@ -6,6 +6,9 @@ import { RiskStatus } from "./components/RiskStatus";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { StoreCleanup } from "./components/StoreCleanup";
 import { Watchlist, loadWatchlist, saveWatchlist } from "./components/Watchlist";
+import { TradingControls } from "./components/TradingControls";
+import { OrdersPanel } from "./components/OrdersPanel";
+import { PositionsPanel } from "./components/PositionsPanel";
 import "./App.css";
 
 function App() {
@@ -60,6 +63,20 @@ function App() {
             <RiskStatus />
           </div>
         </div>
+
+        <section className="trading-section">
+          <div className="dashboard-section">
+            <TradingControls />
+          </div>
+
+          <div className="dashboard-section trading-section-wide">
+            <OrdersPanel />
+          </div>
+
+          <div className="dashboard-section trading-section-wide">
+            <PositionsPanel />
+          </div>
+        </section>
       </main>
     </StoreCleanup>
   );
