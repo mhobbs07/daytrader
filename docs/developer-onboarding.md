@@ -92,8 +92,8 @@ ALPACA_API_SECRET=your_paper_api_secret
 # Logging level
 RUST_LOG=daytrader=debug
 
-# Database path (optional, defaults to ./data/daytrader.db)
-DATABASE_URL=./data/daytrader.db
+# Database URL for sqlx (scripts/setup_db.sh prints the exact value to use)
+DATABASE_URL=sqlite:./daytrader.db
 ```
 
 ### 3. Initialize the Database
@@ -107,7 +107,22 @@ ls -la data/
 sqlite3 data/daytrader.db ".tables"
 ```
 
-### 4. Build the Project
+### 4. Run the Desktop App (Tauri)
+
+The primary runnable artifact is the Tauri desktop app in `daytrader/`. It requires
+Node.js 20+ and runs on synthetic mock data (no broker keys needed):
+
+```bash
+cd daytrader
+npm install
+npm run tauri dev      # Vite dev server on :1421 + Tauri desktop window
+```
+
+See `daytrader/README.md` for details. Note: `cargo run` at the repo root is currently a
+placeholder binary (logging init only) — the backend is consumed as a library by the
+Tauri shell crate.
+
+### 5. Build the Project
 
 ```bash
 # Check for issues
@@ -126,7 +141,7 @@ cargo build
 cargo build --release
 ```
 
-### 5. Run Tests
+### 6. Run Tests
 
 ```bash
 # Run all tests
@@ -142,17 +157,11 @@ cargo test test_pattern_detection
 cargo bench
 ```
 
-### 6. Run the Application
+### 7. Run the Backend Binary (placeholder)
 
 ```bash
-# Development mode
+# Currently only initializes logging/metrics and exits — see README.md "Current Status"
 cargo run
-
-# With specific config
-cargo run -- --config config/custom.toml
-
-# Release mode
-cargo run --release
 ```
 
 ## Project Overview

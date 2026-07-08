@@ -1,35 +1,5 @@
 use crate::state::AppState;
-use daytrader::events::types::PatternSignal;
 use tauri::State;
-
-#[tauri::command]
-pub async fn get_detected_patterns_for_symbol(
-    symbol: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<PatternSignalResponse>, String> {
-    // Get recent patterns from event history or pattern cache
-    let patterns = state
-        .pattern_cache
-        .lock()
-        .unwrap()
-        .get_patterns_for_symbol(&symbol)
-        .map_err(|e| format!("Failed to get patterns: {}", e))?;
-
-    Ok(patterns
-        .into_iter()
-        .map(|signal| PatternSignalResponse {
-            symbol: signal.symbol.to_string(),
-            pattern_name: signal.pattern_name.to_string(),
-            signal_type: match signal.signal_type {
-                daytrader::events::types::SignalType::Buy => "Buy".to_string(),
-                daytrader::events::types::SignalType::Sell => "Sell".to_string(),
-            },
-            confidence: signal.confidence.value(),
-            detected_at: signal.detected_at.to_rfc3339(),
-            price: signal.price.as_f64(),
-        })
-        .collect())
-}
 
 #[tauri::command]
 pub async fn get_pattern_statistics(state: State<'_, AppState>) -> Result<PatternStats, String> {
@@ -57,16 +27,6 @@ pub async fn get_pattern_statistics(state: State<'_, AppState>) -> Result<Patter
         patterns_by_type,
         average_confidence,
     })
-}
-
-#[derive(serde::Serialize)]
-pub struct PatternSignalResponse {
-    pub symbol: String,
-    pub pattern_name: String,
-    pub signal_type: String,
-    pub confidence: f64,
-    pub detected_at: String,
-    pub price: f64,
 }
 
 #[derive(serde::Serialize)]

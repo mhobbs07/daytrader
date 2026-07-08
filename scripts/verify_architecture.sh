@@ -136,7 +136,7 @@ check_forbidden_dep() {
 }
 
 # ===== Foundation Layer: utils must not import from upper layers =====
-echo -e "${BLUE}[1/6] Checking Foundation Layer (utils, brokers)...${NC}"
+echo -e "${BLUE}[1/5] Checking Foundation Layer (utils, brokers)...${NC}"
 check_forbidden_dep "src/utils" "risk" "utils -> risk"
 check_forbidden_dep "src/utils" "orders" "utils -> orders"
 check_forbidden_dep "src/utils" "positions" "utils -> positions"
@@ -147,7 +147,7 @@ check_forbidden_dep "src/utils" "config" "utils -> config"
 check_forbidden_dep "src/utils" "db" "utils -> db"
 
 # ===== Infrastructure Layer =====
-echo -e "${BLUE}[2/6] Checking Infrastructure Layer (events, config, db)...${NC}"
+echo -e "${BLUE}[2/5] Checking Infrastructure Layer (events, config, db)...${NC}"
 check_forbidden_dep "src/events" "risk" "events -> risk"
 check_forbidden_dep "src/events" "orders" "events -> orders"
 check_forbidden_dep "src/events" "positions" "events -> positions"
@@ -169,7 +169,7 @@ check_forbidden_dep "src/db" "positions" "db -> positions"
 check_forbidden_dep "src/db" "execution" "db -> execution"
 
 # ===== Business Logic Layer =====
-echo -e "${BLUE}[3/6] Checking Business Logic Layer (risk, patterns, positions)...${NC}"
+echo -e "${BLUE}[3/5] Checking Business Logic Layer (risk, patterns, positions)...${NC}"
 check_forbidden_dep "src/risk" "orders" "risk -> orders"
 check_forbidden_dep "src/risk" "positions" "risk -> positions"
 check_forbidden_dep "src/risk" "execution" "risk -> execution"
@@ -185,26 +185,15 @@ check_forbidden_dep "src/positions" "risk" "positions -> risk"
 check_forbidden_dep "src/positions" "patterns" "positions -> patterns"
 
 # ===== Orchestration Layer =====
-echo -e "${BLUE}[4/6] Checking Orchestration Layer (orders, execution)...${NC}"
+echo -e "${BLUE}[4/5] Checking Orchestration Layer (orders, execution)...${NC}"
 check_forbidden_dep "src/orders" "execution" "orders -> execution"
 check_forbidden_dep "src/orders" "patterns" "orders -> patterns"
 
 # ===== Top of tree: nothing imports execution =====
-echo -e "${BLUE}[5/6] Checking that nothing depends on execution (top of tree)...${NC}"
-for mod in brokers config db events risk patterns orders positions domain utils infrastructure; do
+echo -e "${BLUE}[5/5] Checking that nothing depends on execution (top of tree)...${NC}"
+for mod in brokers config db events risk patterns orders positions utils; do
     check_forbidden_dep "src/${mod}" "execution" "${mod} -> execution"
 done
-
-# ===== Domain layer should be isolated =====
-echo -e "${BLUE}[6/6] Checking Domain layer isolation...${NC}"
-check_forbidden_dep "src/domain" "orders" "domain -> orders"
-check_forbidden_dep "src/domain" "risk" "domain -> risk"
-check_forbidden_dep "src/domain" "patterns" "domain -> patterns"
-check_forbidden_dep "src/domain" "execution" "domain -> execution"
-check_forbidden_dep "src/domain" "positions" "domain -> positions"
-check_forbidden_dep "src/domain" "events" "domain -> events"
-check_forbidden_dep "src/domain" "config" "domain -> config"
-check_forbidden_dep "src/domain" "db" "domain -> db"
 
 # ===== Summary =====
 echo ""

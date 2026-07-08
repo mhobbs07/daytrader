@@ -64,8 +64,7 @@ INFRASTRUCTURE
   config/             Application configuration
   events/             Event bus (tokio broadcast channels)
   db/                 SQLite persistence via SQLx
-  domain/             Pure domain models (fully isolated)
-  infrastructure/     Repository implementations (db <-> domain bridge)
+  data/               Market data ingestion, cache, validation
 
 FOUNDATION (no upward dependencies)
   utils/              Shared utilities, error types
