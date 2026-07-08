@@ -16,7 +16,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| B-072 | Market-hours check in order engine (DST-correct, injectable clock) | Done | 2026-07-07 | claude/serene-pasteur-af8a90 | Follow-up to B-043; see Completed Tasks |
+| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
 
 ---
 
