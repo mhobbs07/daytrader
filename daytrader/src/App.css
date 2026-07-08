@@ -735,3 +735,186 @@ button:disabled {
 .loading-pulse {
   animation: pulse 1.5s ease-in-out infinite;
 }
+
+/* ============================================================
+   Trading Section Layout
+   ============================================================ */
+
+.trading-section {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  padding: 0 1.5rem 1.5rem;
+}
+
+.trading-section-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 900px) {
+  .trading-section {
+    grid-template-columns: 1fr;
+  }
+
+  .trading-section-wide {
+    grid-column: span 1;
+  }
+}
+
+/* ============================================================
+   Trading Controls Component
+   ============================================================ */
+
+.trading-controls {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px var(--color-shadow);
+  height: 100%;
+}
+
+.trading-controls.error {
+  border-color: var(--color-red);
+}
+
+.automation-toggle-row {
+  margin-top: 0.5rem;
+}
+
+.automation-toggle {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 8px;
+}
+
+.automation-toggle.off {
+  color: var(--color-text-muted);
+  background-color: var(--color-bg);
+  border-color: var(--color-border);
+}
+
+.automation-toggle.on {
+  color: #ffffff;
+  background-color: var(--color-yellow);
+  border-color: var(--color-yellow);
+}
+
+.automation-note {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-bg);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-yellow);
+}
+
+.execution-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* ============================================================
+   Orders / Positions Panels
+   ============================================================ */
+
+.orders-panel,
+.positions-panel {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px var(--color-shadow);
+  height: 100%;
+  overflow-x: auto;
+}
+
+.orders-panel.error,
+.positions-panel.error {
+  border-color: var(--color-red);
+}
+
+.orders-section {
+  margin-top: 0.75rem;
+}
+
+.orders-section:first-of-type {
+  margin-top: 0.5rem;
+}
+
+.orders-empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: 0.875rem;
+  background-color: var(--color-bg);
+  border-radius: 6px;
+}
+
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+
+.orders-table th {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.orders-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.orders-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.orders-symbol {
+  font-weight: 600;
+}
+
+.side-buy {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.side-sell {
+  color: var(--color-red);
+  font-weight: 600;
+}
+
+.order-status {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background-color: var(--color-bg);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.pl-positive {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.pl-negative {
+  color: var(--color-red);
+  font-weight: 600;
+}
