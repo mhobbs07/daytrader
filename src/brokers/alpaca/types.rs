@@ -288,6 +288,68 @@ impl AlpacaBar {
     }
 }
 
+/// Bar from the historical bars REST endpoint (Market Data API v2)
+///
+/// Unlike the WebSocket [`AlpacaBar`], these carry no per-bar symbol — the
+/// symbol lives on the [`AlpacaBarsResponse`] envelope.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlpacaHistoricalBar {
+    #[serde(rename = "t")]
+    pub timestamp: DateTime<Utc>,
+    #[serde(rename = "o")]
+    pub open: f64,
+    #[serde(rename = "h")]
+    pub high: f64,
+    #[serde(rename = "l")]
+    pub low: f64,
+    #[serde(rename = "c")]
+    pub close: f64,
+    #[serde(rename = "v")]
+    pub volume: u64,
+}
+
+impl AlpacaHistoricalBar {
+    /// Converts to the domain Candle, attaching the requested symbol
+    ///
+    /// # Errors
+    ///
+    /// Rejects bars with an inverted range (high < low) or non-positive
+    /// prices — external input is validated at this boundary.
+    pub fn into_candle(self, symbol: &Symbol) -> Result<Candle, BrokerError> {
+        if self.high < self.low {
+            return Err(BrokerError::ApiError(format!(
+                "Invalid bar for {}: high {} < low {}",
+                symbol.as_str(),
+                self.high,
+                self.low
+            )));
+        }
+
+        AlpacaBar {
+            symbol: symbol.as_str().to_string(),
+            timestamp: self.timestamp,
+            open: self.open,
+            high: self.high,
+            low: self.low,
+            close: self.close,
+            volume: self.volume,
+        }
+        .into_candle()
+    }
+}
+
+/// Response envelope for `GET /v2/stocks/{symbol}/bars`
+///
+/// `bars` is `null` (not an empty array) when the window contains no data;
+/// `next_page_token` drives pagination and is `null` on the last page.
+#[derive(Debug, Deserialize)]
+pub struct AlpacaBarsResponse {
+    #[serde(default)]
+    pub bars: Option<Vec<AlpacaHistoricalBar>>,
+    #[serde(default)]
+    pub next_page_token: Option<String>,
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -446,5 +508,75 @@ mod tests {
     fn test_parse_decimal() {
         assert_eq!(parse_decimal("123.45").unwrap(), Decimal::new(12345, 2));
         assert!(parse_decimal("invalid").is_err());
+    }
+
+    #[test]
+    fn test_bars_response_deserializes_page() {
+        let json = r#"{
+            "bars": [
+                {"t": "2024-06-12T14:30:00Z", "o": 150.0, "h": 151.5, "l": 149.75, "c": 151.0, "v": 12345}
+            ],
+            "symbol": "AAPL",
+            "next_page_token": "abc123"
+        }"#;
+        let response: AlpacaBarsResponse = serde_json::from_str(json).unwrap();
+        let bars = response.bars.unwrap();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].volume, 12345);
+        assert_eq!(response.next_page_token.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn test_bars_response_deserializes_empty_window() {
+        // Alpaca returns null (not []) for windows with no data
+        let json = r#"{"bars": null, "symbol": "AAPL", "next_page_token": null}"#;
+        let response: AlpacaBarsResponse = serde_json::from_str(json).unwrap();
+        assert!(response.bars.is_none());
+        assert!(response.next_page_token.is_none());
+    }
+
+    #[test]
+    fn test_historical_bar_into_candle_valid() {
+        let bar = AlpacaHistoricalBar {
+            timestamp: "2024-06-12T14:30:00Z".parse().unwrap(),
+            open: 150.0,
+            high: 151.5,
+            low: 149.75,
+            close: 151.0,
+            volume: 42,
+        };
+        let symbol = Symbol::new("AAPL").unwrap();
+        let candle = bar.into_candle(&symbol).unwrap();
+        assert_eq!(candle.symbol, symbol);
+        assert_eq!(candle.volume, 42);
+        assert_eq!(candle.high.as_f64(), 151.5);
+    }
+
+    #[test]
+    fn test_historical_bar_into_candle_rejects_inverted_range() {
+        let bar = AlpacaHistoricalBar {
+            timestamp: "2024-06-12T14:30:00Z".parse().unwrap(),
+            open: 150.0,
+            high: 149.0, // below low
+            low: 149.75,
+            close: 151.0,
+            volume: 42,
+        };
+        let result = bar.into_candle(&Symbol::new("AAPL").unwrap());
+        assert!(matches!(result, Err(BrokerError::ApiError(_))));
+    }
+
+    #[test]
+    fn test_historical_bar_into_candle_rejects_non_positive_price() {
+        let bar = AlpacaHistoricalBar {
+            timestamp: "2024-06-12T14:30:00Z".parse().unwrap(),
+            open: 0.0, // Price::new rejects non-positive values
+            high: 151.5,
+            low: 0.0,
+            close: 151.0,
+            volume: 42,
+        };
+        let result = bar.into_candle(&Symbol::new("AAPL").unwrap());
+        assert!(matches!(result, Err(BrokerError::ApiError(_))));
     }
 }
