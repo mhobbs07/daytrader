@@ -95,6 +95,9 @@ pub struct ExecutionEngine {
 
     /// Execution metrics
     metrics: Arc<ExecutionMetrics>,
+
+    /// Time source for execution context (injectable for backtesting)
+    clock: Arc<dyn crate::utils::clock::Clock>,
 }
 
 /// Configuration for the execution engine
@@ -251,7 +254,19 @@ impl ExecutionEngine {
             pattern_automation,
             pattern_performance,
             metrics: Arc::new(ExecutionMetrics::new()),
+            clock: Arc::new(crate::utils::clock::SystemClock),
         })
+    }
+
+    /// Replaces the engine's time source
+    ///
+    /// Production uses the default [`crate::utils::clock::SystemClock`]; the
+    /// backtester injects a [`crate::utils::clock::SteppedClock`] so the
+    /// execution context (market-hours rules, timestamps) follows replay
+    /// time instead of wall-clock time.
+    pub fn with_clock(mut self, clock: Arc<dyn crate::utils::clock::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Starts the execution engine
@@ -290,6 +305,24 @@ impl ExecutionEngine {
     pub async fn stop(&self) {
         self.automation_enabled.store(false, Ordering::SeqCst);
         tracing::info!("Execution engine stopped");
+    }
+
+    /// Processes a single trading signal synchronously
+    ///
+    /// Same pipeline as the event-bus path used by [`Self::start`], but
+    /// callable directly so the backtester can replay history
+    /// deterministically (no event-delivery races between steps).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if context building, sizing, or order placement
+    /// fails. `Ok(None)` means the signal was consumed without an order
+    /// (automation off, below confidence threshold, strategy rejection).
+    pub async fn process_signal(
+        &self,
+        signal: TradingSignal,
+    ) -> Result<Option<OrderId>, ExecutionError> {
+        self.handle_signal(signal).await
     }
 
     /// Handles an incoming trading signal
@@ -437,7 +470,7 @@ impl ExecutionEngine {
             current_positions,
             daily_metrics,
             pattern_stats,
-            current_time: Utc::now(),
+            current_time: self.clock.now(),
         })
     }
 
@@ -699,6 +732,7 @@ impl ExecutionEngine {
             strategy: Arc::clone(&self.strategy),
             config: self.config.clone(),
             automation_enabled: Arc::clone(&self.automation_enabled),
+            clock: Arc::clone(&self.clock),
             pattern_automation: Arc::clone(&self.pattern_automation),
             pattern_performance: Arc::clone(&self.pattern_performance),
             metrics: Arc::clone(&self.metrics),

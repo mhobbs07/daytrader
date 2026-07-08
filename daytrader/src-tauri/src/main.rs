@@ -392,13 +392,15 @@ async fn main() {
                 {
                     // Snapshot candles inside the lock, then release it before
                     // awaiting: the std MutexGuard must not live across .await.
-                    let recent_candles = match market_cache.lock() {
+                    let mut recent_candles = match market_cache.lock() {
                         Ok(cache) => cache.get_recent_candles(&symbol, 50).unwrap_or_default(),
                         Err(_) => continue,
                     };
                     if recent_candles.is_empty() {
                         continue;
                     }
+                    // detect_all expects newest-first; the cache is chronological
+                    recent_candles.reverse();
 
                     let patterns = pattern_registry.detect_all(&recent_candles, None).await;
                     for pattern_result in patterns {

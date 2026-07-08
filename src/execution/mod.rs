@@ -46,11 +46,13 @@
 //! # }
 //! ```
 
+pub mod backtest;
 pub mod engine;
 pub mod rules;
 pub mod strategy;
 
 // Re-export primary types
+pub use backtest::{BacktestConfig, BacktestEngine, BacktestReport};
 pub use engine::{ExecutionConfig, ExecutionEngine, ExecutionMetrics};
 pub use rules::{EntryRule, ExitRule, RuleEngine, RuleEvaluation};
 pub use strategy::ExecutionContext;

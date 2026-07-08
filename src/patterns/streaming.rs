@@ -373,8 +373,12 @@ impl PatternStreamingPipeline {
             return Ok(());
         }
 
-        // Step 3: Detect patterns
-        let pattern_results = pattern_registry.detect_all(&cached_candles, None).await;
+        // Step 3: Detect patterns. Detectors index candles newest-first
+        // (candles[0] is the bar under evaluation), while the cache — and the
+        // signal engine's context analysis below — are chronological, so the
+        // detection window is a reversed copy.
+        let detection_window: Vec<Candle> = cached_candles.iter().rev().cloned().collect();
+        let pattern_results = pattern_registry.detect_all(&detection_window, None).await;
 
         // Step 4: Publish PatternDetected events
         for pattern_result in &pattern_results {
