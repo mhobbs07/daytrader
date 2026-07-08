@@ -60,22 +60,29 @@ impl EventBridge {
                 app_handle.emit("market_data:new_candle", &*candle)?;
             }
             MarketEvent::QuoteUpdate { symbol, quote } => {
-                // Convert events::Quote to brokers::Quote for cache
+                // Convert events::Quote to brokers::Quote for cache.
+                // events::Quote carries no last-trade price; use the bid/ask
+                // midpoint as the documented proxy rather than the bid, which
+                // downstream consumers would mistake for a real trade price.
+                let last =
+                    daytrader::brokers::types::Price::new(quote.mid_price()).unwrap_or(quote.bid);
                 let broker_quote = daytrader::brokers::traits::Quote {
                     symbol: symbol.clone(),
                     bid: quote.bid,
                     ask: quote.ask,
-                    last: quote.bid, // Use bid as last price for now
+                    last,
                     bid_size: quote.bid_size.value(),
                     ask_size: quote.ask_size.value(),
                     timestamp: quote.timestamp,
                 };
+                // Emit to frontend with the symbol included (the inner Quote
+                // struct has no symbol field, which the frontend keys on)
+                let payload = crate::commands::market_data::QuoteResponse::from(&broker_quote);
                 // Update cache
                 if let Ok(mut cache) = market_cache.lock() {
                     cache.update_quote(symbol.to_string(), broker_quote);
                 }
-                // Emit to frontend
-                app_handle.emit("market_data:quote_update", &quote)?;
+                app_handle.emit("market_data:quote_update", payload)?;
             }
             MarketEvent::PatternDetected { signal } => {
                 // Update cache

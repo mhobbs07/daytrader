@@ -19,21 +19,7 @@ pub async fn get_latest_quote(
         .ok_or_else(|| format!("No quote available for {}", symbol))?;
 
     // 3. Convert to response type
-    let bid = quote.bid.as_f64();
-    let ask = quote.ask.as_f64();
-    // Use cached last price if available; fall back to midpoint
-    let last = if quote.last.as_f64() > 0.0 {
-        quote.last.as_f64()
-    } else {
-        (bid + ask) / 2.0
-    };
-    Ok(QuoteResponse {
-        symbol: symbol.to_string(),
-        bid,
-        ask,
-        last,
-        timestamp: quote.timestamp.to_rfc3339(),
-    })
+    Ok(QuoteResponse::from(&quote))
 }
 
 #[tauri::command]
@@ -101,14 +87,79 @@ pub async fn unsubscribe_symbol(symbol: String, state: State<'_, AppState>) -> R
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct QuoteResponse {
     pub symbol: String,
     pub bid: f64,
     pub ask: f64,
-    /// Last traded price. Uses ask as proxy when no last trade is available.
+    /// Last traded price. Falls back to the bid/ask midpoint when no last trade is available.
     pub last: f64,
     pub timestamp: String,
+}
+
+impl From<&Quote> for QuoteResponse {
+    fn from(quote: &Quote) -> Self {
+        let bid = quote.bid.as_f64();
+        let ask = quote.ask.as_f64();
+        // Use last trade price if available; fall back to midpoint
+        let last = if quote.last.as_f64() > 0.0 {
+            quote.last.as_f64()
+        } else {
+            (bid + ask) / 2.0
+        };
+        Self {
+            symbol: quote.symbol.to_string(),
+            bid,
+            ask,
+            last,
+            timestamp: quote.timestamp.to_rfc3339(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+    use daytrader::brokers::types::Price;
+    use rust_decimal::Decimal;
+
+    fn sample_quote(last_cents: i64) -> Quote {
+        Quote {
+            symbol: Symbol::new("AAPL").unwrap(),
+            bid: Price::new(Decimal::new(15000, 2)).unwrap(),
+            ask: Price::new(Decimal::new(15010, 2)).unwrap(),
+            last: Price::new(Decimal::new(last_cents, 2)).unwrap(),
+            bid_size: 100,
+            ask_size: 200,
+            timestamp: Utc.with_ymd_and_hms(2026, 7, 6, 14, 30, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn test_quote_response_from_quote_includes_symbol() {
+        let response = QuoteResponse::from(&sample_quote(15005));
+
+        assert_eq!(response.symbol, "AAPL");
+        assert_eq!(response.bid, 150.0);
+        assert_eq!(response.ask, 150.10);
+        assert_eq!(response.last, 150.05);
+        assert_eq!(response.timestamp, "2026-07-06T14:30:00+00:00");
+    }
+
+    /// The `market_data:quote_update` Tauri event emits this exact payload;
+    /// the frontend keys quotes by `payload.symbol`, so the serialized JSON
+    /// must contain a `symbol` field (regression test for the missing-symbol bug).
+    #[test]
+    fn test_quote_update_event_json_contains_symbol() {
+        let json = serde_json::to_value(QuoteResponse::from(&sample_quote(15005))).unwrap();
+
+        assert_eq!(json["symbol"], "AAPL");
+        assert_eq!(json["bid"], 150.0);
+        assert_eq!(json["ask"], 150.10);
+        assert_eq!(json["last"], 150.05);
+        assert_eq!(json["timestamp"], "2026-07-06T14:30:00+00:00");
+    }
 }
 
 #[derive(serde::Serialize)]
