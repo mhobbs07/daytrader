@@ -8,9 +8,10 @@
 //! session using the IANA tz database (via `chrono-tz`), so callers never
 //! need to hardcode an offset.
 //!
-//! This module intentionally does not know about market holidays — pair it
-//! with [`crate::utils::holidays::MarketHolidayCalendar`] when a caller also
-//! needs to skip non-trading days.
+//! The session-boundary functions intentionally do not know about market
+//! holidays; [`is_market_open`] composes them with
+//! [`crate::utils::holidays`] for callers that also need to skip
+//! non-trading days (weekends and holidays).
 //!
 //! # Examples
 //!
@@ -97,6 +98,41 @@ pub fn is_market_hours(instant: DateTime<Utc>) -> Result<bool, MarketHoursError>
     let open = market_open_utc(et_date)?;
     let close = market_close_utc(et_date)?;
     Ok(instant >= open && instant < close)
+}
+
+/// Returns `true` if `instant` falls within regular trading hours on a
+/// trading day: [`is_market_hours`] combined with the weekend/holiday check
+/// from [`crate::utils::holidays::is_business_day`].
+///
+/// This is the complete "may I trade right now" gate for order flow.
+///
+/// # Errors
+///
+/// Returns [`MarketHoursError`] if the session boundaries for the
+/// Eastern-time calendar date of `instant` cannot be computed. Callers
+/// gating order submission should treat an error as "market closed"
+/// (fail closed).
+///
+/// # Examples
+///
+/// ```
+/// use daytrader::utils::market_hours::is_market_open;
+/// use chrono::{TimeZone, Utc};
+///
+/// // Wednesday 2024-06-12 15:00 UTC == 11:00 EDT -> open
+/// let midweek = Utc.with_ymd_and_hms(2024, 6, 12, 15, 0, 0).unwrap();
+/// assert!(is_market_open(midweek).unwrap());
+///
+/// // Saturday at the same wall time -> closed
+/// let saturday = Utc.with_ymd_and_hms(2024, 6, 15, 15, 0, 0).unwrap();
+/// assert!(!is_market_open(saturday).unwrap());
+/// ```
+pub fn is_market_open(instant: DateTime<Utc>) -> Result<bool, MarketHoursError> {
+    let et_date = instant.with_timezone(&New_York).date_naive();
+    if !crate::utils::holidays::is_business_day(et_date) {
+        return Ok(false);
+    }
+    is_market_hours(instant)
 }
 
 /// How to resolve an ambiguous (fall-back, repeated-hour) local time.
@@ -290,6 +326,36 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("25"));
         assert!(msg.contains("61"));
+    }
+
+    #[test]
+    fn test_is_market_open_weekend_returns_closed() {
+        // Saturday/Sunday 2024-06-15/16 at 15:00 UTC — in-session wall time
+        // but not a trading day.
+        let saturday = Utc.with_ymd_and_hms(2024, 6, 15, 15, 0, 0).unwrap();
+        assert!(!is_market_open(saturday).unwrap());
+        let sunday = Utc.with_ymd_and_hms(2024, 6, 16, 15, 0, 0).unwrap();
+        assert!(!is_market_open(sunday).unwrap());
+    }
+
+    #[test]
+    fn test_is_market_open_holiday_returns_closed() {
+        // Independence Day 2024 (Thursday July 4), 15:00 UTC == 11:00 EDT.
+        let july_fourth = Utc.with_ymd_and_hms(2024, 7, 4, 15, 0, 0).unwrap();
+        assert!(!is_market_open(july_fourth).unwrap());
+        // Christmas 2024 (Wednesday December 25), 15:00 UTC == 10:00 EST.
+        let christmas = Utc.with_ymd_and_hms(2024, 12, 25, 15, 0, 0).unwrap();
+        assert!(!is_market_open(christmas).unwrap());
+    }
+
+    #[test]
+    fn test_is_market_open_business_day_in_session_returns_open() {
+        // Wednesday 2024-06-12 15:00 UTC == 11:00 EDT.
+        let midweek = Utc.with_ymd_and_hms(2024, 6, 12, 15, 0, 0).unwrap();
+        assert!(is_market_open(midweek).unwrap());
+        // Same day after the close (21:00 UTC == 17:00 EDT) is closed.
+        let after_close = Utc.with_ymd_and_hms(2024, 6, 12, 21, 0, 0).unwrap();
+        assert!(!is_market_open(after_close).unwrap());
     }
 
     #[test]
