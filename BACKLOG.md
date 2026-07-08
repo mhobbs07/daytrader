@@ -16,7 +16,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| B-072 | Market-hours check in order engine (DST-correct, injectable clock) | Done | 2026-07-07 | claude/serene-pasteur-af8a90 | Follow-up to B-043; see Completed Tasks |
+| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
 
 ---
 
@@ -31,7 +31,8 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-068 | Run doctests in the verification pipeline (`cargo test --doc`); known pre-existing doctest failures in risk/limits.rs flagged in PR #20 | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
 | B-070 | Architecture reconciliation: 52 hidden boundary violations found when checker was tightened to catch inline qualified paths — patterns<->risk is circular (risk->patterns already eliminated by B-058), db -> risk/orders/positions inverts layering, domain -> db breaks isolation, events -> patterns. Baselined (ratchet) in `.governance/architecture_violations_baseline.txt`; burn down edge by edge | Medium | 2026-07-06 checker fix | `src/patterns/signals.rs`, `src/db/`, `src/domain/`, `src/events/types.rs` |
 | B-064 | Dead code cleanup: vestigial `daytrader/src-tauri/src/lib.rs` (`greet`), unused `patternStore.loadStatistics`, unused `get_detected_patterns_for_symbol` (wire up or remove) | Medium | 2026-07-06 audit | `daytrader/` |
-| B-071 | Fix `mock` cargo feature compile errors in src/db/mock.rs (HashSet on non-Eq/Hash type, temporary borrow); pipeline never builds `--features mock` so they persist | Medium | B-062/063 agent finding | `src/db/mock.rs`, `scripts/` |
+| B-074 | Clean up ~130 accumulated clippy/rustc warnings so `cargo clippy -- -D warnings` passes (documented invariant; GitHub CI enforces it and failed on PR #24; local pipeline is warn-only with a TODO to tighten — tighten it once clean) | Medium | 2026-07-07 PR #24 CI failure | `src/` (risk, positions, orders, brokers, events, db, utils) |
+| B-075 | Fix GitHub CI for sqlx macros: docs + test jobs fail with "set DATABASE_URL" because CI provisions no database (commit `.sqlx/` offline cache via `cargo sqlx prepare` + set `SQLX_OFFLINE=true`, or provision sqlite in workflows); also CI triggers only on PRs to main/develop, so staging PRs get zero CI — NEEDS OWNER APPROVAL (CI/CD change) | Medium | 2026-07-07 PR #24 CI failure | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
 
 ### Priority: Low (Enhancements)
 
@@ -101,6 +102,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-059 | Production unwrap/expect removal | 2026-07-07 | PRs #13/#20/#22 (split by file owner) | verify full + ratchet | alpaca/rest.rs expect (PR #13), limits.rs try_from_config with fail-safe halt (PR #20), engine.rs placeholder fallbacks eliminated (PR #22); baseline entries removed |
 | B-058 | Real day-trade detection in RiskEngine | 2026-07-07 | fix/b058-risk-engine-day-trades (PR #22) | verify full (312 unit tests) | predicts_day_trade pre-trade lookahead + PositionTracker::process_fill ground truth feeding PdtEnforcer (single counter); specific RiskViolationType variants; risk->patterns architecture edge eliminated (baseline 3 to 0); pending-order lifecycle incl. cancel/reject cleanup |
 | B-072 | Market-hours check in order engine | 2026-07-07 | claude/serene-pasteur-af8a90 (PR #25) | verify_agent_work.sh full pass | utils/market_hours::is_market_open (B-043 session check + holidays::is_business_day) + utils/clock (Clock trait, SystemClock/FixedClock); place_order step 2 rejects with MarketClosed on closed market/weekend/holiday or check error (fail closed); engine tests pinned to fixed in-session clock |
+| B-071 | Fix mock feature compile errors in MockPdtRepository::get_day_trade_summary | 2026-07-07 | claude/epic-grothendieck-7746f9 (PR #24) | cargo test --lib --features mock (full suite green) | E0716: temporary `&vec![]` dropped while borrowed (replaced with longer-lived empty Vec binding); E0277: unique_symbols collected whole DayTradeRecord structs into HashSet without Eq/Hash (now maps to &t.symbol); 2 regression tests merged into B-063's test module; undetected because verify pipeline never built --features mock — pipeline now runs it as step 5 |
 
 ---
 

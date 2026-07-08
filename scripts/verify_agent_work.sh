@@ -2,8 +2,8 @@
 # =============================================================================
 # Agent Work Verification Pipeline
 # This script MUST pass before any commit of agent-generated code.
-# Runs: format → compile → lint → unit tests → integration tests →
-#        docs → architecture → test quality → backlog check
+# Runs: format → compile → lint → unit tests → mock-feature tests →
+#        integration tests → docs → architecture → test quality → backlog check
 # =============================================================================
 set -uo pipefail
 
@@ -21,7 +21,7 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
-TOTAL_STEPS=11
+TOTAL_STEPS=12
 PASSED=0
 FAILED=0
 SKIPPED=0
@@ -143,8 +143,40 @@ else
     step_fail "Unit tests (exit ${TEST_STATUS}, ${TEST_FAILED} failed)"
 fi
 
-# ===== Step 5: Integration Tests =====
-echo -e "${BLUE}[5/${TOTAL_STEPS}] Running integration tests...${NC}"
+# ===== Step 5: Mock-Feature Unit Tests =====
+echo -e "${BLUE}[5/${TOTAL_STEPS}] Running unit tests with mock feature (cargo test --lib --features mock)...${NC}"
+# The mock feature (src/db/mock.rs) is compiled by nothing else in this
+# pipeline, so it rotted silently for months with compile errors. The feature
+# is a superset of the default `database` feature, so this also re-runs the
+# step-4 tests; the extra lib build is the price of keeping the feature alive.
+# Same cold-cache handling as step 4: the mock feature is a distinct cfg set,
+# so compile untimed first and let the timeout cover only test execution.
+cargo test --lib --features mock --no-run 2>&1 | tail -3
+MOCK_TEST_OUTPUT=$(timeout 120 cargo test --lib --features mock 2>&1)
+MOCK_TEST_STATUS=$?
+MOCK_TEST_PASSED=$(echo "$MOCK_TEST_OUTPUT" | grep -oE '[0-9]+ passed' | awk '{s+=$1} END {print s+0}')
+MOCK_TEST_FAILED=$(echo "$MOCK_TEST_OUTPUT" | grep -oE '[0-9]+ failed' | awk '{s+=$1} END {print s+0}')
+if [ "$MOCK_TEST_STATUS" -eq 124 ]; then
+    echo -e "  ${RED}Timed out after 120s of test execution (build was already complete)${NC}"
+    step_fail "Mock-feature unit tests (timed out)"
+elif [ "$MOCK_TEST_STATUS" -eq 0 ]; then
+    step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed)"
+elif [ "$MOCK_TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
+    KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
+    if [ "$MOCK_TEST_FAILED" -le "$KNOWN_COUNT" ]; then
+        echo -e "  ${YELLOW}${MOCK_TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
+        step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed, ${MOCK_TEST_FAILED} known failures)"
+    else
+        echo "$MOCK_TEST_OUTPUT" | grep "FAILED"
+        step_fail "Mock-feature unit tests (${MOCK_TEST_FAILED} failures exceed ${KNOWN_COUNT} known issues)"
+    fi
+else
+    echo "$MOCK_TEST_OUTPUT" | grep -E "FAILED|error" | head -10
+    step_fail "Mock-feature unit tests (exit ${MOCK_TEST_STATUS}, ${MOCK_TEST_FAILED} failed)"
+fi
+
+# ===== Step 6: Integration Tests =====
+echo -e "${BLUE}[6/${TOTAL_STEPS}] Running integration tests...${NC}"
 # Skip only when neither the staged set NOR the working tree touches .rs/.toml
 # (checking staged-only silently skipped integration tests for unstaged work).
 CHANGED_SRC=$( { git diff --cached --name-only; git diff HEAD --name-only; } 2>/dev/null | sort -u | grep -E '\.(rs|toml)$' || true)
@@ -158,16 +190,16 @@ else
     step_skip "Integration tests" "no .rs/.toml changes staged or in working tree"
 fi
 
-# ===== Step 6: Documentation =====
-echo -e "${BLUE}[6/${TOTAL_STEPS}] Checking documentation compiles (cargo doc)...${NC}"
+# ===== Step 7: Documentation =====
+echo -e "${BLUE}[7/${TOTAL_STEPS}] Checking documentation compiles (cargo doc)...${NC}"
 if cargo doc --no-deps 2>&1; then
     step_pass "Documentation"
 else
     step_fail "Documentation"
 fi
 
-# ===== Step 7: Architecture Boundaries =====
-echo -e "${BLUE}[7/${TOTAL_STEPS}] Verifying architecture boundaries...${NC}"
+# ===== Step 8: Architecture Boundaries =====
+echo -e "${BLUE}[8/${TOTAL_STEPS}] Verifying architecture boundaries...${NC}"
 if [ -x "./scripts/verify_architecture.sh" ]; then
     if ./scripts/verify_architecture.sh 2>&1; then
         step_pass "Architecture boundaries"
@@ -178,8 +210,8 @@ else
     step_skip "Architecture boundaries" "verify_architecture.sh not found or not executable"
 fi
 
-# ===== Step 8: Test Quality =====
-echo -e "${BLUE}[8/${TOTAL_STEPS}] Verifying test quality...${NC}"
+# ===== Step 9: Test Quality =====
+echo -e "${BLUE}[9/${TOTAL_STEPS}] Verifying test quality...${NC}"
 if [ -x "./scripts/verify_test_quality.sh" ]; then
     if ./scripts/verify_test_quality.sh 2>&1; then
         step_pass "Test quality"
@@ -190,8 +222,8 @@ else
     step_skip "Test quality" "verify_test_quality.sh not found or not executable"
 fi
 
-# ===== Step 9: Production Safety =====
-echo -e "${BLUE}[9/${TOTAL_STEPS}] Verifying production safety (unwrap/std::sync)...${NC}"
+# ===== Step 10: Production Safety =====
+echo -e "${BLUE}[10/${TOTAL_STEPS}] Verifying production safety (unwrap/std::sync)...${NC}"
 if [ -x "./scripts/verify_production_safety.sh" ]; then
     if ./scripts/verify_production_safety.sh 2>&1; then
         step_pass "Production safety"
@@ -202,8 +234,8 @@ else
     step_skip "Production safety" "verify_production_safety.sh not found or not executable"
 fi
 
-# ===== Step 10: Frontend Build =====
-echo -e "${BLUE}[10/${TOTAL_STEPS}] Checking frontend build (tsc + vite)...${NC}"
+# ===== Step 11: Frontend Build =====
+echo -e "${BLUE}[11/${TOTAL_STEPS}] Checking frontend build (tsc + vite)...${NC}"
 CHANGED_FRONTEND=$( { git diff --cached --name-only; git diff HEAD --name-only; } 2>/dev/null | sort -u | grep -E '^daytrader/(src/|package\.json|tsconfig|vite)' || true)
 if [ -z "$CHANGED_FRONTEND" ]; then
     step_skip "Frontend build" "no daytrader/ frontend changes staged or in working tree"
@@ -221,8 +253,8 @@ else
     fi
 fi
 
-# ===== Step 11: Backlog Updated =====
-echo -e "${BLUE}[11/${TOTAL_STEPS}] Checking BACKLOG.md was updated...${NC}"
+# ===== Step 12: Backlog Updated =====
+echo -e "${BLUE}[12/${TOTAL_STEPS}] Checking BACKLOG.md was updated...${NC}"
 BACKLOG_CHANGED=$(git diff --cached --name-only 2>/dev/null | grep 'BACKLOG.md' || true)
 SRC_CHANGED=$(git diff --cached --name-only 2>/dev/null | grep -E '^src/' || true)
 if [ -n "$BACKLOG_CHANGED" ]; then
