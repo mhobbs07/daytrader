@@ -340,6 +340,87 @@ impl OrderEngine {
         self.tracker.get_archived_orders().await
     }
 
+    /// Polls the broker for status changes on all submitted active orders
+    ///
+    /// For each active order that has a broker order ID, fetches the broker's
+    /// view and applies any status transition through the tracker, which
+    /// publishes the corresponding lifecycle events (`OrderFilled`,
+    /// `OrderCancelled`, ...) and archives terminal orders. The database row
+    /// is updated for every applied transition.
+    ///
+    /// Intended to be called periodically by the application runtime; brokers
+    /// without push-based order updates (REST polling, the mock broker) get
+    /// their fills surfaced this way.
+    ///
+    /// Returns the number of orders whose status changed. Per-order broker
+    /// errors are logged and skipped so one bad order cannot stall the sweep.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if applying a status transition to the tracker fails.
+    pub async fn sync_order_statuses(&self) -> Result<usize, OrderError> {
+        let mut updated = 0;
+
+        for order in self.tracker.get_active_orders() {
+            let Some(broker_order_id) = order.broker_order_id.clone() else {
+                continue;
+            };
+
+            let broker_order = match self.broker.get_order(&OrderId::new(&broker_order_id)).await {
+                Ok(broker_order) => broker_order,
+                Err(e) => {
+                    warn!(
+                        order_id = %order.id,
+                        broker_order_id = %broker_order_id,
+                        error = %e,
+                        "Failed to poll broker order status"
+                    );
+                    continue;
+                }
+            };
+
+            if broker_order.status == order.status {
+                continue;
+            }
+
+            let fill_info = match broker_order.status {
+                crate::brokers::traits::OrderStatus::Filled
+                | crate::brokers::traits::OrderStatus::PartiallyFilled => {
+                    match (
+                        crate::brokers::types::Quantity::new(broker_order.filled_quantity),
+                        broker_order.filled_avg_price,
+                    ) {
+                        (Ok(filled_quantity), Some(filled_price)) => {
+                            Some(crate::orders::types::FillInfo {
+                                filled_quantity,
+                                filled_price,
+                                commission: Decimal::ZERO,
+                                timestamp: broker_order.filled_at.unwrap_or_else(Utc::now),
+                            })
+                        }
+                        _ => {
+                            warn!(
+                                order_id = %order.id,
+                                "Broker reported fill without quantity/price; skipping"
+                            );
+                            continue;
+                        }
+                    }
+                }
+                _ => None,
+            };
+
+            self.tracker
+                .update_order_status(&order.id, broker_order.status, fill_info)
+                .await?;
+            self.update_order_status_in_db(&OrderId::new(&broker_order_id), broker_order.status)
+                .await?;
+            updated += 1;
+        }
+
+        Ok(updated)
+    }
+
     // ========================================================================
     // Validation Methods
     // ========================================================================
@@ -728,6 +809,120 @@ mod tests {
 
         assert!(order.pre_trade_validation_passed);
         assert!(order.broker_order_id.is_some());
+    }
+
+    /// Builds an engine backed by a real `MockBroker` (auto-fill on) so the
+    /// submit -> poll -> fill lifecycle can be exercised end to end.
+    async fn create_test_engine_with_auto_fill_broker() -> (OrderEngine, Arc<EventBus>) {
+        use crate::brokers::mock::{MockBroker, MockConfig};
+        use crate::orders::broker_adapter::AlpacaAdapter;
+
+        let event_bus = Arc::new(EventBus::new(1000));
+
+        let risk_engine = Arc::new(RiskEngine::new(
+            RiskConfig {
+                max_daily_loss_dollars: 500.0,
+                max_daily_loss_percent: 2.0,
+                halt_trading_on_limit: true,
+                max_position_size_dollars: 5000.0,
+                max_position_size_percent: 10.0,
+                max_concurrent_positions: 5,
+                enforce_pdt_rule: true,
+                pdt_min_equity: 25000.0,
+                max_day_trades_under_pdt: 3,
+                max_trades_per_pattern_per_day: 5,
+                stop_pattern_after_consecutive_losses: 3,
+                required_win_rate_for_auto: 60.0,
+                min_pattern_sample_size: 20,
+                min_account_balance: 1000.0,
+                emergency_liquidate_threshold: 500.0,
+                pattern_profiles: HashMap::new(),
+                confidence_multipliers: vec![],
+                pattern_performance_thresholds:
+                    crate::risk::types::PatternPerformanceThresholds::default(),
+            },
+            Arc::clone(&event_bus),
+            AccountId::new("test-account"),
+            Decimal::new(5000000, 2),
+        ));
+
+        let broker = Arc::new(MockBroker::new(MockConfig {
+            auto_fill_orders: true,
+            ..MockConfig::default()
+        }));
+        // AlpacaAdapter is a plain passthrough over any OrderExecutionProvider,
+        // so submitted orders land in the mock's own order store and the ids
+        // returned by submit_order resolve on the poll path.
+        let broker_adapter = Arc::new(AlpacaAdapter::new(broker.clone()));
+
+        let db_pool = Arc::new(sqlx::SqlitePool::connect(":memory:").await.unwrap());
+        sqlx::query(include_str!("../db/schema.sql"))
+            .execute(&*db_pool)
+            .await
+            .unwrap();
+        sqlx::query!("INSERT INTO accounts (broker, account_number, account_type) VALUES ('alpaca', 'test-account', 'paper')")
+            .execute(&*db_pool)
+            .await
+            .unwrap();
+
+        let engine = OrderEngine::new(
+            broker,
+            risk_engine,
+            broker_adapter,
+            Arc::clone(&event_bus),
+            db_pool,
+            1,
+            OrderConfig::default(),
+        )
+        .with_clock(open_market_clock());
+
+        (engine, event_bus)
+    }
+
+    #[tokio::test]
+    async fn test_sync_order_statuses_applies_fill_and_publishes_event() {
+        let (engine, event_bus) = create_test_engine_with_auto_fill_broker().await;
+        let mut receiver = event_bus.subscribe();
+
+        let limit = crate::brokers::types::Price::new(Decimal::new(15000, 2)).unwrap();
+        let request = OrderRequest::builder()
+            .symbol(Symbol::new("AAPL").unwrap())
+            .side(OrderSide::Buy)
+            .order_type(OrderType::Limit)
+            .quantity(Quantity::new(10).unwrap())
+            .limit_price(limit)
+            .build()
+            .unwrap();
+
+        let order_id = engine.place_order(request).await.unwrap();
+
+        let updated = engine.sync_order_statuses().await.unwrap();
+        assert_eq!(updated, 1);
+
+        // Filled orders are terminal, so the order moves to the archive
+        let order = engine.get_order(&order_id).await.unwrap();
+        assert_eq!(order.status, crate::brokers::traits::OrderStatus::Filled);
+        assert_eq!(order.filled_avg_price, Some(limit));
+        assert!(engine.get_active_orders().is_empty());
+
+        // An OrderFilled event must have been published for the risk engine
+        let mut saw_fill = false;
+        while let Ok(event) = receiver.try_recv() {
+            if let crate::events::types::MarketEvent::OrderFilled { fill, .. } = event {
+                assert_eq!(fill.filled_price, limit);
+                saw_fill = true;
+            }
+        }
+        assert!(saw_fill, "expected an OrderFilled event on the bus");
+    }
+
+    #[tokio::test]
+    async fn test_sync_order_statuses_no_change_returns_zero() {
+        let (engine, _event_bus) = create_test_engine_with_auto_fill_broker().await;
+
+        // No orders placed: nothing to sync
+        let updated = engine.sync_order_statuses().await.unwrap();
+        assert_eq!(updated, 0);
     }
 
     #[tokio::test]

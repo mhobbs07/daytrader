@@ -1,3 +1,4 @@
+pub mod execution;
 pub mod market_data;
 pub mod patterns;
 pub mod risk;

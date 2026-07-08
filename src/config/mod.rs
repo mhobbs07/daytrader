@@ -32,7 +32,11 @@ pub struct AppConfig {
 pub struct BrokerConfig {
     pub provider: String,
     pub is_paper: bool,
+    /// Credentials come from the environment (`ALPACA_API_KEY`), never from
+    /// the config file, so these fields default to empty when absent.
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub api_secret: String,
 }
 

@@ -783,6 +783,15 @@ impl RiskEngine {
         &self.position_sizer
     }
 
+    /// Gets the engine's position tracker
+    ///
+    /// The risk engine feeds this tracker from `OrderFilled` events; consumers
+    /// (execution engine, UI state) must share this instance rather than
+    /// constructing their own, or they will never observe fills.
+    pub fn position_tracker(&self) -> &Arc<PositionTracker> {
+        &self.position_tracker
+    }
+
     /// Gets access to the risk configuration
     pub fn config(&self) -> &RiskConfig {
         &self.config
@@ -833,6 +842,36 @@ mod tests {
         assert_eq!(state.daily_pl, Decimal::ZERO);
         assert_eq!(state.day_trade_count, 0);
         assert!(!state.is_trading_halted);
+    }
+
+    #[tokio::test]
+    async fn test_position_tracker_accessor_returns_shared_instance() {
+        let config = create_test_risk_config();
+        let event_bus = Arc::new(EventBus::new(1000));
+        let engine = RiskEngine::new(
+            config,
+            event_bus,
+            AccountId::new("test-account"),
+            Decimal::new(5000000, 2),
+        );
+
+        let symbol = crate::brokers::types::Symbol::new("AAPL").unwrap();
+        let tracker = Arc::clone(engine.position_tracker());
+        tracker
+            .process_fill(
+                &symbol,
+                crate::events::types::OrderSide::Buy,
+                100,
+                Decimal::new(15000, 2),
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        // A fill applied through the returned handle must be visible via the
+        // engine's own tracker — same instance, not a copy
+        let position = engine.position_tracker().get_position(&symbol).await;
+        assert!(position.is_some(), "fill must land in the shared tracker");
     }
 
     #[tokio::test]
