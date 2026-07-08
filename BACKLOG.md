@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis-and-backlog-completion-strategy.md`)
+Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-07-06-gap-analysis-and-backlog-completion-strategy.md`; all Critical/High and implementable Medium tasks Done; remaining: 6 Medium follow-ups, 8 Low enhancements, B-061 blocked on human decision, MCP track deferred)
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -16,34 +16,22 @@ Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| B-069 | Fix Tauri app binary compilation (23 errors invisible to pipeline) | In Progress | 2026-07-06 | fix/tauri-app-compile | Unified duplicate Candle type; wired holidays + position_tracker modules; pipeline now checks --workspace |
+| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
 
 ---
 
 ## Pending Tasks
 
-### Priority: High (Compliance Correctness — 2026-07-06 audit)
-
-| ID | Task | Priority | Source | Scope |
-|----|------|----------|--------|-------|
-| B-058 | Implement day-trade detection in RiskEngine (currently stubbed to `false`); reconcile RiskEngine vs PdtEnforcer double-tracking; specific RiskViolationType variants | High | risk/engine.rs:254,310,266 TODOs | `src/risk/engine.rs` |
-| B-059 | Remove production-path `.unwrap()`/`.expect()`: risk/limits.rs from_config (panics on NaN/inf config), risk/engine.rs placeholder fallbacks, alpaca/rest.rs client builder | High | 2026-07-06 audit | `src/risk/limits.rs`, `src/risk/engine.rs`, `src/brokers/alpaca/rest.rs` |
-| B-062 | Implement `get_recent_risk_violations` DB query (currently stub returning `[]`; also masks DB errors as "no violations") | High | commands/risk.rs:184,543 TODO | `daytrader/src-tauri/src/commands/risk.rs`, `src/db/` |
-
 ### Priority: Medium (Quality & Completeness)
 
 | ID | Task | Priority | Source | Scope |
 |----|------|----------|--------|-------|
-| B-036 | Add TypeScript types module: `daytrader/src/types/` with market, pattern, system, risk types | Medium | plans/tauri-thin-slice-plan.md; partial commit 7074a2a on worktree-agent-a00587c1 | `daytrader/src/types/` (new) |
-| B-037 | Add React custom hooks: `useMarketData`, `usePatterns`, `useTauriEvents` | Medium | plans/tauri-thin-slice-plan.md | `daytrader/src/hooks/` (new) |
-| B-039 | Extend App.tsx to support multi-symbol watchlist (not just AAPL hardcoded) | Medium | codebase audit | `daytrader/src/App.tsx` |
-| B-043 | ET session-boundary handling: replace fixed UTC hour offsets with `chrono-tz` America/New_York (open/close off by 1h part of year); note: core timestamps are already all-UTC, classic DST bug not present | Medium | 2026-07-06 audit | `src/risk/`, `src/utils/`, Cargo.toml |
 | B-066 | Implement concrete SQLite `PdtRepositoryTrait` and wire into AppState/PdtEnforcer (PDT enforcement currently in-memory only; day-trade history and audit commands return empty fallbacks) | Medium | 2026-07-06 tauri compile fix | `src/db/`, `daytrader/src-tauri/src/state.rs` |
 | B-067 | Unify Quote types (`brokers::traits::Quote` has symbol/last/u32 sizes vs `events::types::Quote` with Quantity sizes) or document the boundary mapping as intentional | Medium | 2026-07-06 Candle-unification analysis | `src/brokers/traits.rs`, `src/events/types.rs` |
-| B-068 | Run doctests in the verification pipeline (`cargo test --doc`); the deleted events::Candle doc example could never compile and was never caught | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
-| B-063 | Fix `std::sync::RwLock` usage violating concurrency rule | Medium | 2026-07-06 audit | `src/db/mock.rs`, `src/utils/holidays.rs` |
-| B-070 | Architecture reconciliation: 52 hidden boundary violations found when checker was tightened to catch inline qualified paths — patterns<->risk is circular, db -> risk/orders/positions inverts layering, domain -> db breaks isolation, events -> patterns. Baselined (ratchet) in `.governance/architecture_violations_baseline.txt`; burn down edge by edge | Medium | 2026-07-06 checker fix | `src/patterns/signals.rs`, `src/risk/engine.rs`, `src/db/`, `src/domain/`, `src/events/types.rs` |
+| B-068 | Run doctests in the verification pipeline (`cargo test --doc`); known pre-existing doctest failures in risk/limits.rs flagged in PR #20 | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
+| B-070 | Architecture reconciliation: 52 hidden boundary violations found when checker was tightened to catch inline qualified paths — patterns<->risk is circular (risk->patterns already eliminated by B-058), db -> risk/orders/positions inverts layering, domain -> db breaks isolation, events -> patterns. Baselined (ratchet) in `.governance/architecture_violations_baseline.txt`; burn down edge by edge | Medium | 2026-07-06 checker fix | `src/patterns/signals.rs`, `src/db/`, `src/domain/`, `src/events/types.rs` |
 | B-064 | Dead code cleanup: vestigial `daytrader/src-tauri/src/lib.rs` (`greet`), unused `patternStore.loadStatistics`, unused `get_detected_patterns_for_symbol` (wire up or remove) | Medium | 2026-07-06 audit | `daytrader/` |
+| B-071 | Fix `mock` cargo feature compile errors in src/db/mock.rs (HashSet on non-Eq/Hash type, temporary borrow); pipeline never builds `--features mock` so they persist | Medium | B-062/063 agent finding | `src/db/mock.rs`, `scripts/` |
 
 ### Priority: Low (Enhancements)
 
@@ -103,6 +91,15 @@ Last Updated: 2026-07-06 (full-repo audit — see `plans/2026-07-06-gap-analysis
 | B-034 | Risk store auto-refresh via push events | 2026-07-06 | feat/b032-b034-risk-ui-events (PR #12) | verify 8/8 + npm build | EventBridge forwards RiskViolation as risk:violation; riskStore listens + refreshes; 30s polling fallback kept |
 | B-042 | PDT holiday enforcement | 2026-07-06 | fix/b042-pdt-holiday-enforcer (PR #14) | verify 8/8 | MarketHolidayCalendar threaded through PdtState window logic; holiday edge-case tests (Christmas/New Year, Thanksgiving, Jul 4 observance); also exported orphaned utils::holidays module |
 | B-044 | Alpaca rate limiting | 2026-07-06 | feat/b044-alpaca-rate-limiting (PR #13) | verify 8/8 | Token bucket (200 req/min default), real Retry-After parsing, exponential WS reconnect backoff, README corrected |
+| B-069 | Fix Tauri app binary compilation | 2026-07-06 | fix/tauri-app-compile (PR #15) | verify 10/10 | 23 errors invisible to pipeline (bare cargo check skips workspace members): unified duplicate Candle type, wired orphaned holidays/position_tracker modules + implemented their missing types, PdtRepositoryTrait object in state, pipeline now checks --workspace |
+| B-036 | TypeScript types module | 2026-07-07 | feat/b036-b039-frontend-consolidation (PR #18) | verify 9/9 + npm build | daytrader/src/types/ single source for all IPC shapes; also fixed Decimal-as-string wire format in raw event payloads |
+| B-037 | React custom hooks | 2026-07-07 | feat/b036-b039-frontend-consolidation (PR #18) | verify 9/9 + npm build | useTauriEvents (auto-unlisten), useMarketData (subscribe/unsubscribe lifecycle), usePatterns (filters) |
+| B-039 | Multi-symbol watchlist | 2026-07-07 | feat/b036-b039-frontend-consolidation (PR #18) | verify 9/9 + npm build | Watchlist.tsx: validated add input, removable chips, localStorage persistence, per-symbol MarketData cards |
+| B-062 | Real risk-violations DB query | 2026-07-07 | fix/b062-b063-violations-query-std-sync (PR #19) | verify full | PerformanceRepository::get_recent_risk_violations; DB errors now surface to frontend instead of reading as "no violations"; mock mode distinguished |
+| B-063 | std::sync concurrency-rule fixes | 2026-07-07 | fix/b062-b063-violations-query-std-sync (PR #19) | verify full | db/mock.rs to tokio::sync (10 poisoned-lock unwraps gone); holidays.rs kept std::sync with documented sync-context exception |
+| B-043 | DST-correct market session boundaries | 2026-07-07 | fix/b043-et-session-boundaries (PR #20) + fix/b043-review-followups (PR #26) | verify full | utils/market_hours.rs via chrono-tz America/New_York; fixed limits.rs, pdt.rs, execution/rules.rs call sites; follow-up: ET trading_date consistency, sticky invalid-config halt, direction-aware ambiguity |
+| B-059 | Production unwrap/expect removal | 2026-07-07 | PRs #13/#20/#22 (split by file owner) | verify full + ratchet | alpaca/rest.rs expect (PR #13), limits.rs try_from_config with fail-safe halt (PR #20), engine.rs placeholder fallbacks eliminated (PR #22); baseline entries removed |
+| B-058 | Real day-trade detection in RiskEngine | 2026-07-07 | fix/b058-risk-engine-day-trades (PR #22) | verify full (312 unit tests) | predicts_day_trade pre-trade lookahead + PositionTracker::process_fill ground truth feeding PdtEnforcer (single counter); specific RiskViolationType variants; risk->patterns architecture edge eliminated (baseline 3 to 0); pending-order lifecycle incl. cancel/reject cleanup |
 
 ---
 

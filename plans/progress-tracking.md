@@ -1,7 +1,8 @@
 # Project Progress Tracking
 
-**Last Updated:** January 25, 2026
-**Next Review:** March 25, 2026
+**Last Updated:** July 7, 2026 (backlog-completion sweep; detailed section tables below
+this summary predate the sweep — BACKLOG.md is the authoritative per-task record)
+**Next Review:** August 2026
 
 This document serves as the single source of truth for project progress, consolidating information from various documentation files and checklists. It provides a clear overview of completed work, ongoing tasks, and pending items across all major components.
 
@@ -9,24 +10,24 @@ This document serves as the single source of truth for project progress, consoli
 
 The DayTrader project is a comprehensive algorithmic trading platform built with Rust (backend/core logic) and Tauri/React (desktop frontend). The platform implements robust risk management, PDT compliance, pattern recognition, and supports multiple broker integrations.
 
-**Current Phase:** Phase 4 - Order Execution (Planning)
-**Architecture Status:** Production-ready pattern recognition with real-time streaming
-**Testing Coverage:** Extensive (unit, integration, performance, e2e) - 91% for pattern modules
+**Current Phase:** Demo-complete end-to-end (mock streaming → pattern detection → risk/PDT → dashboard); production-hardening follow-ups tracked in BACKLOG.md
+**Architecture Status:** Layering enforced by tightened checker; known pre-existing debt baselined and ratcheting down (B-070)
+**Testing Coverage:** 312 lib unit tests + integration suites green under the full verification pipeline
 
 ## Progress Summary
 
 | Component | Completion % | Status | Priority |
 |-----------|-------------|--------|----------|
-| Core Architecture | 95% | Mostly Complete | High |
-| Risk Management & PDT | 90% | Advanced | Critical |
-| Broker Integrations | 80% | Good Progress | High |
+| Core Architecture | 90% | Enforced with baselined debt (B-070) | High |
+| Risk Management & PDT | 95% | Day-trade detection real, holiday+DST-correct windows; persistence pending (B-066), liquidation blocked (B-061) | Critical |
+| Broker Integrations | 85% | Alpaca rate-limited with real backoff; IBKR not started (B-053) | High |
 | Pattern Recognition | 100% | ✅ Complete | High |
-| Database & Persistence | 90% | Advanced | High |
-| Event System | 95% | Mature | High |
-| Frontend (Tauri/React) | 60% | In Development | Medium |
-| Testing Infrastructure | 90% | Comprehensive | High |
-| Documentation | 85% | Excellent Coverage | Medium |
-| CI/CD & Deployment | 70% | Functional | Medium |
+| Database & Persistence | 90% | Violations query real; PDT repo pending (B-066), mock feature broken (B-071) | High |
+| Event System | 95% | Mature; risk violations pushed to frontend | High |
+| Frontend (Tauri/React) | 90% | Live dashboard: chart, watchlist, PDT panel, push events, typed IPC, hooks; tests absent (B-065) | Medium |
+| Testing Infrastructure | 90% | 11-step pipeline with workspace compile, production-safety + architecture ratchets, frontend gate | High |
+| Documentation | 85% | Backlog/plans current as of 2026-07-07 | Medium |
+| CI/CD & Deployment | 75% | PR checks + review bot; release automation pending (B-050) | Medium |
 
 ## Core Architecture
 
