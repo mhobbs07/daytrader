@@ -21,7 +21,6 @@ use tokio::time::{Duration, sleep};
 /// Test the complete risk workflow: event bus → risk evaluation → violation handling
 // TODO(B-056): engine.start() subscribes inside a spawned tokio task which may not have started
 // before the event is published, causing 0 violations to be detected. Ignored pending engine fix.
-#[ignore]
 #[tokio::test]
 async fn test_complete_risk_workflow() {
     // Setup
@@ -177,7 +176,7 @@ async fn test_event_persistence() {
 // TODO(B-056): Low-confidence pattern signals do not produce RiskViolation events;
 // pattern risk evaluation only produces violations for patterns with prior stats.
 // Ignored pending engine implementation.
-#[ignore]
+#[ignore = "B-081 remainder: engine does not publish PatternPerformanceUpdate on detection for patterns without prior trade stats"]
 #[tokio::test]
 async fn test_pattern_specific_events() {
     let config = create_test_risk_config();
@@ -231,7 +230,6 @@ async fn test_pattern_specific_events() {
 /// Test multi-rule evaluation where multiple risk rules are evaluated together
 // TODO(B-056): engine.start() subscribes inside a spawned tokio task which may not have started
 // before orders are published, resulting in 0 violations detected. Ignored pending engine fix.
-#[ignore]
 #[tokio::test]
 async fn test_multi_rule_evaluation() {
     let config = create_test_risk_config();
@@ -265,7 +263,10 @@ async fn test_multi_rule_evaluation() {
     sleep(Duration::from_millis(100)).await;
 
     let mut violations = Vec::new();
-    while let Ok(MarketEvent::RiskViolation { violation }) = event_receiver.try_recv() {
+    while let Ok(event) = event_receiver.try_recv() {
+        let MarketEvent::RiskViolation { violation } = event else {
+            continue;
+        };
         violations.push(violation);
     }
 
@@ -391,7 +392,6 @@ async fn test_end_to_end_pattern_risk_workflow() {
 /// Test event publishing and risk violation events
 // TODO(B-056): engine.start() subscribes inside a spawned tokio task which may not have started
 // before the event is published, so 0 violations detected instead of 1. Ignored pending engine fix.
-#[ignore]
 #[tokio::test]
 async fn test_event_publishing() {
     let config = create_test_risk_config();
@@ -442,7 +442,6 @@ async fn test_event_publishing() {
 // TODO(B-056): Fill event published before engine.start() is missed because the engine
 // subscribes inside a spawned task; last_updated stays the same as initial_state.
 // Ignored pending engine fix.
-#[ignore]
 #[tokio::test]
 async fn test_risk_state_persistence() {
     let config = create_test_risk_config();
@@ -467,14 +466,14 @@ async fn test_risk_state_persistence() {
         commission: Decimal::new(-500, 2), // $5.00 commission
     };
 
-    // Publish fill event (this would normally update state)
+    // Start engine BEFORE publishing: broadcast receivers only observe
+    // events published after they subscribe (no replay)
+    engine.start().await.unwrap();
+
     event_bus.publish(MarketEvent::OrderFilled {
         order_id: OrderId::new("fill-1"),
         fill,
     });
-
-    // Start engine to process events
-    engine.start().await.unwrap();
 
     // Wait for processing
     sleep(Duration::from_millis(100)).await;
@@ -535,7 +534,10 @@ async fn test_concurrent_risk_evaluations() {
 
     // Count violations
     let mut violation_count = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { .. } = event else {
+            continue;
+        };
         violation_count += 1;
     }
 

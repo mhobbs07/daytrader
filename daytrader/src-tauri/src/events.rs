@@ -36,8 +36,19 @@ impl EventBridge {
         let pattern_cache = Arc::clone(&self.pattern_cache);
 
         let handle = thread::spawn(move || {
-            while let Ok(event) = rx.blocking_recv() {
-                let _ = Self::forward_event(&app_handle, event, &market_cache, &pattern_cache);
+            loop {
+                match rx.blocking_recv() {
+                    Ok(event) => {
+                        let _ =
+                            Self::forward_event(&app_handle, event, &market_cache, &pattern_cache);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        // Skip ahead — exiting here would freeze all frontend
+                        // updates for the rest of the session
+                        tracing::warn!("Event bridge lagged, skipped {missed} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         });
 

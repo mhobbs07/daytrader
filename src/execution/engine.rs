@@ -284,16 +284,25 @@ impl ExecutionEngine {
         let engine = Arc::new(self.clone_refs());
 
         tokio::spawn(async move {
-            while let Ok(event) = receiver.recv().await {
-                if let MarketEvent::SignalGenerated { signal } = event {
-                    let start = std::time::Instant::now();
+            loop {
+                match receiver.recv().await {
+                    Ok(MarketEvent::SignalGenerated { signal }) => {
+                        let start = std::time::Instant::now();
 
-                    if let Err(e) = engine.handle_signal(signal).await {
-                        tracing::error!("Failed to handle signal: {}", e);
+                        if let Err(e) = engine.handle_signal(signal).await {
+                            tracing::error!("Failed to handle signal: {}", e);
+                        }
+
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        engine.metrics.record_exec_time(elapsed);
                     }
-
-                    let elapsed = start.elapsed().as_millis() as u64;
-                    engine.metrics.record_exec_time(elapsed);
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        // Skip ahead instead of silently stopping signal
+                        // processing for the rest of the session
+                        tracing::warn!("Execution engine receiver lagged, skipped {missed} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });

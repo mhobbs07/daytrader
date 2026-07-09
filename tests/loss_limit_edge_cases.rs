@@ -96,7 +96,7 @@ async fn test_rapid_pnl_changes() {
 
 /// Test daily reset timing at exact market open time
 // TODO(B-056): depends on DailyLossTracker having public `state` field (now private)
-#[ignore]
+#[ignore = "B-081 remainder: needs rewrite against public DailyLossTracker API (was written against a public state field)"]
 #[tokio::test]
 async fn test_daily_reset_timing() {
     // Cannot run: requires direct write access to DailyLossTracker::state (now private).

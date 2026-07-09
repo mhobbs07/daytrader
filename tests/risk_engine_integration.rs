@@ -33,9 +33,6 @@ async fn test_risk_engine_initialization() {
 }
 
 /// Test risk engine event processing and state updates
-// TODO(B-056): engine.start() subscribes inside a spawned tokio task which may not have started
-// before the event is published, causing 0 violations to be detected. Ignored pending engine fix.
-#[ignore]
 #[tokio::test]
 async fn test_risk_engine_event_processing() {
     let config = create_test_risk_config();
@@ -49,7 +46,9 @@ async fn test_risk_engine_event_processing() {
     // Subscribe to risk violations
     let mut violation_receiver = event_bus.subscribe();
 
-    // Create and publish an order that should trigger violations
+    // Create and publish an order that should trigger violations. The order
+    // must carry a price: position value is quantity * price, and a market
+    // order without one evaluates to $0, which can never violate size limits.
     let order = create_large_position_order("large-order-1");
     event_bus.publish(MarketEvent::OrderPlaced {
         order: Arc::clone(&order),
@@ -58,10 +57,13 @@ async fn test_risk_engine_event_processing() {
     // Wait for processing
     sleep(Duration::from_millis(50)).await;
 
-    // Check for violations
+    // Drain everything on the bus (the receiver sees its own OrderPlaced
+    // echo first) and count the violations among it
     let mut violations_found = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
-        violations_found += 1;
+    while let Ok(event) = violation_receiver.try_recv() {
+        if matches!(event, MarketEvent::RiskViolation { .. }) {
+            violations_found += 1;
+        }
     }
 
     assert!(
@@ -161,10 +163,6 @@ async fn test_position_tracking_integration() {
 }
 
 /// Test risk engine trading halt functionality
-// TODO(B-056): RiskEngine.update_on_fill does not propagate DailyLossTracker.is_halted
-// to engine.state.is_trading_halted, and TradingHalted event is not published from
-// the fill path. Ignored pending engine implementation.
-#[ignore]
 #[tokio::test]
 async fn test_trading_halt_functionality() {
     let config = create_strict_loss_config(); // Low loss threshold
@@ -215,10 +213,6 @@ async fn test_trading_halt_functionality() {
 }
 
 /// Test risk engine recovery after halt conditions clear
-// TODO(B-056): engine.is_trading_allowed() remains true after a loss fill because
-// DailyLossTracker halt state is not propagated to engine.state.is_trading_halted.
-// Ignored pending engine implementation.
-#[ignore]
 #[tokio::test]
 async fn test_risk_engine_recovery() {
     let config = create_strict_loss_config();
@@ -274,7 +268,6 @@ async fn test_risk_engine_recovery() {
 /// Test risk engine with pattern-specific risk evaluation
 // TODO(B-056): PatternDetected events do not produce PatternPerformanceUpdate or RiskViolation
 // events for a new pattern with no prior stats. Ignored pending engine implementation.
-#[ignore]
 #[tokio::test]
 async fn test_pattern_risk_integration() {
     let config = create_test_risk_config();
@@ -344,16 +337,51 @@ async fn test_daily_loss_tracker_from_config_initialization() {
     assert!(!can_trade, "Should block loss at percentage limit");
 }
 
-/// Test that RiskEngine::with_database preserves repositories in start()
-// TODO(B-056): depends on Database struct accepting SqlitePool (not PgPool) and public repo fields
-// This test was written when Database used PgPool and RiskEngine fields were public.
-// Both of those APIs have since changed; the test cannot compile without a real DB setup.
-#[ignore]
+/// Test that RiskEngine::with_database preserves repositories through start()
+///
+/// The repos are private, so this asserts the observable behavior instead:
+/// a `PatternDetected` event processed by the started engine must be
+/// persisted through the engine's own signal repository.
 #[tokio::test]
 async fn test_risk_engine_with_database_preserves_repos() {
-    // Cannot compile: requires sqlx::PgPool (codebase uses SqlitePool)
-    // and access to private RiskEngine fields (database, pattern_repo, signal_repo, performance_repo).
-    panic!("test cannot run: API changed — see TODO(B-056) comment above");
+    let database = daytrader::db::Database::in_memory().await.unwrap();
+    sqlx::query(include_str!("../src/db/schema.sql"))
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let database = Arc::new(database);
+
+    let event_bus = Arc::new(EventBus::new(1000));
+    let engine = RiskEngine::with_database(
+        create_test_risk_config(),
+        Arc::clone(&event_bus),
+        AccountId::new("db-test-account"),
+        Decimal::new(10000000, 2),
+        Some(Arc::clone(&database)),
+    );
+    engine.start().await.unwrap();
+
+    event_bus.publish(MarketEvent::PatternDetected {
+        signal: daytrader::events::types::PatternSignal {
+            symbol: Symbol::new("AAPL").unwrap(),
+            pattern_name: daytrader::brokers::types::PatternName::new("hammer"),
+            signal_type: daytrader::events::types::SignalType::Buy,
+            confidence: daytrader::brokers::types::Confidence::new(0.85).unwrap(),
+            detected_at: chrono::Utc::now(),
+            price: Price::new(Decimal::new(15000, 2)).unwrap(),
+        },
+    });
+
+    sleep(Duration::from_millis(100)).await;
+
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pattern_signals")
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        row.0, 1,
+        "signal must be persisted via the engine's repositories after start()"
+    );
 }
 
 /// Helper function to create test risk configuration
@@ -410,9 +438,10 @@ fn create_large_position_order(id: &str) -> Arc<Order> {
         id: OrderId::new(id),
         symbol: Symbol::new("AAPL").unwrap(),
         side: OrderSide::Buy,
-        order_type: OrderType::Market,
+        order_type: OrderType::Limit,
         quantity: Quantity::new(10000).unwrap(), // Very large position
-        price: None,
+        // $150.00 x 10,000 = $1.5M, far beyond max_position_size_dollars
+        price: Some(Price::new(Decimal::new(15000, 2)).unwrap()),
         status: OrderStatus::Submitted,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),

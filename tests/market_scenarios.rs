@@ -20,13 +20,14 @@ use tokio::time::{Duration, sleep};
 
 /// Test PDT edge cases with day trade counting at window boundaries
 // TODO(B-056): RiskEngine does not propagate PDT violations as RiskViolation events on OrderPlaced
-#[ignore]
+#[ignore = "B-081 remainder: PdtLimit rule emits violations for every predicted day trade under the equity threshold instead of only beyond the 3-trade allowance; enforcer counting semantics need a design pass"]
 #[tokio::test]
 async fn test_pdt_edge_cases() {
     let config = create_strict_pdt_config();
     let event_bus = Arc::new(EventBus::new(1000));
     let account_id = AccountId::new("pdt-test-account");
-    let initial_equity = Decimal::new(2500000, 2); // $25,000.00 (PDT threshold)
+    // Clearly below the $25k PDT threshold: PDT restrictions apply
+    let initial_equity = Decimal::new(2000000, 2); // $20,000.00
 
     let engine = RiskEngine::new(config, Arc::clone(&event_bus), account_id, initial_equity);
     engine.start().await.unwrap();
@@ -34,32 +35,54 @@ async fn test_pdt_edge_cases() {
     // Subscribe to violations
     let mut violation_receiver = event_bus.subscribe();
 
-    // Simulate exactly 3 day trades (PDT limit)
+    // Simulate exactly 3 day trades (PDT limit). A day trade is a same-day
+    // open AND close, so each iteration is a buy fill followed by a sell
+    // fill on the same symbol (the FIFO tracker counts the close).
     for i in 1..=3 {
-        let order = create_day_trade_order(&format!("day-trade-{}", i), "AAPL");
-        let fill = create_fill_for_order(&order.id.to_string(), 100);
-
-        // Publish order and fill (simulating a complete day trade)
+        let buy = create_day_trade_order(&format!("day-trade-buy-{}", i), "AAPL");
         event_bus.publish(MarketEvent::OrderPlaced {
-            order: Arc::clone(&order),
+            order: Arc::clone(&buy),
         });
         event_bus.publish(MarketEvent::OrderFilled {
-            order_id: order.id.clone(),
-            fill: fill.clone(),
+            order_id: buy.id.clone(),
+            fill: create_fill_for_order(&buy.id.to_string(), 100),
         });
+        sleep(Duration::from_millis(10)).await;
 
+        let sell = create_day_trade_close_order(&format!("day-trade-sell-{}", i), "AAPL");
+        event_bus.publish(MarketEvent::OrderPlaced {
+            order: Arc::clone(&sell),
+        });
+        event_bus.publish(MarketEvent::OrderFilled {
+            order_id: sell.id.clone(),
+            fill: create_fill_for_order(&sell.id.to_string(), 100),
+        });
         sleep(Duration::from_millis(10)).await;
     }
 
     // Check that no violations occurred for 3 day trades
     let mut violations = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { .. } = event else {
+            continue;
+        };
         violations += 1;
     }
     assert_eq!(violations, 0, "Should allow exactly 3 day trades under PDT");
 
-    // Now attempt a 4th day trade - should be blocked
-    let fourth_order = create_day_trade_order("day-trade-4", "AAPL");
+    // Now attempt a 4th day trade: open a position, then try to place the
+    // same-day closing order. The close is what predicts the 4th day trade.
+    let fourth_buy = create_day_trade_order("day-trade-buy-4", "AAPL");
+    event_bus.publish(MarketEvent::OrderPlaced {
+        order: Arc::clone(&fourth_buy),
+    });
+    event_bus.publish(MarketEvent::OrderFilled {
+        order_id: fourth_buy.id.clone(),
+        fill: create_fill_for_order(&fourth_buy.id.to_string(), 100),
+    });
+    sleep(Duration::from_millis(10)).await;
+
+    let fourth_order = create_day_trade_close_order("day-trade-sell-4", "AAPL");
     event_bus.publish(MarketEvent::OrderPlaced {
         order: Arc::clone(&fourth_order),
     });
@@ -68,7 +91,10 @@ async fn test_pdt_edge_cases() {
 
     // Should detect PDT violation
     let mut pdt_violations = 0;
-    while let Ok(MarketEvent::RiskViolation { violation }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { violation } = event else {
+            continue;
+        };
         if matches!(
             violation.violation_type,
             daytrader::events::types::RiskViolationType::PdtLimit
@@ -84,7 +110,6 @@ async fn test_pdt_edge_cases() {
 
 /// Test loss limit scenarios with various P&L situations and halt conditions
 // TODO(B-056): RiskEngine does not propagate DailyLossTracker halt to engine.state.is_trading_halted
-#[ignore]
 #[tokio::test]
 async fn test_loss_limit_scenarios() {
     let config = create_loss_limit_config();
@@ -100,9 +125,9 @@ async fn test_loss_limit_scenarios() {
 
     // Scenario 1: Gradual losses approaching limit
     let mut total_loss = Decimal::ZERO;
-    let loss_per_trade = Decimal::new(25000, 2); // $250 per trade
+    let loss_per_trade = Decimal::new(10000, 2); // $100 per trade
 
-    for i in 1..=10 {
+    for i in 1..=4 {
         let fill = Fill {
             order_id: OrderId::new(&format!("loss-trade-{}", i)),
             filled_quantity: Quantity::new(100).unwrap(),
@@ -120,7 +145,7 @@ async fn test_loss_limit_scenarios() {
         sleep(Duration::from_millis(5)).await;
     }
 
-    // Should not halt yet (total loss = $2,500, limit = $500)
+    // Should not halt yet (total loss = $400, limit = $500)
     assert!(engine.is_trading_allowed().await);
 
     // Scenario 2: Single large loss that exceeds limit
@@ -154,7 +179,6 @@ async fn test_loss_limit_scenarios() {
 
 /// Test position sizing with portfolio allocation limits and multiple positions
 // TODO(B-056): RiskEngine does not publish PositionSizeLimit violations via event bus on OrderPlaced
-#[ignore]
 #[tokio::test]
 async fn test_position_sizing_multiple_positions() {
     let config = create_position_sizing_config();
@@ -214,7 +238,10 @@ async fn test_position_sizing_multiple_positions() {
 
     // Should detect position size violation
     let mut position_violations = 0;
-    while let Ok(MarketEvent::RiskViolation { violation }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { violation } = event else {
+            continue;
+        };
         if matches!(
             violation.violation_type,
             daytrader::events::types::RiskViolationType::PositionSizeLimit
@@ -311,7 +338,10 @@ async fn test_concurrent_operations() {
 
     // Count violations and ensure system handled concurrent load
     let mut violation_count = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { .. } = event else {
+            continue;
+        };
         violation_count += 1;
     }
 
@@ -333,8 +363,6 @@ async fn test_concurrent_operations() {
 }
 
 /// Test rapid P&L changes and limit enforcement
-// TODO(B-056): RiskEngine does not propagate DailyLossTracker halt to engine.state.is_trading_halted
-#[ignore]
 #[tokio::test]
 async fn test_rapid_pnl_changes() {
     let config = create_loss_limit_config();
@@ -354,7 +382,8 @@ async fn test_rapid_pnl_changes() {
         Decimal::new(5000, 2),   // +$50
         Decimal::new(-15000, 2), // -$150
         Decimal::new(8000, 2),   // +$80
-        Decimal::new(-25000, 2), // -$250 (should trigger limit)
+        // Cumulative: -100 +50 -150 +80 -400 = -$520, past the $500 limit
+        Decimal::new(-40000, 2),
     ];
 
     for (i, pnl_change) in pnl_changes.iter().enumerate() {
@@ -535,14 +564,28 @@ fn create_test_risk_config() -> RiskConfig {
 }
 
 /// Helper function to create a day trade order
+fn create_day_trade_close_order(id: &str, symbol: &str) -> Arc<Order> {
+    Arc::new(Order {
+        id: OrderId::new(id),
+        symbol: Symbol::new(symbol).unwrap(),
+        side: OrderSide::Sell,
+        order_type: OrderType::Limit,
+        quantity: Quantity::new(100).unwrap(),
+        price: Some(Price::new(Decimal::new(15000, 2)).unwrap()),
+        status: OrderStatus::Submitted,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    })
+}
+
 fn create_day_trade_order(id: &str, symbol: &str) -> Arc<Order> {
     Arc::new(Order {
         id: OrderId::new(id),
         symbol: Symbol::new(symbol).unwrap(),
         side: OrderSide::Buy,
-        order_type: OrderType::Market,
+        order_type: OrderType::Limit,
         quantity: Quantity::new(100).unwrap(),
-        price: None, // Market order
+        price: Some(Price::new(Decimal::new(15000, 2)).unwrap()),
         status: OrderStatus::Submitted,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),

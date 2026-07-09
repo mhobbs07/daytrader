@@ -45,6 +45,9 @@ pub struct RiskEngine {
     pdt_enforcer: Arc<PdtEnforcer>,
     // Position lifecycle tracking for day-trade detection (FIFO lots per symbol)
     position_tracker: Arc<PositionTracker>,
+    /// Account equity at engine construction; combined with daily P&L for
+    /// balance-based checks (emergency liquidation threshold)
+    initial_equity: Decimal,
     // Metadata for orders awaiting fill, so `update_on_fill` can recover the
     // symbol/side needed to feed the position tracker (OrderFilled events
     // only carry the order id and fill, not the originating order).
@@ -140,6 +143,7 @@ impl RiskEngine {
             config,
             event_bus,
             state: Arc::new(RwLock::new(state)),
+            initial_equity,
             rule_engine,
             daily_loss_tracker,
             position_sizer,
@@ -178,6 +182,7 @@ impl RiskEngine {
             config,
             event_bus: Arc::clone(&self.event_bus),
             state,
+            initial_equity: self.initial_equity,
             rule_engine,
             daily_loss_tracker,
             position_sizer,
@@ -192,13 +197,26 @@ impl RiskEngine {
             performance_repo: self.performance_repo.clone(),
         });
 
+        // Subscribe BEFORE spawning: a receiver created inside the task only
+        // sees events published after the task gets scheduled, so anything
+        // published immediately after start() returned was silently missed.
+        let mut receiver = event_bus.subscribe();
+
         // Spawn event processing task
         tokio::spawn(async move {
-            let mut receiver = event_bus.subscribe();
-
-            while let Ok(event) = receiver.recv().await {
-                if let Err(e) = engine.process_event(event).await {
-                    tracing::error!("Risk engine event processing error: {}", e);
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        if let Err(e) = engine.process_event(event).await {
+                            tracing::error!("Risk engine event processing error: {}", e);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        // Dropped messages are expected under load; skip ahead
+                        // instead of killing risk processing
+                        tracing::warn!("Risk engine receiver lagged, skipped {missed} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -456,14 +474,11 @@ impl RiskEngine {
                 .await?;
         }
 
-        let mut current_state = self.state.write().await;
-
-        // Update daily P&L (realized P&L from commissions)
-        let pl_change = fill.commission; // Negative for losses, positive for profits
-        self.daily_loss_tracker.update_daily_pnl(pl_change).await;
-
-        current_state.daily_pl += pl_change;
-        current_state.last_updated = Utc::now();
+        // Fills carry realized P&L via the commission field (negative for
+        // losses, positive for profits — established event convention).
+        // Route it through the same path as position closes so loss-limit
+        // halts propagate to engine state and the bus.
+        self.update_daily_pl(fill.commission).await?;
 
         Ok(())
     }
@@ -493,6 +508,21 @@ impl RiskEngine {
 
         current_state.last_updated = Utc::now();
 
+        // Unrealized losses count toward the daily limit too; propagate a
+        // tracker halt to engine state just like the realized path does
+        if self.config.halt_trading_on_limit
+            && !current_state.is_trading_halted
+            && self.daily_loss_tracker.should_halt_trading().await
+        {
+            current_state.is_trading_halted = true;
+            tracing::error!("Trading halted: daily loss limit exceeded (unrealized)");
+            self.event_bus.publish(MarketEvent::TradingHalted {
+                reason: crate::brokers::types::Reason::new(
+                    "Daily loss limit exceeded (unrealized)",
+                ),
+            });
+        }
+
         Ok(())
     }
 
@@ -501,16 +531,46 @@ impl RiskEngine {
         &self,
         realized_pl: Decimal,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut current_state = self.state.write().await;
+        // Update daily P&L in loss tracker; it reports when limits trip
+        let evaluation = self.daily_loss_tracker.update_daily_pnl(realized_pl).await;
 
-        // Update daily P&L in loss tracker
-        self.daily_loss_tracker.update_daily_pnl(realized_pl).await;
+        // Scope the state guard: check_emergency_liquidation below reaches
+        // halt_trading(), which takes this same write lock — holding the
+        // guard across that call self-deadlocks the risk engine.
+        let daily_pl = {
+            let mut current_state = self.state.write().await;
 
-        current_state.daily_pl += realized_pl;
-        current_state.last_updated = Utc::now();
+            current_state.daily_pl += realized_pl;
+            current_state.last_updated = Utc::now();
 
-        // Check for emergency liquidation
-        self.check_emergency_liquidation(current_state.daily_pl)
+            // Propagate loss-limit halts to the engine's own state so
+            // is_trading_allowed() and pre-trade order checks observe them.
+            // Without this the tracker's halt was invisible to callers.
+            if self.config.halt_trading_on_limit
+                && !current_state.is_trading_halted
+                && matches!(
+                    evaluation,
+                    crate::risk::types::RiskEvaluation::Violated { .. }
+                )
+            {
+                current_state.is_trading_halted = true;
+                tracing::error!(
+                    daily_pl = %current_state.daily_pl,
+                    "Trading halted: daily loss limit exceeded"
+                );
+                self.event_bus.publish(MarketEvent::TradingHalted {
+                    reason: crate::brokers::types::Reason::new("Daily loss limit exceeded"),
+                });
+            }
+
+            current_state.daily_pl
+        };
+
+        // Check for emergency liquidation (may halt; takes the lock itself).
+        // The threshold is a BALANCE floor: compare equity + daily P&L, not
+        // the day's P&L alone — passing daily_pl false-triggered a halt on
+        // any loss past the threshold.
+        self.check_emergency_liquidation(self.initial_equity + daily_pl)
             .await?;
 
         Ok(())
