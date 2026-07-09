@@ -171,14 +171,21 @@ impl OrderTracker {
         match new_status {
             crate::brokers::traits::OrderStatus::Filled => {
                 if let Some(fill) = fill_info {
+                    // Publish the CUMULATIVE fill from the order's own state:
+                    // callers may pass per-tranche deltas (the status poller
+                    // does), and consumers must see the complete quantity
+                    // exactly once, on the terminal transition.
+                    let filled_quantity =
+                        crate::brokers::types::Quantity::new(order_clone.filled_quantity)
+                            .unwrap_or(fill.filled_quantity);
                     self.event_bus.publish(MarketEvent::OrderFilled {
                         order_id: order_id.clone(),
                         fill: crate::events::types::Fill {
                             order_id: order_id.clone(),
-                            filled_quantity: fill.filled_quantity,
-                            filled_price: fill.filled_price,
+                            filled_quantity,
+                            filled_price: order_clone.filled_avg_price.unwrap_or(fill.filled_price),
                             filled_at: fill.timestamp,
-                            commission: fill.commission,
+                            commission: order_clone.commission.unwrap_or(fill.commission),
                         },
                     });
                 }

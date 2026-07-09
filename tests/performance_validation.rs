@@ -318,15 +318,20 @@ async fn test_pattern_detection_scaling() {
     for size in sizes {
         let candles = create_test_candles(size);
 
-        // Measure
-        let start = Instant::now();
-        for _ in 0..10 {
-            let _ = registry.detect_all(&candles, Some(&params)).await;
+        // Best-of-5 batches: µs-scale averages are dominated by scheduler
+        // noise when the suite runs in parallel; the minimum is the standard
+        // low-noise estimator for microbenchmarks (B-082 de-flake)
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..5 {
+            let start = Instant::now();
+            for _ in 0..10 {
+                let _ = registry.detect_all(&candles, Some(&params)).await;
+            }
+            best = best.min(start.elapsed() / 10);
         }
-        let avg_duration = start.elapsed() / 10;
 
-        timings.push((size, avg_duration));
-        println!("Size {}: {:?}", size, avg_duration);
+        timings.push((size, best));
+        println!("Size {}: {:?}", size, best);
     }
 
     // Verify scaling is reasonable (shouldn't be exponential)

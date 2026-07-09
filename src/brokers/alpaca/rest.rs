@@ -75,11 +75,17 @@ impl RestClient {
     ///
     /// Historical data lives on `data.alpaca.markets`, a different host from
     /// the paper/live trading API served by [`Self::get`].
-    async fn get_data<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, BrokerError> {
+    async fn get_data<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, BrokerError> {
         self.rate_limiter.acquire().await;
 
         let url = format!("{}{}", self.config.data_base_url, path);
-        let request = self.client.get(&url);
+        // .query() percent-encodes values; page tokens are base64-like and
+        // can contain '+', '/', '=' which raw concatenation would corrupt
+        let request = self.client.get(&url).query(query);
         let request = self.add_auth_headers(request);
 
         let response = request
@@ -233,21 +239,21 @@ impl RestClient {
     ) -> Result<Vec<Candle>, BrokerError> {
         let mut candles = Vec::new();
         let mut page_token: Option<String> = None;
+        let path = format!("/v2/stocks/{}/bars", symbol.as_str());
 
         loop {
-            let mut path = format!(
-                "/v2/stocks/{}/bars?timeframe={}&start={}&end={}&limit=10000&adjustment=raw",
-                symbol.as_str(),
-                timeframe_param(timeframe),
-                start.format("%Y-%m-%dT%H:%M:%SZ"),
-                end.format("%Y-%m-%dT%H:%M:%SZ"),
-            );
+            let mut query: Vec<(&str, String)> = vec![
+                ("timeframe", timeframe_param(timeframe).to_string()),
+                ("start", start.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+                ("end", end.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+                ("limit", "10000".to_string()),
+                ("adjustment", "raw".to_string()),
+            ];
             if let Some(token) = &page_token {
-                path.push_str("&page_token=");
-                path.push_str(token);
+                query.push(("page_token", token.clone()));
             }
 
-            let response: AlpacaBarsResponse = self.get_data(&path).await?;
+            let response: AlpacaBarsResponse = self.get_data(&path, &query).await?;
 
             for bar in response.bars.unwrap_or_default() {
                 candles.push(bar.into_candle(symbol)?);
