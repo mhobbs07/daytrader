@@ -16,7 +16,8 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
+| B-085 | R0.3 — remove `to_string().parse()` decimal round-trip from the pattern-detection hot path | Done | 2026-07-28 | refactor/r0-measurement-integrity | 16 sites across `patterns/{traits,utils,multi_candle}.rs`, `brokers/types.rs`, `risk/types.rs`; all collapsed onto the canonical `patterns::utils::decimal_to_ratio` |
+| B-086 | R0.1 — corporate-action / split adjustment pipeline | In Progress | 2026-07-28 | refactor/r0-measurement-integrity | `alpaca/rest.rs:250` requests `adjustment=raw` with no compensating pipeline — unadjusted splits manufacture fake gaps that detectors trade |
 
 ---
 
@@ -30,9 +31,37 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-067 | Unify Quote types (`brokers::traits::Quote` has symbol/last/u32 sizes vs `events::types::Quote` with Quantity sizes) or document the boundary mapping as intentional | Medium | 2026-07-06 Candle-unification analysis | `src/brokers/traits.rs`, `src/events/types.rs` |
 | B-068 | Run doctests in the verification pipeline (`cargo test --doc`); known pre-existing doctest failures in risk/limits.rs flagged in PR #20 | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
 | B-070 | Architecture reconciliation: hidden boundary violations found when checker was tightened to catch inline qualified paths — patterns<->risk is circular (risk->patterns already eliminated by B-058), db -> risk/orders/positions inverts layering, events -> patterns. Baselined (ratchet) in `.governance/architecture_violations_baseline.txt`; burn down edge by edge. (domain -> db edges resolved 2026-07-07 by deleting the never-compiled `src/domain/`/`src/infrastructure/` modules in B-064) | Medium | 2026-07-06 checker fix | `src/patterns/signals.rs`, `src/db/`, `src/events/types.rs` |
-| B-074 | Clean up ~130 accumulated clippy/rustc warnings so `cargo clippy -- -D warnings` passes (documented invariant; GitHub CI enforces it and failed on PR #24; local pipeline is warn-only with a TODO to tighten — tighten it once clean) | Medium | 2026-07-07 PR #24 CI failure | `src/` (risk, positions, orders, brokers, events, db, utils) |
+| B-074 | **Superseded by B-089.** Warning count re-measured 2026-07-28: `cargo check --lib` alone emits **693** warnings, not ~130. Clean up accumulated clippy/rustc warnings so `cargo clippy -- -D warnings` passes (documented invariant; GitHub CI enforces it and failed on PR #24; local pipeline is warn-only with a TODO to tighten — tighten it once clean) | Medium | 2026-07-07 PR #24 CI failure | `src/` (risk, positions, orders, brokers, events, db, utils) |
 | B-075 | Fix GitHub CI for sqlx macros: docs + test jobs fail with "set DATABASE_URL" because CI provisions no database (commit `.sqlx/` offline cache via `cargo sqlx prepare` + set `SQLX_OFFLINE=true`, or provision sqlite in workflows); also CI triggers only on PRs to main/develop, so staging PRs get zero CI — NEEDS OWNER APPROVAL (CI/CD change) | Medium | 2026-07-07 PR #24 CI failure | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
 | B-081 | Burn down the 28 `#[ignore]`d tests baselined in `.governance/known_test_issues.txt` (newtype-refactor assertion drift, static since April) — includes `test_end_to_end_candle_to_signal_pipeline`, `test_pdt_edge_cases`, `test_loss_limit_scenarios`; the disabled e2e pipeline test is part of why the B-079 candle-ordering bug went unnoticed. Fold in B-068 (doctests never run) | Medium | 2026-07-08 session review | `tests/`, `src/`, `.governance/known_test_issues.txt` |
+
+### Priority: Research Platform (R0–R5)
+
+Roadmap: `plans/2026-07-28-research-platform-roadmap.md`. Goal is a trustworthy
+verdict on whether edge exists, not live trading. **Automation gate stays OFF
+until Phase L.** Ordering: R0 → R1 → Go/No-Go checkpoint → R2/R3/R5 as the
+verdict directs.
+
+| ID | Task | Priority | Phase | Scope |
+|----|------|----------|-------|-------|
+| B-086 | Corporate-action / split adjustment: store bars unadjusted + factor table, adjust at query time (never in place) | Critical | R0.1 | `src/brokers/alpaca/rest.rs`, `src/data/`, `migrations/` |
+| B-087 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) | Critical | R0.2 | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
+| B-088 | Config type spine: `RawRiskConfig` → `TryFrom` → `RiskConfig`; drop `derive(Default)` (a default risk config currently disables every limit) | High | R0.4 | `src/config/mod.rs` |
+| B-089 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) | High | R0.5 | `scripts/`, `.governance/` |
+| B-090 | Dependency cleanup: delete `ta`/`once_cell`/`tower`/`crossbeam`/`rusqlite` (0–2 refs each); upgrade reqwest 0.11→0.13, tungstenite 0.21→0.30, thiserror 1→2, sqlx 0.8→0.9 | Medium | R0.6 | `Cargo.toml` |
+| B-091 | Data-quality gates + `data_quality_events` quarantine table; free-tier divergence audit → `docs/data-validity.md` | High | R0.7 | `src/data/validation.rs` |
+| B-103 | **`benches/` does not compile** — `cargo bench --bench pattern_benchmarks` fails with 9 errors (E0063/E0277/E0382/E0507) and no script references any bench. Prerequisite for the perf-regression gate and for measuring R0.3/R1 throughput claims | High | R0.5 | `benches/`, `scripts/verify_perf.sh` |
+| B-092 | Backtester realism: `FillModel` trait (spread/impact/participation), short side, PDT accrual during replay, EOD liquidation | Critical | R1 | `src/execution/backtest.rs` |
+| B-093 | Walk-forward + purged K-fold with embargo; deflated Sharpe fed by sweep trial count | Critical | R1 | `src/execution/` |
+| B-094 | Metric suite + Monte Carlo bootstrap + per-pattern × regime × hour attribution | High | R1 | `src/execution/`, `src/utils/stats.rs` |
+| B-095 | Backtest CLI (`src/bin/backtest.rs`) + determinism and lookahead-detector gates | High | R1 | `src/bin/` |
+| B-096 | `src/domain/` leaf module; drain architecture ratchet to empty (supersedes B-067, B-070) | High | R2 | `src/domain/`, `src/events/`, `src/db/` |
+| B-097 | Sealed `SignalSource` trait; adapt all 9 detectors; feature store with PIT `CHECK` constraints + restatement log | High | R2 | `src/signals/` |
+| B-098 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 | `src/patterns/`, `src/risk/pattern_stats.rs` |
+| B-099 | Universe scanner: PIT snapshots, free-tier factors (RVOL time-of-day normalized, gap, ATR%, momentum, pattern prior), ranking with rationale | Medium | R3 | `src/universe/` |
+| B-100 | `tauri-specta` bindings + `dto.rs` boundary; money crosses as branded string (supersedes hand-written TS types) | Medium | R4 | `daytrader/src-tauri/src/dto.rs`, `daytrader/src/types/` |
+| B-101 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 | `daytrader/src/` |
+| B-102 | ML signal layer: ONNX via `ort` behind `--features ml`, model registry, shadow-only evaluation, drift/decay/crowding metrics | Low | R5 | `src/signals/ml/` |
 
 ### Priority: Low (Enhancements)
 

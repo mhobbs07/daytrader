@@ -291,6 +291,7 @@ pub trait ConfigurablePatternDetector: PatternDetector {
 pub mod utils {
     use super::*;
     use crate::events::types::Candle;
+    use crate::patterns::utils::decimal_to_ratio;
     use rust_decimal::Decimal;
 
     /// Calculates the body size ratio for a candle
@@ -304,7 +305,7 @@ pub mod utils {
         }
 
         let body_size = candle.body_size();
-        (body_size / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(body_size, range)
     }
 
     /// Calculates the upper shadow ratio for a candle
@@ -317,7 +318,7 @@ pub mod utils {
         }
 
         let upper_shadow = candle.high.value() - candle.open.value().max(candle.close.value());
-        (upper_shadow / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(upper_shadow, range)
     }
 
     /// Calculates the lower shadow ratio for a candle
@@ -330,7 +331,7 @@ pub mod utils {
         }
 
         let lower_shadow = candle.open.value().min(candle.close.value()) - candle.low.value();
-        (lower_shadow / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(lower_shadow, range)
     }
 
     /// Checks if a candle is a doji (small body relative to range)

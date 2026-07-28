@@ -7,6 +7,7 @@ use crate::brokers::types::Confidence;
 use crate::events::types::Candle;
 use crate::patterns::types::{PatternContext, PatternError, TrendContext, VolumeConfirmation};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 
 /// Shadow ratios for a candle - proportions of upper and lower shadows relative to total range
 #[derive(Debug, Clone, Copy)]
@@ -43,12 +44,19 @@ impl ShadowRatios {
 
 /// Convert a Decimal value to a ratio (f64) relative to a total
 ///
-/// This is a common operation used throughout pattern detection
+/// This is a common operation used throughout pattern detection.
+///
+/// Converts via `ToPrimitive` rather than a decimal-string round-trip. This is
+/// evaluated per candle per detector, so the former cost a heap allocation and
+/// a float parse on the hottest path in the system. Ratios are shape
+/// measurements, not money, so `f64` is the correct representation.
+///
+/// Returns `0.0` when `total` is zero.
 pub fn decimal_to_ratio(value: Decimal, total: Decimal) -> f64 {
     if total == Decimal::ZERO {
         0.0
     } else {
-        (value / total).to_string().parse::<f64>().unwrap_or(0.0)
+        (value / total).to_f64().unwrap_or(0.0)
     }
 }
 

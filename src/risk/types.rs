@@ -6,6 +6,7 @@
 use crate::brokers::types::PatternName;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -59,7 +60,7 @@ impl DollarAmount {
     /// Returns the amount as f64 (use sparingly, prefer Decimal)
     #[inline]
     pub fn as_f64(&self) -> f64 {
-        self.0.to_string().parse().unwrap_or(0.0)
+        self.0.to_f64().unwrap_or(0.0)
     }
 }
 
@@ -124,7 +125,7 @@ impl Percentage {
     /// Returns the percentage as f64 (use sparingly)
     #[inline]
     pub fn as_f64(&self) -> f64 {
-        self.0.to_string().parse().unwrap_or(0.0)
+        self.0.to_f64().unwrap_or(0.0)
     }
 }
 
