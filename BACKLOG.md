@@ -19,6 +19,9 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-085 | R0.3 — remove `to_string().parse()` decimal round-trip from the pattern-detection hot path | Done | 2026-07-28 | refactor/r0-measurement-integrity | 16 sites across `patterns/{traits,utils,multi_candle}.rs`, `brokers/types.rs`, `risk/types.rs`; all collapsed onto the canonical `patterns::utils::decimal_to_ratio` |
 | B-086 | R0.1 step 1 — typed `BarAdjustment` + candle provenance | Done | 2026-07-28 | refactor/r0-measurement-integrity | `adjustment=raw` was hardcoded; now a `#[non_exhaustive]` enum defaulting to `All`, threaded through `get_bars`/`MarketDataProvider`/storage. Schema v3 adds an `adjustment` discriminator to the candles uniqueness key so price bases cannot collide. Step 2 (raw + factor table, query-time adjustment) still open |
 | B-089a | R0.5 — gate matched failure *counts*, not test *names* | Done | 2026-07-28 | refactor/r0-measurement-integrity | Any N new failures passed while N stayed under the known-issues ceiling; caught a real `data::ingestion` regression only by manual inspection. Now fails on any failing test absent from the baseline |
+| B-103 | R0.5 — repair the `benches/` suite + `scripts/verify_perf.sh` | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 1. All 5 criterion suites fail to compile against the post-newtype-refactor API |
+| B-088 | R0.4 — config type spine (`RawRiskConfig` → `TryFrom` → `RiskConfig`) | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 2. `RiskConfig::default()` currently yields a config with every limit disabled |
+| B-086b | R0.1 step 2 — corporate-action factors + query-time adjustment | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 3. Migration v4, `src/data/corporate_actions.rs`, 4:1-split-produces-no-signal regression test |
 
 ---
 
