@@ -3,6 +3,7 @@
 //! This module provides persistent storage for candles and quotes using SQLite.
 //! Uses sqlx for async database operations with connection pooling.
 
+use crate::brokers::traits::BarAdjustment;
 use crate::brokers::types::Symbol;
 use crate::events::types::Candle;
 use crate::utils::errors::{AppError, DatabaseError, Result};
@@ -79,11 +80,11 @@ impl CandleStorage {
     ///     volume: 1_000_000,
     /// };
     ///
-    /// storage.store_candle(&candle).await?;
+    /// storage.store_candle(&candle, BarAdjustment::All).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn store_candle(&self, candle: &Candle) -> Result<()> {
+    pub async fn store_candle(&self, candle: &Candle, adjustment: BarAdjustment) -> Result<()> {
         let symbol = candle.symbol.as_str();
         let timestamp = candle.timestamp;
         let open = candle.open.value().to_string();
@@ -92,12 +93,13 @@ impl CandleStorage {
         let close = candle.close.value().to_string();
         let volume = candle.volume as i64;
         let broker = "alpaca";
+        let adjustment = adjustment.as_str();
 
         sqlx::query(
             r"
-            INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol, timestamp, broker) DO UPDATE SET
+            INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker, adjustment)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, timestamp, broker, adjustment) DO UPDATE SET
                 open = excluded.open,
                 high = excluded.high,
                 low = excluded.low,
@@ -113,6 +115,7 @@ impl CandleStorage {
         .bind(close)
         .bind(volume)
         .bind(broker)
+        .bind(adjustment)
         .execute(&self.pool)
         .await
         .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
@@ -158,11 +161,11 @@ impl CandleStorage {
     ///     },
     /// ];
     ///
-    /// storage.store_candles(&candles).await?;
+    /// storage.store_candles(&candles, BarAdjustment::All).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn store_candles(&self, candles: &[Candle]) -> Result<()> {
+    pub async fn store_candles(&self, candles: &[Candle], adjustment: BarAdjustment) -> Result<()> {
         if candles.is_empty() {
             return Ok(());
         }
@@ -172,6 +175,8 @@ impl CandleStorage {
             .begin()
             .await
             .map_err(|e| DatabaseError::TransactionFailed(e.to_string()))?;
+
+        let adjustment = adjustment.as_str();
 
         for candle in candles {
             let symbol = candle.symbol.as_str();
@@ -185,9 +190,9 @@ impl CandleStorage {
 
             sqlx::query(
                 r"
-                INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol, timestamp, broker) DO UPDATE SET
+                INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker, adjustment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, timestamp, broker, adjustment) DO UPDATE SET
                     open = excluded.open,
                     high = excluded.high,
                     low = excluded.low,
@@ -203,6 +208,7 @@ impl CandleStorage {
             .bind(close)
             .bind(volume)
             .bind(broker)
+            .bind(adjustment)
             .execute(&mut *tx)
             .await
             .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
@@ -240,21 +246,27 @@ impl CandleStorage {
     /// let storage = CandleStorage::new(pool);
     ///
     /// let symbol = Symbol::new("AAPL");
-    /// let candles = storage.get_recent_candles(&symbol, 100).await?;
+    /// let candles = storage.get_recent_candles(&symbol, 100, BarAdjustment::All).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_recent_candles(&self, symbol: &Symbol, count: usize) -> Result<Vec<Candle>> {
+    pub async fn get_recent_candles(
+        &self,
+        symbol: &Symbol,
+        count: usize,
+        adjustment: BarAdjustment,
+    ) -> Result<Vec<Candle>> {
         let rows = sqlx::query(
             r"
             SELECT symbol, timestamp, open, high, low, close, volume
             FROM candles
-            WHERE symbol = ?
+            WHERE symbol = ? AND adjustment = ?
             ORDER BY timestamp DESC
             LIMIT ?
             ",
         )
         .bind(symbol.as_str())
+        .bind(adjustment.as_str())
         .bind(count as i64)
         .fetch_all(&self.pool)
         .await
@@ -287,16 +299,18 @@ impl CandleStorage {
         symbol: &Symbol,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>> {
         let rows = sqlx::query(
             r"
             SELECT symbol, timestamp, open, high, low, close, volume
             FROM candles
-            WHERE symbol = ? AND timestamp >= ? AND timestamp <= ?
+            WHERE symbol = ? AND adjustment = ? AND timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
             ",
         )
         .bind(symbol.as_str())
+        .bind(adjustment.as_str())
         .bind(start)
         .bind(end)
         .fetch_all(&self.pool)
@@ -321,15 +335,20 @@ impl CandleStorage {
     /// # Errors
     ///
     /// Returns error if database operation fails
-    pub async fn get_candle_count(&self, symbol: &Symbol) -> Result<i64> {
+    pub async fn get_candle_count(
+        &self,
+        symbol: &Symbol,
+        adjustment: BarAdjustment,
+    ) -> Result<i64> {
         let row = sqlx::query(
             r"
             SELECT COUNT(*) as count
             FROM candles
-            WHERE symbol = ?
+            WHERE symbol = ? AND adjustment = ?
             ",
         )
         .bind(symbol.as_str())
+        .bind(adjustment.as_str())
         .fetch_one(&self.pool)
         .await
         .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
@@ -456,7 +475,9 @@ mod tests {
                 close TEXT NOT NULL,
                 volume INTEGER NOT NULL,
                 broker TEXT NOT NULL,
-                UNIQUE(symbol, timestamp, broker)
+                adjustment TEXT NOT NULL DEFAULT 'raw'
+                    CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
+                UNIQUE(symbol, timestamp, broker, adjustment)
             )
             ",
         )
@@ -486,11 +507,115 @@ mod tests {
         let symbol = Symbol::new("AAPL").unwrap();
 
         let candle = create_test_candle(symbol.clone(), 150);
-        storage.store_candle(&candle).await.unwrap();
+        storage
+            .store_candle(&candle, BarAdjustment::All)
+            .await
+            .unwrap();
 
-        let retrieved = storage.get_recent_candles(&symbol, 1).await.unwrap();
+        let retrieved = storage
+            .get_recent_candles(&symbol, 1, BarAdjustment::All)
+            .await
+            .unwrap();
         assert_eq!(retrieved.len(), 1);
         assert_eq!(retrieved[0].close, candle.close);
+    }
+
+    #[tokio::test]
+    async fn test_differing_adjustments_do_not_overwrite_each_other() {
+        // Same symbol and instant, different corporate-action basis: these are
+        // two distinct series. Before the adjustment discriminator existed the
+        // uniqueness key could not tell them apart, so the second write
+        // silently clobbered the first through the ON CONFLICT path.
+        let pool = create_test_pool().await;
+        let storage = CandleStorage::new(pool);
+        let symbol = Symbol::new("AAPL").unwrap();
+        let timestamp = Utc::now();
+
+        let mut raw = create_test_candle(symbol.clone(), 400);
+        raw.timestamp = timestamp;
+        let mut adjusted = create_test_candle(symbol.clone(), 100);
+        adjusted.timestamp = timestamp;
+
+        storage
+            .store_candle(&raw, BarAdjustment::Raw)
+            .await
+            .unwrap();
+        storage
+            .store_candle(&adjusted, BarAdjustment::All)
+            .await
+            .unwrap();
+
+        let raw_series = storage
+            .get_recent_candles(&symbol, 10, BarAdjustment::Raw)
+            .await
+            .unwrap();
+        let adjusted_series = storage
+            .get_recent_candles(&symbol, 10, BarAdjustment::All)
+            .await
+            .unwrap();
+
+        assert_eq!(raw_series.len(), 1, "raw series must survive intact");
+        assert_eq!(
+            adjusted_series.len(),
+            1,
+            "adjusted series must survive intact"
+        );
+        assert_eq!(raw_series[0].close, raw.close);
+        assert_eq!(adjusted_series[0].close, adjusted.close);
+        assert_ne!(
+            raw_series[0].close, adjusted_series[0].close,
+            "the two bases must remain independently addressable"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reads_are_scoped_to_a_single_adjustment_basis() {
+        // A query must never return a series mixing price bases.
+        let pool = create_test_pool().await;
+        let storage = CandleStorage::new(pool);
+        let symbol = Symbol::new("MSFT").unwrap();
+        let base = Utc::now();
+
+        for i in 0..3 {
+            let mut raw = create_test_candle(symbol.clone(), 400 + i);
+            raw.timestamp = base + Duration::minutes(i);
+            storage
+                .store_candle(&raw, BarAdjustment::Raw)
+                .await
+                .unwrap();
+        }
+
+        let mut adjusted = create_test_candle(symbol.clone(), 100);
+        adjusted.timestamp = base;
+        storage
+            .store_candle(&adjusted, BarAdjustment::All)
+            .await
+            .unwrap();
+
+        let adjusted_only = storage
+            .get_recent_candles(&symbol, 100, BarAdjustment::All)
+            .await
+            .unwrap();
+        assert_eq!(
+            adjusted_only.len(),
+            1,
+            "raw bars must not leak into an adjusted query"
+        );
+
+        assert_eq!(
+            storage
+                .get_candle_count(&symbol, BarAdjustment::Raw)
+                .await
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            storage
+                .get_candle_count(&symbol, BarAdjustment::All)
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -509,9 +634,15 @@ mod tests {
             })
             .collect();
 
-        storage.store_candles(&candles).await.unwrap();
+        storage
+            .store_candles(&candles, BarAdjustment::All)
+            .await
+            .unwrap();
 
-        let count = storage.get_candle_count(&symbol).await.unwrap();
+        let count = storage
+            .get_candle_count(&symbol, BarAdjustment::All)
+            .await
+            .unwrap();
         assert_eq!(count, 10);
     }
 
@@ -530,12 +661,15 @@ mod tests {
             candles.push(candle);
         }
 
-        storage.store_candles(&candles).await.unwrap();
+        storage
+            .store_candles(&candles, BarAdjustment::All)
+            .await
+            .unwrap();
 
         let start = now - Duration::hours(3);
         let end = now;
         let retrieved = storage
-            .get_candles_in_range(&symbol, start, end)
+            .get_candles_in_range(&symbol, start, end, BarAdjustment::All)
             .await
             .unwrap();
 
@@ -557,14 +691,20 @@ mod tests {
             candles.push(candle);
         }
 
-        storage.store_candles(&candles).await.unwrap();
+        storage
+            .store_candles(&candles, BarAdjustment::All)
+            .await
+            .unwrap();
 
         let cutoff = now - Duration::hours(2);
         let deleted = storage.delete_old_candles(cutoff).await.unwrap();
 
         assert_eq!(deleted, 3); // Should delete 3 old candles
 
-        let remaining = storage.get_candle_count(&symbol).await.unwrap();
+        let remaining = storage
+            .get_candle_count(&symbol, BarAdjustment::All)
+            .await
+            .unwrap();
         assert_eq!(remaining, 2);
     }
 }

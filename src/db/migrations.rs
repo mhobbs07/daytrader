@@ -66,6 +66,9 @@ impl MigrationManager {
         if current_version < 2 {
             self.migrate_to_v2().await?;
         }
+        if current_version < 3 {
+            self.migrate_to_v3().await?;
+        }
 
         tracing::info!(
             "Database schema is at version {}",
@@ -164,6 +167,92 @@ impl MigrationManager {
         Ok(())
     }
 
+    /// Migration to version 3: Make candle corporate-action adjustment explicit
+    ///
+    /// Bars fetched under different [`BarAdjustment`] modes are different
+    /// series for the same instrument and instant. The v1 uniqueness key
+    /// `(symbol, timestamp, broker)` could not tell them apart, so storing an
+    /// adjusted bar over a previously-stored raw one silently overwrote it and
+    /// left the table with mixed, unlabelled provenance.
+    ///
+    /// Adds an `adjustment` discriminator and widens the uniqueness key.
+    /// Existing rows are backfilled as `'raw'`, which is historically accurate:
+    /// every fetch before this migration hardcoded `adjustment=raw`.
+    ///
+    /// SQLite cannot alter a UNIQUE constraint in place, so the table is
+    /// rebuilt. DDL is issued through the unchecked `sqlx::query` rather than
+    /// the `query!` macro: these statements bind no parameters and return no
+    /// columns, so the macro would add offline-cache entries without adding
+    /// any verification.
+    ///
+    /// [`BarAdjustment`]: crate::brokers::traits::BarAdjustment
+    async fn migrate_to_v3(&self) -> Result<(), sqlx::Error> {
+        tracing::info!("Migrating database schema to version 3...");
+
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS candles_v3 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume INTEGER NOT NULL,
+                broker TEXT NOT NULL,
+                adjustment TEXT NOT NULL DEFAULT 'raw'
+                    CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, timestamp, broker, adjustment)
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Pre-v3 rows were all fetched with adjustment=raw.
+        sqlx::query(
+            r"
+            INSERT OR IGNORE INTO candles_v3
+                (id, symbol, timestamp, open, high, low, close, volume, broker, adjustment, created_at)
+            SELECT id, symbol, timestamp, open, high, low, close, volume, broker, 'raw', created_at
+            FROM candles
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query("DROP TABLE candles")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("ALTER TABLE candles_v3 RENAME TO candles")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, timestamp DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_candles_adjustment ON candles(symbol, adjustment, timestamp DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query!(
+            "INSERT INTO schema_migrations (version, description) VALUES (3, 'Add candle corporate-action adjustment discriminator')"
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Migration to version 3 completed successfully");
+        Ok(())
+    }
+
     /// Validates database schema integrity
     pub async fn validate_schema(&self) -> Result<(), sqlx::Error> {
         // Check that all required tables exist
@@ -206,5 +295,173 @@ impl MigrationManager {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Row;
+
+    /// Builds a pre-v3 database: the original candles shape, plus the
+    /// migrations bookkeeping table pinned at version 2.
+    async fn v2_pool_with_candles() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+
+        sqlx::query(
+            r"
+            CREATE TABLE candles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume INTEGER NOT NULL,
+                broker TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, timestamp, broker)
+            )
+            ",
+        )
+        .execute(&pool)
+        .await
+        .expect("create v1 candles");
+
+        sqlx::query(
+            r"
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                description TEXT NOT NULL,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ",
+        )
+        .execute(&pool)
+        .await
+        .expect("create schema_migrations");
+
+        sqlx::query("INSERT INTO schema_migrations (version, description) VALUES (2, 'test')")
+            .execute(&pool)
+            .await
+            .expect("seed version 2");
+
+        pool
+    }
+
+    async fn insert_legacy_candle(pool: &SqlitePool, symbol: &str, close: f64) {
+        sqlx::query(
+            r"
+            INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker)
+            VALUES (?, '2024-06-10T13:30:00Z', ?, ?, ?, ?, 1000, 'alpaca')
+            ",
+        )
+        .bind(symbol)
+        .bind(close)
+        .bind(close)
+        .bind(close)
+        .bind(close)
+        .execute(pool)
+        .await
+        .expect("insert legacy candle");
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v3_preserves_existing_rows_as_raw() {
+        // Pre-v3 fetches hardcoded adjustment=raw, so surviving rows must be
+        // labelled raw — anything else would misrepresent their provenance and
+        // let unadjusted bars masquerade as analysis-safe.
+        let pool = v2_pool_with_candles().await;
+        insert_legacy_candle(&pool, "AAPL", 400.0).await;
+        insert_legacy_candle(&pool, "MSFT", 300.0).await;
+
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v3 migration");
+
+        let rows = sqlx::query("SELECT symbol, adjustment FROM candles ORDER BY symbol")
+            .fetch_all(&pool)
+            .await
+            .expect("read migrated candles");
+
+        assert_eq!(rows.len(), 2, "no rows may be lost by the rebuild");
+        for row in &rows {
+            let adjustment: String = row.get("adjustment");
+            assert_eq!(adjustment, "raw");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v3_widens_uniqueness_key() {
+        // The point of the migration: the same bar under two adjustment bases
+        // must be storable as two rows rather than one silently overwriting
+        // the other.
+        let pool = v2_pool_with_candles().await;
+        insert_legacy_candle(&pool, "AAPL", 400.0).await;
+
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v3 migration");
+
+        sqlx::query(
+            r"
+            INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker, adjustment)
+            VALUES ('AAPL', '2024-06-10T13:30:00Z', 100, 100, 100, 100, 1000, 'alpaca', 'all')
+            ",
+        )
+        .execute(&pool)
+        .await
+        .expect("adjusted bar must not collide with the raw bar");
+
+        let count: i64 = sqlx::query("SELECT COUNT(*) AS n FROM candles WHERE symbol = 'AAPL'")
+            .fetch_one(&pool)
+            .await
+            .expect("count")
+            .get("n");
+        assert_eq!(count, 2, "both price bases must coexist");
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v3_rejects_unknown_adjustment_label() {
+        let pool = v2_pool_with_candles().await;
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v3 migration");
+
+        let result = sqlx::query(
+            r"
+            INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker, adjustment)
+            VALUES ('AAPL', '2024-06-10T13:30:00Z', 100, 100, 100, 100, 1000, 'alpaca', 'bogus')
+            ",
+        )
+        .execute(&pool)
+        .await;
+
+        assert!(
+            result.is_err(),
+            "CHECK constraint must reject an unrecognised adjustment label"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v3_is_idempotent() {
+        let pool = v2_pool_with_candles().await;
+        insert_legacy_candle(&pool, "AAPL", 400.0).await;
+
+        let manager = MigrationManager::new(pool.clone());
+        manager.run_migrations().await.expect("first run");
+        manager.run_migrations().await.expect("second run");
+
+        assert_eq!(
+            manager.get_schema_version().await.expect("version"),
+            3,
+            "re-running migrations must not advance or duplicate the version"
+        );
     }
 }

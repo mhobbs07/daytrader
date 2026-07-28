@@ -3,6 +3,7 @@
 //! This module orchestrates the flow of market data from providers through
 //! validation, caching, storage, and event publishing using functional patterns.
 
+use crate::brokers::traits::BarAdjustment;
 use crate::brokers::types::Symbol;
 use crate::data::{CandleStorage, MarketDataCache, validation};
 use crate::events::types::{Candle, Quote};
@@ -10,6 +11,22 @@ use crate::events::{EventBus, types::MarketEvent};
 use crate::utils::errors::Result;
 use std::sync::Arc;
 use tracing::{debug, error, warn};
+
+/// Corporate-action label recorded for bars arriving on the live feed.
+///
+/// Streaming bars carry as-traded prices, so `Raw` is their truthful
+/// provenance and the only honest label to store them under.
+///
+/// # Known gap
+///
+/// A detection window that splices these live raw bars onto adjusted
+/// historical bars straddles two price bases, and if a split occurred during
+/// the stored history the join is discontinuous. Closing this requires
+/// converting live bars onto the historical adjustment basis using a
+/// corporate-action factor table — B-086 step 2. Until then, treat same-day
+/// live bars and adjusted history as separate series rather than concatenating
+/// them.
+const LIVE_FEED_ADJUSTMENT: BarAdjustment = BarAdjustment::Raw;
 
 /// Data ingestion pipeline that processes market data
 ///
@@ -146,7 +163,10 @@ impl DataIngestionPipeline {
         let storage = self.storage.clone();
         let candle_for_db = candle.clone();
         tokio::spawn(async move {
-            if let Err(e) = storage.store_candle(&candle_for_db).await {
+            if let Err(e) = storage
+                .store_candle(&candle_for_db, LIVE_FEED_ADJUSTMENT)
+                .await
+            {
                 error!(
                     symbol = %candle_for_db.symbol,
                     error = %e,
@@ -311,7 +331,10 @@ impl DataIngestionPipeline {
         let storage = self.storage.clone();
         let candles_for_db = candles.clone();
         tokio::spawn(async move {
-            if let Err(e) = storage.store_candles(&candles_for_db).await {
+            if let Err(e) = storage
+                .store_candles(&candles_for_db, LIVE_FEED_ADJUSTMENT)
+                .await
+            {
                 error!(
                     count = candles_for_db.len(),
                     error = %e,
@@ -373,7 +396,9 @@ mod tests {
                 close TEXT NOT NULL,
                 volume INTEGER NOT NULL,
                 broker TEXT NOT NULL,
-                UNIQUE(symbol, timestamp, broker)
+                adjustment TEXT NOT NULL DEFAULT 'raw'
+                    CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
+                UNIQUE(symbol, timestamp, broker, adjustment)
             )
             ",
         )
@@ -420,7 +445,7 @@ mod tests {
         // Check database
         let stored = pipeline
             .storage()
-            .get_recent_candles(&symbol, 1)
+            .get_recent_candles(&symbol, 1, LIVE_FEED_ADJUSTMENT)
             .await
             .unwrap();
         assert_eq!(stored.len(), 1);
@@ -495,7 +520,11 @@ mod tests {
         sleep(TokioDuration::from_millis(100)).await;
 
         // Check database
-        let count = pipeline.storage().get_candle_count(&symbol).await.unwrap();
+        let count = pipeline
+            .storage()
+            .get_candle_count(&symbol, LIVE_FEED_ADJUSTMENT)
+            .await
+            .unwrap();
         assert_eq!(count, 5);
     }
 

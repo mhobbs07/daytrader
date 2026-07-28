@@ -298,6 +298,78 @@ pub enum Timeframe {
     OneDay,
 }
 
+/// Corporate-action adjustment applied to historical bars.
+///
+/// This is a correctness-critical parameter, not a preference. Unadjusted
+/// (`Raw`) bars spanning a split contain a discontinuity that is indistinguishable
+/// from a real price gap: a 4:1 split manufactures an apparent 75% drop, which
+/// pattern detectors will read as a signal and act on. Any series used for
+/// pattern detection, backtesting, or indicator calculation must be adjusted.
+///
+/// `Raw` remains available because it is the correct choice when reconciling
+/// against broker fills or tax lots, which are denominated in as-traded prices.
+///
+/// # Reproducibility caveat
+///
+/// Adjusted bars are adjusted *as of the time of the request*. Re-fetching the
+/// same historical window after a subsequent split yields different values, so a
+/// backtest is only reproducible against a pinned local copy. Storing raw bars
+/// alongside a corporate-action factor table, and adjusting at query time,
+/// removes this caveat — tracked as B-086 step 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BarAdjustment {
+    /// As-traded prices, no adjustment. Correct only for reconciling against
+    /// broker fills and tax lots — never for pattern detection or backtesting.
+    Raw,
+    /// Adjusted for stock splits only.
+    Split,
+    /// Adjusted for cash dividends only.
+    Dividend,
+    /// Adjusted for both splits and dividends. The correct default for analysis.
+    All,
+}
+
+impl BarAdjustment {
+    /// Returns the value for the Alpaca data API `adjustment` query parameter.
+    #[inline]
+    pub fn as_param(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::Split => "split",
+            Self::Dividend => "dividend",
+            Self::All => "all",
+        }
+    }
+
+    /// Returns the discriminator persisted alongside stored candles.
+    ///
+    /// Bars under different adjustments are different series and must never
+    /// collide in storage; this value is part of the candles uniqueness key.
+    #[inline]
+    pub fn as_str(self) -> &'static str {
+        self.as_param()
+    }
+
+    /// Whether bars under this adjustment are safe for pattern detection,
+    /// indicator calculation, and backtesting.
+    ///
+    /// `Raw` is not: split discontinuities are indistinguishable from gaps.
+    #[inline]
+    pub fn is_analysis_safe(self) -> bool {
+        !matches!(self, Self::Raw)
+    }
+}
+
+impl Default for BarAdjustment {
+    /// Splits and dividends both adjusted — the only default that cannot
+    /// silently manufacture a fake gap.
+    fn default() -> Self {
+        Self::All
+    }
+}
+
 // ============================================================================
 // Trait Definitions
 // ============================================================================
@@ -342,6 +414,11 @@ pub trait MarketDataProvider: Send + Sync {
 
     /// Get historical candles for a symbol
     ///
+    /// `adjustment` selects the corporate-action treatment and is
+    /// correctness-critical — see [`BarAdjustment`]. Callers feeding pattern
+    /// detection, indicators, or backtests must not pass
+    /// [`BarAdjustment::Raw`], which leaves split discontinuities in the series.
+    ///
     /// # Errors
     ///
     /// Returns an error if data retrieval fails or parameters are invalid
@@ -351,6 +428,7 @@ pub trait MarketDataProvider: Send + Sync {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError>;
 
     /// Start real-time data stream
@@ -501,5 +579,51 @@ mod tests {
         assert!(!candle.is_bearish());
         assert_eq!(candle.body_size(), Decimal::new(100, 2));
         assert_eq!(candle.range(), Decimal::new(300, 2));
+    }
+
+    #[test]
+    fn test_bar_adjustment_default_is_fully_adjusted() {
+        // A defaulted adjustment must never be Raw: an unadjusted series lets a
+        // split masquerade as a gap, which detectors will trade.
+        assert_eq!(BarAdjustment::default(), BarAdjustment::All);
+        assert!(BarAdjustment::default().is_analysis_safe());
+    }
+
+    #[test]
+    fn test_bar_adjustment_raw_is_not_analysis_safe() {
+        assert!(!BarAdjustment::Raw.is_analysis_safe());
+        assert!(BarAdjustment::Split.is_analysis_safe());
+        assert!(BarAdjustment::Dividend.is_analysis_safe());
+        assert!(BarAdjustment::All.is_analysis_safe());
+    }
+
+    #[test]
+    fn test_bar_adjustment_api_params_match_alpaca_vocabulary() {
+        assert_eq!(BarAdjustment::Raw.as_param(), "raw");
+        assert_eq!(BarAdjustment::Split.as_param(), "split");
+        assert_eq!(BarAdjustment::Dividend.as_param(), "dividend");
+        assert_eq!(BarAdjustment::All.as_param(), "all");
+    }
+
+    #[test]
+    fn test_bar_adjustment_storage_discriminators_are_distinct() {
+        // Bars under different adjustments are different series. If two
+        // variants shared a discriminator they would collide in the candles
+        // uniqueness key and silently overwrite one another.
+        let all = [
+            BarAdjustment::Raw,
+            BarAdjustment::Split,
+            BarAdjustment::Dividend,
+            BarAdjustment::All,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for adjustment in all {
+            assert!(
+                seen.insert(adjustment.as_str()),
+                "duplicate storage discriminator for {:?}",
+                adjustment
+            );
+        }
+        assert_eq!(seen.len(), 4);
     }
 }

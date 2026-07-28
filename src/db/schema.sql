@@ -22,11 +22,16 @@ CREATE TABLE IF NOT EXISTS candles (
     close REAL NOT NULL,
     volume INTEGER NOT NULL,
     broker TEXT NOT NULL,
+    -- Corporate-action treatment. Bars under different adjustments are
+    -- different series and must not collide; see BarAdjustment.
+    adjustment TEXT NOT NULL DEFAULT 'raw'
+        CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(symbol, timestamp, broker)
+    UNIQUE(symbol, timestamp, broker, adjustment)
 );
 
 CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_candles_adjustment ON candles(symbol, adjustment, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp DESC);
 
 -- Positions (Active Positions Only)

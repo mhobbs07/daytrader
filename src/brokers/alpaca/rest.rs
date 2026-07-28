@@ -11,7 +11,9 @@ use super::ratelimit::{RateLimiter, RateLimiterConfig};
 use super::types::{
     AlpacaAccount, AlpacaBarsResponse, AlpacaOrder, AlpacaPosition, PlaceOrderRequest,
 };
-use crate::brokers::traits::{Account, Candle, Order, OrderExecutionProvider, Position, Timeframe};
+use crate::brokers::traits::{
+    Account, BarAdjustment, Candle, Order, OrderExecutionProvider, Position, Timeframe,
+};
 use crate::brokers::types::{OrderId, Reason, Symbol};
 use crate::utils::errors::BrokerError;
 
@@ -226,6 +228,11 @@ impl RestClient {
     /// are validated at the boundary (positive prices, high >= low) and
     /// returned oldest-first as delivered by Alpaca.
     ///
+    /// `adjustment` is correctness-critical: [`BarAdjustment::Raw`] returns
+    /// as-traded prices, in which a stock split appears as a large gap that
+    /// pattern detectors cannot distinguish from a real move. Pass
+    /// [`BarAdjustment::All`] for anything feeding detection or backtesting.
+    ///
     /// # Errors
     ///
     /// Returns an error on connection failure, an API error response, or a
@@ -236,6 +243,7 @@ impl RestClient {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError> {
         let mut candles = Vec::new();
         let mut page_token: Option<String> = None;
@@ -247,7 +255,7 @@ impl RestClient {
                 ("start", start.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
                 ("end", end.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
                 ("limit", "10000".to_string()),
-                ("adjustment", "raw".to_string()),
+                ("adjustment", adjustment.as_param().to_string()),
             ];
             if let Some(token) = &page_token {
                 query.push(("page_token", token.clone()));
@@ -491,6 +499,7 @@ mod tests {
                 Utc.with_ymd_and_hms(2024, 6, 10, 13, 30, 0).unwrap(),
                 Utc.with_ymd_and_hms(2024, 6, 10, 20, 0, 0).unwrap(),
                 Timeframe::OneMinute,
+                BarAdjustment::All,
             )
             .await
             .unwrap();

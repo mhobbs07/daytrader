@@ -17,7 +17,8 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
 | B-085 | R0.3 — remove `to_string().parse()` decimal round-trip from the pattern-detection hot path | Done | 2026-07-28 | refactor/r0-measurement-integrity | 16 sites across `patterns/{traits,utils,multi_candle}.rs`, `brokers/types.rs`, `risk/types.rs`; all collapsed onto the canonical `patterns::utils::decimal_to_ratio` |
-| B-086 | R0.1 — corporate-action / split adjustment pipeline | In Progress | 2026-07-28 | refactor/r0-measurement-integrity | `alpaca/rest.rs:250` requests `adjustment=raw` with no compensating pipeline — unadjusted splits manufacture fake gaps that detectors trade |
+| B-086 | R0.1 step 1 — typed `BarAdjustment` + candle provenance | Done | 2026-07-28 | refactor/r0-measurement-integrity | `adjustment=raw` was hardcoded; now a `#[non_exhaustive]` enum defaulting to `All`, threaded through `get_bars`/`MarketDataProvider`/storage. Schema v3 adds an `adjustment` discriminator to the candles uniqueness key so price bases cannot collide. Step 2 (raw + factor table, query-time adjustment) still open |
+| B-089a | R0.5 — gate matched failure *counts*, not test *names* | Done | 2026-07-28 | refactor/r0-measurement-integrity | Any N new failures passed while N stayed under the known-issues ceiling; caught a real `data::ingestion` regression only by manual inspection. Now fails on any failing test absent from the baseline |
 
 ---
 
@@ -44,7 +45,7 @@ verdict directs.
 
 | ID | Task | Priority | Phase | Scope |
 |----|------|----------|-------|-------|
-| B-086 | Corporate-action / split adjustment: store bars unadjusted + factor table, adjust at query time (never in place) | Critical | R0.1 | `src/brokers/alpaca/rest.rs`, `src/data/`, `migrations/` |
+| B-086 | **Step 2** — corporate-action factor table + query-time adjustment; reconcile live raw bars onto the historical adjustment basis (step 1 landed 2026-07-28: typed `BarAdjustment`, schema v3 provenance). Also add the split-artefact regression test (a known 4:1 split must produce no signal) once factor data exists | Critical | R0.1 | `src/data/corporate_actions.rs`, `migrations/` |
 | B-087 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) | Critical | R0.2 | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
 | B-088 | Config type spine: `RawRiskConfig` → `TryFrom` → `RiskConfig`; drop `derive(Default)` (a default risk config currently disables every limit) | High | R0.4 | `src/config/mod.rs` |
 | B-089 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) | High | R0.5 | `scripts/`, `.governance/` |
