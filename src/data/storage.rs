@@ -10,7 +10,6 @@ use crate::utils::errors::{AppError, DatabaseError, Result};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::{Row, SqlitePool};
-use std::str::FromStr;
 
 /// Database storage for candle data
 ///
@@ -87,10 +86,13 @@ impl CandleStorage {
     pub async fn store_candle(&self, candle: &Candle, adjustment: BarAdjustment) -> Result<()> {
         let symbol = candle.symbol.as_str();
         let timestamp = candle.timestamp;
-        let open = candle.open.value().to_string();
-        let high = candle.high.value().to_string();
-        let low = candle.low.value().to_string();
-        let close = candle.close.value().to_string();
+        // Bound as f64 to match the REAL column affinity declared in
+        // schema.sql. Binding the decimal string also "works" — SQLite coerces
+        // it — but leaves the write and read sides visibly asymmetric.
+        let open = candle.open.as_f64();
+        let high = candle.high.as_f64();
+        let low = candle.low.as_f64();
+        let close = candle.close.as_f64();
         let volume = candle.volume as i64;
         let broker = "alpaca";
         let adjustment = adjustment.as_str();
@@ -181,10 +183,10 @@ impl CandleStorage {
         for candle in candles {
             let symbol = candle.symbol.as_str();
             let timestamp = candle.timestamp;
-            let open = candle.open.value().to_string();
-            let high = candle.high.value().to_string();
-            let low = candle.low.value().to_string();
-            let close = candle.close.value().to_string();
+            let open = candle.open.as_f64();
+            let high = candle.high.as_f64();
+            let low = candle.low.as_f64();
+            let close = candle.close.as_f64();
             let volume = candle.volume as i64;
             let broker = "alpaca";
 
@@ -391,10 +393,36 @@ impl CandleStorage {
     }
 }
 
-/// Convert a database row to a Candle struct
-fn row_to_candle(row: &sqlx::sqlite::SqliteRow) -> Result<Candle> {
+/// Reads one OHLC price column.
+///
+/// The `candles` price columns are declared `REAL` in `schema.sql`, so SQLite's
+/// column affinity coerces the numeric string bound on write into a double.
+/// Decoding them back as `String` therefore fails at runtime with a type
+/// mismatch — every candle read was broken against the real schema, hidden
+/// because the unit-test fixture declared these columns `TEXT`.
+///
+/// Decoding as `f64` matches the declared affinity. No precision is lost
+/// *here*: the value was already rounded to a double at write time. That
+/// lossiness is a property of the `REAL` column and is what B-087 removes by
+/// migrating money to `INTEGER` micro-units, at which point this helper decodes
+/// an `i64` and the float disappears entirely.
+fn price_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+) -> Result<crate::brokers::types::Price> {
     use crate::brokers::types::Price;
 
+    let raw: f64 = row
+        .try_get(column)
+        .map_err(|e| DatabaseError::QueryFailed(format!("column `{column}`: {e}")))?;
+    let value = Decimal::from_f64_retain(raw).ok_or_else(|| {
+        DatabaseError::QueryFailed(format!("column `{column}`: {raw} is not representable"))
+    })?;
+    Price::new(value).map_err(|e| AppError::Other(anyhow::anyhow!(e)))
+}
+
+/// Convert a database row to a Candle struct
+fn row_to_candle(row: &sqlx::sqlite::SqliteRow) -> Result<Candle> {
     let symbol_str: String = row
         .try_get("symbol")
         .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
@@ -404,37 +432,10 @@ fn row_to_candle(row: &sqlx::sqlite::SqliteRow) -> Result<Candle> {
         .try_get("timestamp")
         .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
 
-    let open_str: String = row
-        .try_get("open")
-        .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
-    let open = Price::new(
-        Decimal::from_str(&open_str).map_err(|e| DatabaseError::QueryFailed(e.to_string()))?,
-    )
-    .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
-
-    let high_str: String = row
-        .try_get("high")
-        .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
-    let high = Price::new(
-        Decimal::from_str(&high_str).map_err(|e| DatabaseError::QueryFailed(e.to_string()))?,
-    )
-    .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
-
-    let low_str: String = row
-        .try_get("low")
-        .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
-    let low = Price::new(
-        Decimal::from_str(&low_str).map_err(|e| DatabaseError::QueryFailed(e.to_string()))?,
-    )
-    .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
-
-    let close_str: String = row
-        .try_get("close")
-        .map_err(|e| DatabaseError::QueryFailed(e.to_string()))?;
-    let close = Price::new(
-        Decimal::from_str(&close_str).map_err(|e| DatabaseError::QueryFailed(e.to_string()))?,
-    )
-    .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    let open = price_from_row(row, "open")?;
+    let high = price_from_row(row, "high")?;
+    let low = price_from_row(row, "low")?;
+    let close = price_from_row(row, "close")?;
 
     let volume: i64 = row
         .try_get("volume")
@@ -469,10 +470,10 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
                 timestamp DATETIME NOT NULL,
-                open TEXT NOT NULL,
-                high TEXT NOT NULL,
-                low TEXT NOT NULL,
-                close TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
                 volume INTEGER NOT NULL,
                 broker TEXT NOT NULL,
                 adjustment TEXT NOT NULL DEFAULT 'raw'
