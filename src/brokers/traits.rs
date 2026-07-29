@@ -370,6 +370,50 @@ impl Default for BarAdjustment {
     }
 }
 
+/// A stock split reported by a broker's corporate-actions feed.
+///
+/// `from` old shares become `to` new shares: a forward 4:1 split is
+/// `{ from: 1, to: 4 }`; a 1:10 reverse split is `{ from: 10, to: 1 }`.
+/// Modeled as a ratio (not a single multiplier) so reverse splits are
+/// representable without a separate "direction" flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SplitAnnouncement {
+    /// Date the split takes effect. Bars dated before this need adjusting;
+    /// bars on or after it already reflect the new share count.
+    pub ex_date: chrono::NaiveDate,
+    /// Old shares in the ratio (must be positive)
+    pub from: u32,
+    /// New shares in the ratio (must be positive)
+    pub to: u32,
+}
+
+/// A cash dividend reported by a broker's corporate-actions feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CashDividendAnnouncement {
+    /// Date the dividend takes effect (the day the stock trades "ex" the
+    /// dividend, so its price is expected to drop by roughly `amount`).
+    pub ex_date: chrono::NaiveDate,
+    /// Cash amount paid per share
+    pub amount_per_share: Decimal,
+}
+
+/// A corporate action reported by a broker's corporate-actions feed for a
+/// single symbol.
+///
+/// This is the foundation-layer wire representation — broker-agnostic, no
+/// dependency on the storage/factor types in `data::corporate_actions`
+/// (which live in a higher layer and convert from this). Mirrors how
+/// [`Candle`] is the foundation-layer OHLCV representation that
+/// `data::storage` persists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorporateActionAnnouncement {
+    /// A stock split
+    Split(SplitAnnouncement),
+    /// A cash dividend
+    CashDividend(CashDividendAnnouncement),
+}
+
 // ============================================================================
 // Trait Definitions
 // ============================================================================
@@ -603,6 +647,44 @@ mod tests {
         assert_eq!(BarAdjustment::Split.as_param(), "split");
         assert_eq!(BarAdjustment::Dividend.as_param(), "dividend");
         assert_eq!(BarAdjustment::All.as_param(), "all");
+    }
+
+    #[test]
+    fn test_split_announcement_models_forward_and_reverse_ratios() {
+        // A forward split and a reverse split are both representable as a
+        // from:to ratio, just inverted — no separate "direction" enum needed.
+        let forward = SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 1,
+            to: 4,
+        };
+        let reverse = SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 10,
+            to: 1,
+        };
+        assert_ne!(forward, reverse);
+        assert!(forward.to > forward.from, "forward split increases shares");
+        assert!(reverse.from > reverse.to, "reverse split decreases shares");
+    }
+
+    #[test]
+    fn test_corporate_action_announcement_wraps_split_and_dividend() {
+        let split = CorporateActionAnnouncement::Split(SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 1,
+            to: 4,
+        });
+        let dividend = CorporateActionAnnouncement::CashDividend(CashDividendAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            amount_per_share: Decimal::new(25, 2),
+        });
+        assert_ne!(split, dividend);
+        assert!(matches!(split, CorporateActionAnnouncement::Split(_)));
+        assert!(matches!(
+            dividend,
+            CorporateActionAnnouncement::CashDividend(_)
+        ));
     }
 
     #[test]

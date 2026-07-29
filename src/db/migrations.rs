@@ -69,6 +69,9 @@ impl MigrationManager {
         if current_version < 3 {
             self.migrate_to_v3().await?;
         }
+        if current_version < 4 {
+            self.migrate_to_v4().await?;
+        }
 
         tracing::info!(
             "Database schema is at version {}",
@@ -253,6 +256,87 @@ impl MigrationManager {
         Ok(())
     }
 
+    /// Migration to version 4: Add the corporate-action factor table
+    ///
+    /// Step 1 (v3) made the corporate-action *basis* of a stored bar
+    /// explicit, but adjusted bars are only correct as of the moment they
+    /// were fetched — a subsequent split changes what the vendor returns for
+    /// the same historical window, so an adjusted series is not
+    /// reproducible, and it cannot be spliced with raw live bars without a
+    /// discontinuity at the split.
+    ///
+    /// The fix is to store bars raw and adjust at query time from a
+    /// separately-recorded ledger of corporate actions, rather than ever
+    /// rewriting stored prices in place. This migration adds that ledger.
+    /// `crate::data::corporate_actions` computes the adjustment factors from
+    /// its rows; this migration only creates the table.
+    ///
+    /// A row's `action_type` determines which of the type-specific columns
+    /// are populated: `split_from`/`split_to` for `'split'`,
+    /// `cash_amount` for `'cash_dividend'`. The CHECK constraint enforces
+    /// that exactly the right columns are set for each type, so a
+    /// half-populated row (e.g. a `'split'` with no ratio) cannot exist.
+    ///
+    /// `cash_amount` is `REAL`, matching the pre-existing (and already
+    /// imprecise) convention for money elsewhere in this schema — see the
+    /// `candles` price columns. The planned `Money<6>` integer-micros
+    /// migration (B-087, not yet landed) should convert this column
+    /// alongside the rest when it does.
+    ///
+    /// DDL is issued through the unchecked `sqlx::query` rather than the
+    /// `query!` macro, matching `migrate_to_v3`: these statements bind no
+    /// parameters and return no columns, so the macro would add
+    /// offline-cache entries without adding any verification.
+    async fn migrate_to_v4(&self) -> Result<(), sqlx::Error> {
+        tracing::info!("Migrating database schema to version 4...");
+
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS corporate_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                ex_date DATE NOT NULL,
+                action_type TEXT NOT NULL CHECK(action_type IN ('split', 'cash_dividend')),
+                split_from INTEGER,
+                split_to INTEGER,
+                -- REAL pending the B-087 Money<6> integer-micros migration;
+                -- convert this column alongside the rest when it lands.
+                cash_amount REAL,
+                source TEXT NOT NULL,
+                ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CHECK (
+                    (action_type = 'split'
+                        AND split_from IS NOT NULL AND split_from > 0
+                        AND split_to IS NOT NULL AND split_to > 0
+                        AND cash_amount IS NULL)
+                    OR
+                    (action_type = 'cash_dividend'
+                        AND cash_amount IS NOT NULL AND cash_amount > 0
+                        AND split_from IS NULL AND split_to IS NULL)
+                ),
+                UNIQUE(symbol, ex_date, action_type)
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_corporate_actions_symbol_date ON corporate_actions(symbol, ex_date)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query!(
+            "INSERT INTO schema_migrations (version, description) VALUES (4, 'Add corporate_actions factor table for query-time bar adjustment')"
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Migration to version 4 completed successfully");
+        Ok(())
+    }
+
     /// Validates database schema integrity
     pub async fn validate_schema(&self) -> Result<(), sqlx::Error> {
         // Check that all required tables exist
@@ -278,6 +362,7 @@ impl MigrationManager {
             "app_settings",
             "trading_signals",
             "indicator_values",
+            "corporate_actions",
         ];
 
         for table in required_tables {
@@ -451,6 +536,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_v3_is_idempotent() {
+        // `run_migrations` cascades through every migration up to the
+        // latest (now v4), so a v2 database converges there, not at v3.
         let pool = v2_pool_with_candles().await;
         insert_legacy_candle(&pool, "AAPL", 400.0).await;
 
@@ -460,7 +547,133 @@ mod tests {
 
         assert_eq!(
             manager.get_schema_version().await.expect("version"),
-            3,
+            4,
+            "re-running migrations must not advance or duplicate the version"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v4_preserves_existing_candles() {
+        // Adding the corporate_actions ledger must not touch the candles
+        // table it will eventually be read alongside.
+        let pool = v2_pool_with_candles().await;
+        insert_legacy_candle(&pool, "AAPL", 400.0).await;
+        insert_legacy_candle(&pool, "MSFT", 300.0).await;
+
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v2 -> v4 migration");
+
+        let count: i64 = sqlx::query("SELECT COUNT(*) AS n FROM candles")
+            .fetch_one(&pool)
+            .await
+            .expect("count")
+            .get("n");
+        assert_eq!(count, 2, "no candle rows may be lost by the v4 migration");
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v4_allows_split_and_dividend_for_same_symbol() {
+        // The uniqueness key is (symbol, ex_date, action_type), so a split
+        // and a dividend on different dates for the same symbol — the
+        // common case — must both be storable without colliding.
+        let pool = v2_pool_with_candles().await;
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v2 -> v4 migration");
+
+        sqlx::query(
+            r"
+            INSERT INTO corporate_actions (symbol, ex_date, action_type, split_from, split_to, source)
+            VALUES ('AAPL', '2020-08-31', 'split', 1, 4, 'alpaca')
+            ",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert split");
+
+        sqlx::query(
+            r"
+            INSERT INTO corporate_actions (symbol, ex_date, action_type, cash_amount, source)
+            VALUES ('AAPL', '2020-05-08', 'cash_dividend', 0.82, 'alpaca')
+            ",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert dividend must not collide with the split row");
+
+        let count: i64 =
+            sqlx::query("SELECT COUNT(*) AS n FROM corporate_actions WHERE symbol = 'AAPL'")
+                .fetch_one(&pool)
+                .await
+                .expect("count")
+                .get("n");
+        assert_eq!(count, 2, "both action types must coexist");
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v4_rejects_unknown_action_type() {
+        let pool = v2_pool_with_candles().await;
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v2 -> v4 migration");
+
+        let result = sqlx::query(
+            r"
+            INSERT INTO corporate_actions (symbol, ex_date, action_type, cash_amount, source)
+            VALUES ('AAPL', '2020-05-08', 'bogus', 0.82, 'alpaca')
+            ",
+        )
+        .execute(&pool)
+        .await;
+
+        assert!(
+            result.is_err(),
+            "CHECK constraint must reject an unrecognised action_type"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v4_rejects_split_row_missing_ratio() {
+        // A 'split' row with no split_from/split_to is a half-populated,
+        // meaningless row — the CHECK constraint must not let it in, the
+        // same way an unknown action_type is rejected.
+        let pool = v2_pool_with_candles().await;
+        MigrationManager::new(pool.clone())
+            .run_migrations()
+            .await
+            .expect("v2 -> v4 migration");
+
+        let result = sqlx::query(
+            r"
+            INSERT INTO corporate_actions (symbol, ex_date, action_type, source)
+            VALUES ('AAPL', '2020-08-31', 'split', 'alpaca')
+            ",
+        )
+        .execute(&pool)
+        .await;
+
+        assert!(
+            result.is_err(),
+            "CHECK constraint must reject a split row with no ratio"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_v4_is_idempotent() {
+        let pool = v2_pool_with_candles().await;
+        insert_legacy_candle(&pool, "AAPL", 400.0).await;
+
+        let manager = MigrationManager::new(pool.clone());
+        manager.run_migrations().await.expect("first run");
+        manager.run_migrations().await.expect("second run");
+
+        assert_eq!(
+            manager.get_schema_version().await.expect("version"),
+            4,
             "re-running migrations must not advance or duplicate the version"
         );
     }
