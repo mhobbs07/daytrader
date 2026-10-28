@@ -17,15 +17,19 @@ use tracing::{debug, error, warn};
 /// Streaming bars carry as-traded prices, so `Raw` is their truthful
 /// provenance and the only honest label to store them under.
 ///
-/// # Known gap
+/// # Closing the reconciliation gap
 ///
 /// A detection window that splices these live raw bars onto adjusted
 /// historical bars straddles two price bases, and if a split occurred during
-/// the stored history the join is discontinuous. Closing this requires
-/// converting live bars onto the historical adjustment basis using a
-/// corporate-action factor table — B-086 step 2. Until then, treat same-day
-/// live bars and adjusted history as separate series rather than concatenating
-/// them.
+/// the stored history the join is discontinuous. Storing everything raw
+/// (as this constant already does) and adjusting at query time removes the
+/// discontinuity: `crate::data::corporate_actions::adjust_candles` takes a
+/// raw series spanning both the live and historical windows plus the
+/// corporate-action factor table and returns one continuously-adjusted
+/// series — B-086 step 2. Callers reading a range that may include both
+/// live and historical bars should fetch raw (`BarAdjustment::Raw`) and run
+/// it through `adjust_candles` rather than mixing `get_recent_candles`
+/// results fetched under different adjustments.
 const LIVE_FEED_ADJUSTMENT: BarAdjustment = BarAdjustment::Raw;
 
 /// Data ingestion pipeline that processes market data
