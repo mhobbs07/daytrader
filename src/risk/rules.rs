@@ -18,7 +18,7 @@
 //! use daytrader::config::RiskConfig;
 //! use rust_decimal::Decimal;
 //!
-//! let config = RiskConfig::default();
+//! let config = RiskConfig::test_fixture();
 //! let engine = RiskRuleEngine::new(config);
 //!
 //! let context = TradeContext {
@@ -520,7 +520,7 @@ impl RiskRuleEngine {
     /// # use daytrader::config::RiskConfig;
     /// # use rust_decimal::Decimal;
     /// # tokio_test::block_on(async {
-    /// let config = RiskConfig::default();
+    /// let config = RiskConfig::test_fixture();
     /// let engine = RiskRuleEngine::new(config);
     ///
     /// let context = TradeContext::new(
@@ -627,7 +627,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_evaluation_structure() {
-        let config = RiskConfig::default();
+        let config = RiskConfig::test_fixture();
         let engine = RiskRuleEngine::new(config);
         let context = create_test_context();
 
@@ -677,7 +677,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_critical_violation_detection() {
-        let config = RiskConfig::default();
+        let config = RiskConfig::test_fixture();
         let engine = RiskRuleEngine::new(config);
 
         // Create a context that should pass

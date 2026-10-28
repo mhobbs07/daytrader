@@ -98,7 +98,7 @@ impl DailyLossLimits {
     /// use daytrader::config::RiskConfig;
     /// use daytrader::risk::limits::DailyLossLimits;
     ///
-    /// let mut config = RiskConfig::default();
+    /// let mut config = RiskConfig::test_fixture();
     /// config.max_daily_loss_dollars = 500.0;
     /// config.max_daily_loss_percent = 2.0;
     /// let limits = DailyLossLimits::try_from_config(&config).unwrap();
@@ -699,7 +699,7 @@ mod tests {
         RiskConfig {
             max_daily_loss_dollars: 500.0,
             max_daily_loss_percent: 2.0,
-            ..RiskConfig::default()
+            ..RiskConfig::test_fixture()
         }
     }
 
