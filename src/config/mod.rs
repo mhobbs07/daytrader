@@ -8,6 +8,7 @@
 //! - Logging configuration
 
 use crate::risk::types::{ConfidenceMultiplier, PatternPerformanceThresholds, PatternRiskProfile};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -151,6 +152,138 @@ pub enum RiskConfigError {
          min_account_balance ({min_balance})"
     )]
     EmergencyAboveMinBalance { emergency: f64, min_balance: f64 },
+
+    /// A pattern profile field was invalid.
+    #[error("pattern profile `{pattern}`: {source}")]
+    PatternProfile {
+        pattern: String,
+        #[source]
+        source: Box<RiskConfigError>,
+    },
+
+    /// A confidence multiplier band was invalid.
+    #[error("confidence_multipliers[{index}]: {source}")]
+    ConfidenceBand {
+        index: usize,
+        #[source]
+        source: Box<RiskConfigError>,
+    },
+
+    /// A multiplier was NaN, non-positive or above [`MAX_MULTIPLIER`].
+    #[error("risk config field `{field}` must be in (0, 10], got {value}")]
+    MultiplierOutOfRange { field: &'static str, value: f64 },
+
+    /// A confidence score was outside `[0, 1]`.
+    #[error("risk config field `{field}` must be in [0, 1], got {value}")]
+    ConfidenceOutOfRange { field: &'static str, value: f64 },
+
+    /// A confidence band had `min_confidence >= max_confidence`.
+    #[error("confidence band is empty or inverted: min {min} >= max {max}")]
+    InvertedConfidenceBand { min: f64, max: f64 },
+
+    /// Two confidence bands overlap.
+    #[error("confidence bands overlap: [{a_min}, {a_max}) and [{b_min}, {b_max})")]
+    OverlappingConfidenceBands {
+        a_min: f64,
+        a_max: f64,
+        b_min: f64,
+        b_max: f64,
+    },
+
+    /// A performance-threshold percentage was outside `[0, 100]`.
+    #[error("pattern_performance_thresholds.{field} must be in [0, 100], got {value}")]
+    ThresholdPercentOutOfRange { field: &'static str, value: String },
+}
+
+/// Upper bound for any risk/size/limit multiplier. Guards against a typo'd
+/// value silently lifting a limit by orders of magnitude.
+pub const MAX_MULTIPLIER: f64 = 10.0;
+
+fn multiplier(field: &'static str, value: f64) -> Result<f64, RiskConfigError> {
+    if value.is_finite() && value > 0.0 && value <= MAX_MULTIPLIER {
+        Ok(value)
+    } else {
+        Err(RiskConfigError::MultiplierOutOfRange { field, value })
+    }
+}
+
+fn confidence(field: &'static str, value: f64) -> Result<f64, RiskConfigError> {
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(RiskConfigError::ConfidenceOutOfRange { field, value })
+    }
+}
+
+fn validate_profile(p: &PatternRiskProfile) -> Result<(), RiskConfigError> {
+    at_least_one("max_trades_per_day", p.max_trades_per_day.value())?;
+    at_least_one(
+        "stop_after_consecutive_losses",
+        p.stop_after_consecutive_losses.value(),
+    )?;
+    multiplier(
+        "max_position_size_multiplier",
+        p.max_position_size_multiplier,
+    )?;
+    multiplier("risk_multiplier", p.risk_multiplier)?;
+    confidence("min_confidence_threshold", p.min_confidence_threshold)?;
+    Ok(())
+}
+
+fn validate_band(b: &ConfidenceMultiplier) -> Result<(), RiskConfigError> {
+    let min = confidence("min_confidence", b.min_confidence)?;
+    let max = confidence("max_confidence", b.max_confidence)?;
+    if min >= max {
+        return Err(RiskConfigError::InvertedConfidenceBand { min, max });
+    }
+    multiplier("position_size_multiplier", b.position_size_multiplier)?;
+    multiplier("trade_limit_multiplier", b.trade_limit_multiplier)?;
+    multiplier("risk_limit_multiplier", b.risk_limit_multiplier)?;
+    Ok(())
+}
+
+fn validate_bands(bands: &[ConfidenceMultiplier]) -> Result<(), RiskConfigError> {
+    for (index, b) in bands.iter().enumerate() {
+        validate_band(b).map_err(|e| RiskConfigError::ConfidenceBand {
+            index,
+            source: Box::new(e),
+        })?;
+    }
+    let mut sorted: Vec<&ConfidenceMultiplier> = bands.iter().collect();
+    sorted.sort_by(|a, b| a.min_confidence.total_cmp(&b.min_confidence));
+    for pair in sorted.windows(2) {
+        if pair[0].max_confidence > pair[1].min_confidence {
+            return Err(RiskConfigError::OverlappingConfidenceBands {
+                a_min: pair[0].min_confidence,
+                a_max: pair[0].max_confidence,
+                b_min: pair[1].min_confidence,
+                b_max: pair[1].max_confidence,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_thresholds(t: &PatternPerformanceThresholds) -> Result<(), RiskConfigError> {
+    let lo = Decimal::ZERO;
+    let hi = Decimal::new(1000, 1);
+    for (field, p) in [
+        ("min_win_rate_short", t.min_win_rate_short),
+        ("min_win_rate_medium", t.min_win_rate_medium),
+        ("min_win_rate_long", t.min_win_rate_long),
+        ("auto_disable_threshold", t.auto_disable_threshold),
+    ] {
+        let v = p.value();
+        if v < lo || v > hi {
+            return Err(RiskConfigError::ThresholdPercentOutOfRange {
+                field,
+                value: v.to_string(),
+            });
+        }
+    }
+    at_least_one("max_consecutive_losses", t.max_consecutive_losses.value())?;
+    at_least_one("min_sample_size", t.min_sample_size.value())?;
+    Ok(())
 }
 
 fn finite(field: &'static str, value: f64) -> Result<f64, RiskConfigError> {
@@ -217,6 +350,15 @@ impl TryFrom<RawRiskConfig> for RiskConfig {
         } else {
             non_negative("pdt_min_equity", raw.pdt_min_equity)?
         };
+
+        for (name, profile) in &raw.pattern_profiles {
+            validate_profile(profile).map_err(|e| RiskConfigError::PatternProfile {
+                pattern: name.clone(),
+                source: Box::new(e),
+            })?;
+        }
+        validate_bands(&raw.confidence_multipliers)?;
+        validate_thresholds(&raw.pattern_performance_thresholds)?;
 
         Ok(Self {
             max_daily_loss_dollars: positive("max_daily_loss_dollars", raw.max_daily_loss_dollars)?,
@@ -358,6 +500,234 @@ mod tests {
         assert_eq!(config.risk.max_daily_loss_dollars, 500.0);
         assert!(config.risk.enforce_pdt_rule);
         assert_eq!(config.risk.max_concurrent_positions, 5);
+    }
+
+    fn profile() -> PatternRiskProfile {
+        PatternRiskProfile::moderate()
+    }
+
+    fn band(min: f64, max: f64) -> ConfidenceMultiplier {
+        ConfidenceMultiplier {
+            min_confidence: min,
+            max_confidence: max,
+            position_size_multiplier: 1.0,
+            trade_limit_multiplier: 1.0,
+            risk_limit_multiplier: 1.0,
+        }
+    }
+
+    fn with_profile(p: PatternRiskProfile) -> Result<RiskConfig, RiskConfigError> {
+        let mut r = raw();
+        r.pattern_profiles.insert("hammer".into(), p);
+        RiskConfig::try_from(r)
+    }
+
+    fn with_bands(b: Vec<ConfidenceMultiplier>) -> Result<RiskConfig, RiskConfigError> {
+        let mut r = raw();
+        r.confidence_multipliers = b;
+        RiskConfig::try_from(r)
+    }
+
+    fn profile_err(e: RiskConfigError) -> RiskConfigError {
+        match e {
+            RiskConfigError::PatternProfile { source, .. } => *source,
+            other => other,
+        }
+    }
+
+    fn band_err(e: RiskConfigError) -> RiskConfigError {
+        match e {
+            RiskConfigError::ConfidenceBand { source, .. } => *source,
+            other => other,
+        }
+    }
+
+    #[test]
+    fn test_valid_profile_and_bands_accepted() {
+        assert!(with_profile(profile()).is_ok());
+        assert!(with_bands(vec![band(0.0, 0.5), band(0.5, 1.0)]).is_ok());
+    }
+
+    #[test]
+    fn test_profile_nan_risk_multiplier_rejected() {
+        let mut p = profile();
+        p.risk_multiplier = f64::NAN;
+        assert!(matches!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::MultiplierOutOfRange {
+                field: "risk_multiplier",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_profile_negative_risk_multiplier_rejected() {
+        let mut p = profile();
+        p.risk_multiplier = -0.5;
+        assert!(matches!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::MultiplierOutOfRange {
+                field: "risk_multiplier",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_profile_huge_position_multiplier_rejected() {
+        let mut p = profile();
+        p.max_position_size_multiplier = 1.0e9;
+        assert!(matches!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::MultiplierOutOfRange {
+                field: "max_position_size_multiplier",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_profile_confidence_threshold_out_of_range_rejected() {
+        let mut p = profile();
+        p.min_confidence_threshold = 1.5;
+        assert!(matches!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::ConfidenceOutOfRange {
+                field: "min_confidence_threshold",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_profile_zero_max_trades_rejected() {
+        let mut p = profile();
+        p.max_trades_per_day = crate::risk::types::Count::new(0).unwrap();
+        assert_eq!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::ZeroCount {
+                field: "max_trades_per_day"
+            }
+        );
+    }
+
+    #[test]
+    fn test_profile_zero_stop_losses_rejected() {
+        let mut p = profile();
+        p.stop_after_consecutive_losses = crate::risk::types::Count::new(0).unwrap();
+        assert_eq!(
+            profile_err(with_profile(p).unwrap_err()),
+            RiskConfigError::ZeroCount {
+                field: "stop_after_consecutive_losses"
+            }
+        );
+    }
+
+    #[test]
+    fn test_band_inverted_rejected() {
+        assert!(matches!(
+            band_err(with_bands(vec![band(0.6, 0.4)]).unwrap_err()),
+            RiskConfigError::InvertedConfidenceBand { .. }
+        ));
+    }
+
+    #[test]
+    fn test_band_confidence_out_of_range_rejected() {
+        assert!(matches!(
+            band_err(with_bands(vec![band(0.0, 1.5)]).unwrap_err()),
+            RiskConfigError::ConfidenceOutOfRange {
+                field: "max_confidence",
+                ..
+            }
+        ));
+        assert!(matches!(
+            band_err(with_bands(vec![band(-0.1, 0.5)]).unwrap_err()),
+            RiskConfigError::ConfidenceOutOfRange {
+                field: "min_confidence",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_band_bad_multipliers_rejected() {
+        for (i, field) in [
+            "position_size_multiplier",
+            "trade_limit_multiplier",
+            "risk_limit_multiplier",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut b = band(0.0, 1.0);
+            match i {
+                0 => b.position_size_multiplier = f64::NAN,
+                1 => b.trade_limit_multiplier = 0.0,
+                _ => b.risk_limit_multiplier = 100.0,
+            }
+            assert!(matches!(
+                band_err(with_bands(vec![b]).unwrap_err()),
+                RiskConfigError::MultiplierOutOfRange { field: f, .. } if f == field
+            ));
+        }
+    }
+
+    #[test]
+    fn test_overlapping_bands_rejected() {
+        assert!(matches!(
+            with_bands(vec![band(0.5, 1.0), band(0.0, 0.6)]).unwrap_err(),
+            RiskConfigError::OverlappingConfidenceBands { .. }
+        ));
+    }
+
+    fn with_thresholds(
+        f: impl FnOnce(&mut PatternPerformanceThresholds),
+    ) -> Result<RiskConfig, RiskConfigError> {
+        let mut r = raw();
+        f(&mut r.pattern_performance_thresholds);
+        RiskConfig::try_from(r)
+    }
+
+    #[test]
+    fn test_thresholds_out_of_range_percentage_rejected() {
+        // Percentage's derived Deserialize bypasses its range check.
+        let bad = serde_json::from_str::<crate::risk::types::Percentage>("\"150.0\"").unwrap();
+        for field in [
+            "min_win_rate_short",
+            "min_win_rate_medium",
+            "min_win_rate_long",
+            "auto_disable_threshold",
+        ] {
+            let err = with_thresholds(|t| match field {
+                "min_win_rate_short" => t.min_win_rate_short = bad,
+                "min_win_rate_medium" => t.min_win_rate_medium = bad,
+                "min_win_rate_long" => t.min_win_rate_long = bad,
+                _ => t.auto_disable_threshold = bad,
+            })
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                RiskConfigError::ThresholdPercentOutOfRange { field: f, .. } if f == field
+            ));
+        }
+    }
+
+    #[test]
+    fn test_thresholds_zero_counts_rejected() {
+        let zero = crate::risk::types::Count::new(0).unwrap();
+        assert_eq!(
+            with_thresholds(|t| t.max_consecutive_losses = zero).unwrap_err(),
+            RiskConfigError::ZeroCount {
+                field: "max_consecutive_losses"
+            }
+        );
+        assert_eq!(
+            with_thresholds(|t| t.min_sample_size = zero).unwrap_err(),
+            RiskConfigError::ZeroCount {
+                field: "min_sample_size"
+            }
+        );
     }
 
     #[test]
