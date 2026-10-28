@@ -19,9 +19,9 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 | B-085 | R0.3 — remove `to_string().parse()` decimal round-trip from the pattern-detection hot path | Done | 2026-07-28 | refactor/r0-measurement-integrity | 16 sites across `patterns/{traits,utils,multi_candle}.rs`, `brokers/types.rs`, `risk/types.rs`; all collapsed onto the canonical `patterns::utils::decimal_to_ratio` |
 | B-086 | R0.1 step 1 — typed `BarAdjustment` + candle provenance | Done | 2026-07-28 | refactor/r0-measurement-integrity | `adjustment=raw` was hardcoded; now a `#[non_exhaustive]` enum defaulting to `All`, threaded through `get_bars`/`MarketDataProvider`/storage. Schema v3 adds an `adjustment` discriminator to the candles uniqueness key so price bases cannot collide. Step 2 (raw + factor table, query-time adjustment) still open |
 | B-089a | R0.5 — gate matched failure *counts*, not test *names* | Done | 2026-07-28 | refactor/r0-measurement-integrity | Any N new failures passed while N stayed under the known-issues ceiling; caught a real `data::ingestion` regression only by manual inspection. Now fails on any failing test absent from the baseline |
-| B-103 | R0.5 — repair the `benches/` suite + `scripts/verify_perf.sh` | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 1. All 5 criterion suites fail to compile against the post-newtype-refactor API |
-| B-088 | R0.4 — config type spine (`RawRiskConfig` → `TryFrom` → `RiskConfig`) | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 2. `RiskConfig::default()` currently yields a config with every limit disabled |
-| B-086b | R0.1 step 2 — corporate-action factors + query-time adjustment | In Progress | 2026-07-28 | feat/r0-parallel-sweep | Swarm agent 3. Migration v4, `src/data/corporate_actions.rs`, 4:1-split-produces-no-signal regression test |
+| B-103 | R0.5 — repair the `benches/` suite + `scripts/verify_perf.sh` | Done | 2026-10-28 | feat/r0-parallel-sweep | All 5 criterion suites compile against the current API (no benchmarks deleted). Found Cargo.toml lacked `[[bench]] harness = false`, so benches had run zero criterion benchmarks; added. New `scripts/verify_perf.sh` (compile gate; `--quick` runs each bench once). Not yet wired into verify/CI (B-089) |
+| B-088 | R0.4 — config type spine (`RawRiskConfig` → `TryFrom` → `RiskConfig`) | Done | 2026-10-28 | feat/r0-parallel-sweep | `derive(Default)` removed; `RiskConfig` deserializes via `#[serde(try_from)]` so every load path validates (scalars, pattern profiles, confidence bands, performance thresholds) with typed `RiskConfigError`. Tauri fallback uses embedded `config/default.toml`. Follow-ups: private fields/newtypes; gate `test_fixture()` behind cfg; fail hard on invalid user config instead of falling back |
+| B-086b | R0.1 step 2 — corporate-action factors + query-time adjustment | Done | 2026-10-28 | feat/r0-parallel-sweep | Migration v4, `src/data/corporate_actions.rs`, query-time factor adjustment, 4:1-split-produces-no-signal regression test |
 
 ---
 
@@ -48,13 +48,10 @@ verdict directs.
 
 | ID | Task | Priority | Phase | Scope |
 |----|------|----------|-------|-------|
-| B-086 | **Step 2** — corporate-action factor table + query-time adjustment; reconcile live raw bars onto the historical adjustment basis (step 1 landed 2026-07-28: typed `BarAdjustment`, schema v3 provenance). Also add the split-artefact regression test (a known 4:1 split must produce no signal) once factor data exists | Critical | R0.1 | `src/data/corporate_actions.rs`, `migrations/` |
 | B-087 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) | Critical | R0.2 | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
-| B-088 | Config type spine: `RawRiskConfig` → `TryFrom` → `RiskConfig`; drop `derive(Default)` (a default risk config currently disables every limit) | High | R0.4 | `src/config/mod.rs` |
 | B-089 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) | High | R0.5 | `scripts/`, `.governance/` |
 | B-090 | Dependency cleanup: delete `ta`/`once_cell`/`tower`/`crossbeam`/`rusqlite` (0–2 refs each); upgrade reqwest 0.11→0.13, tungstenite 0.21→0.30, thiserror 1→2, sqlx 0.8→0.9 | Medium | R0.6 | `Cargo.toml` |
 | B-091 | Data-quality gates + `data_quality_events` quarantine table; free-tier divergence audit → `docs/data-validity.md` | High | R0.7 | `src/data/validation.rs` |
-| B-103 | **`benches/` does not compile** — `cargo bench --bench pattern_benchmarks` fails with 9 errors (E0063/E0277/E0382/E0507) and no script references any bench. Prerequisite for the perf-regression gate and for measuring R0.3/R1 throughput claims | High | R0.5 | `benches/`, `scripts/verify_perf.sh` |
 | B-092 | Backtester realism: `FillModel` trait (spread/impact/participation), short side, PDT accrual during replay, EOD liquidation | Critical | R1 | `src/execution/backtest.rs` |
 | B-093 | Walk-forward + purged K-fold with embargo; deflated Sharpe fed by sweep trial count | Critical | R1 | `src/execution/` |
 | B-094 | Metric suite + Monte Carlo bootstrap + per-pattern × regime × hour attribution | High | R1 | `src/execution/`, `src/utils/stats.rs` |

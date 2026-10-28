@@ -8,31 +8,43 @@
 
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use daytrader::brokers::traits::{OrderExecutionProvider, OrderSide, OrderType, TimeInForce};
 use daytrader::brokers::types::{OrderId, PatternName, Price, Quantity, Symbol};
 use daytrader::db::repositories::PositionRepository;
-use daytrader::events::EventBus;
-use daytrader::orders::types::{FillInfo, ManagedOrder, OrderRequest};
 use daytrader::positions::{
-    pnl::{PnLCalculator, PnLConfig, TaxLotMethod},
-    tracker::{CloseReason, Position, PositionConfig, PositionSide, PositionTracker},
+    pnl::PnLCalculator,
+    tracker::{CloseReason, Position, PositionSide},
 };
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
-use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 // =============================================================================
 // Test Data Generators
 // =============================================================================
 
+/// Builds a validated Price (bench inputs are always valid)
+fn px(v: Decimal) -> Price {
+    Price::new(v).unwrap()
+}
+
+/// Builds a validated Quantity
+fn qty(v: u32) -> Quantity {
+    Quantity::new(v).unwrap()
+}
+
+/// Builds a validated Symbol
+fn sym(s: &str) -> Symbol {
+    Symbol::new(s).unwrap()
+}
+
 /// Creates a test position with realistic data
 fn create_test_position(symbol: &str, quantity: u32, entry_price: f64) -> Position {
     Position::new(
-        Symbol::new(symbol),
+        sym(symbol),
         PositionSide::Long,
-        Quantity::new(quantity),
-        Price::new(Decimal::from_f64_retain(entry_price).unwrap()),
+        qty(quantity),
+        px(Decimal::from_f64_retain(entry_price).unwrap()),
         OrderId::new(format!("order-{}", symbol)),
         None,
         None,
@@ -51,43 +63,6 @@ fn create_test_positions(count: usize) -> Vec<Position> {
         .collect()
 }
 
-/// Creates test fill info
-fn create_fill_info(quantity: u32, price: f64, commission: f64) -> FillInfo {
-    FillInfo {
-        filled_quantity: Quantity::new(quantity),
-        filled_price: Price::new(Decimal::from_f64_retain(price).unwrap()),
-        filled_at: Utc::now(),
-        commission: Decimal::from_f64_retain(commission).unwrap(),
-    }
-}
-
-/// Creates a test managed order
-fn create_test_order(symbol: &str, side: OrderSide, quantity: u32) -> ManagedOrder {
-    ManagedOrder {
-        id: OrderId::new(format!("order-{}", symbol)),
-        broker_order_id: None,
-        symbol: Symbol::new(symbol),
-        side,
-        order_type: OrderType::Market,
-        quantity: Quantity::new(quantity),
-        filled_quantity: 0,
-        limit_price: None,
-        stop_price: None,
-        trailing_amount: None,
-        time_in_force: TimeInForce::Day,
-        status: daytrader::brokers::traits::OrderStatus::Pending,
-        submitted_at: None,
-        filled_at: None,
-        filled_avg_price: None,
-        commission: None,
-        error_message: None,
-        is_pattern_trade: false,
-        pattern_name: None,
-        signal_id: None,
-        signal_confidence: None,
-    }
-}
-
 // =============================================================================
 // 1. P&L Calculator Benchmarks
 // =============================================================================
@@ -97,7 +72,7 @@ pub fn bench_unrealized_pl_single(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
     let cost_basis = dec!(10000.00);
     let quantity = 100;
-    let current_price = Price::new(dec!(105.00));
+    let current_price = px(dec!(105.00));
 
     let mut group = c.benchmark_group("pnl_calculations");
 
@@ -119,7 +94,7 @@ pub fn bench_unrealized_pl_percent(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
     let cost_basis = dec!(10000.00);
     let quantity = 100;
-    let current_price = Price::new(dec!(105.00));
+    let current_price = px(dec!(105.00));
 
     let mut group = c.benchmark_group("pnl_calculations");
 
@@ -139,9 +114,9 @@ pub fn bench_unrealized_pl_percent(c: &mut Criterion) {
 /// Benchmark realized P&L calculation
 pub fn bench_realized_pl(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
-    let entry_price = Price::new(dec!(100.00));
-    let exit_price = Price::new(dec!(110.00));
-    let quantity = Quantity::new(100);
+    let entry_price = px(dec!(100.00));
+    let exit_price = px(dec!(110.00));
+    let quantity = qty(100);
     let commission = dec!(2.00);
 
     let mut group = c.benchmark_group("pnl_calculations");
@@ -171,7 +146,7 @@ pub fn bench_portfolio_pl(c: &mut Criterion) {
             .map(|i| {
                 let cost_basis = dec!(10000.00) + Decimal::from(i * 100);
                 let quantity = 100;
-                let current_price = Price::new(dec!(105.00) + Decimal::from(i % 10));
+                let current_price = px(dec!(105.00) + Decimal::from(i % 10));
                 (cost_basis, quantity, current_price)
             })
             .collect();
@@ -192,9 +167,9 @@ pub fn bench_portfolio_pl(c: &mut Criterion) {
 /// Benchmark average entry price calculation (position averaging)
 pub fn bench_average_entry_calculation(c: &mut Criterion) {
     let calculator = PnLCalculator::with_defaults();
-    let existing_avg = Price::new(dec!(100.00));
+    let existing_avg = px(dec!(100.00));
     let existing_qty = 100;
-    let new_price = Price::new(dec!(105.00));
+    let new_price = px(dec!(105.00));
     let new_qty = 50;
 
     let mut group = c.benchmark_group("pnl_calculations");
@@ -276,7 +251,7 @@ pub fn bench_position_updates(c: &mut Criterion) {
 
                     // Now update all positions with new prices
                     for (i, mut position) in positions.into_iter().enumerate() {
-                        position.current_price = Price::new(dec!(105.00) + Decimal::from(i % 10));
+                        position.current_price = px(dec!(105.00) + Decimal::from(i % 10));
                         let _ = repo.update_position(&position, 1).await;
                     }
                 });
@@ -430,7 +405,7 @@ pub fn bench_position_closing(c: &mut Criterion) {
             rt.block_on(async {
                 let repo = PositionRepository::new(db_pool.clone());
                 let position = &positions[0];
-                let exit_price = Price::new(dec!(110.00));
+                let exit_price = px(dec!(110.00));
                 let close_reason = CloseReason::TakeProfit;
 
                 let _ = black_box(
@@ -571,7 +546,11 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
         let positions = create_test_positions(500);
         for position in &positions {
             let exit_price = position.current_price.value() * dec!(1.05);
-            sqlx::query!(
+            let realized_pl = (exit_price - position.avg_entry_price.value())
+                .to_f64()
+                .unwrap_or(0.0)
+                * position.quantity.value() as f64;
+            sqlx::query(
                 r#"
                 INSERT INTO position_history (
                     account_id, symbol, quantity, side, avg_entry_price, exit_price,
@@ -579,26 +558,25 @@ pub fn bench_position_history_queries(c: &mut Criterion) {
                     holding_period_minutes, close_reason, pattern_name, signal_confidence,
                     entry_orders, exit_orders
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-                1,
-                position.symbol.as_str(),
-                position.quantity.value(),
-                "long",
-                position.avg_entry_price.as_f64(),
-                exit_price.to_f64().unwrap_or(0.0),
-                position.cost_basis.to_f64().unwrap_or(0.0),
-                0.0,
-                (exit_price - position.avg_entry_price.value()).to_f64().unwrap_or(0.0) * position.quantity.value() as f64,
-                (exit_price - position.avg_entry_price.value()).to_f64().unwrap_or(0.0) * position.quantity.value() as f64,
-                position.opened_at,
-                Utc::now(),
-                60,
-                "take_profit",
-                None::<String>,
-                None::<f64>,
-                "[]",
-                "[]",
-            )
+                "#)
+            .bind(1)
+            .bind(position.symbol.as_str())
+            .bind(position.quantity.value())
+            .bind("long")
+            .bind(position.avg_entry_price.as_f64())
+            .bind(exit_price.to_f64().unwrap_or(0.0))
+            .bind(position.cost_basis.to_f64().unwrap_or(0.0))
+            .bind(0.0)
+            .bind(realized_pl)
+            .bind(realized_pl)
+            .bind(position.opened_at)
+            .bind(Utc::now())
+            .bind(60)
+            .bind("take_profit")
+            .bind(None::<String>)
+            .bind(None::<f64>)
+            .bind("[]")
+            .bind("[]")
             .execute(&pool)
             .await
             .unwrap();

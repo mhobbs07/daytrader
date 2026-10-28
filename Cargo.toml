@@ -124,6 +124,28 @@ panic = "abort"
 incremental = false
 codegen-units = 1
 
+# Criterion benches supply their own main; without harness = false cargo
+# builds them against libtest and silently runs zero benchmarks.
+[[bench]]
+name = "pattern_benchmarks"
+harness = false
+
+[[bench]]
+name = "pattern_signal_benchmarks"
+harness = false
+
+[[bench]]
+name = "phase_3d_benchmarks"
+harness = false
+
+[[bench]]
+name = "position_benchmarks"
+harness = false
+
+[[bench]]
+name = "risk_benchmarks"
+harness = false
+
 [profile.bench]
 inherits = "release"
 debug = true
