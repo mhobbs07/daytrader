@@ -67,41 +67,18 @@ fn load_config() -> AppConfig {
                 "Failed to load config from {}: {e} — using built-in defaults",
                 path.display()
             );
-            AppConfig {
-                broker: daytrader::config::BrokerConfig {
-                    provider: "mock".to_string(),
-                    is_paper: true,
-                    api_key: String::new(),
-                    api_secret: String::new(),
-                },
-                database: daytrader::config::DatabaseConfig {
-                    path: "data/db/daytrader.db".into(),
-                    max_connections: 10,
-                },
-                logging: daytrader::config::LoggingConfig {
-                    level: "info".to_string(),
-                    file_path: "data/logs/daytrader.log".into(),
-                },
-                risk: daytrader::config::RiskConfig {
-                    max_daily_loss_dollars: 500.0,
-                    max_daily_loss_percent: 2.0,
-                    halt_trading_on_limit: true,
-                    max_position_size_dollars: 5000.0,
-                    max_position_size_percent: 10.0,
-                    max_concurrent_positions: 5,
-                    enforce_pdt_rule: true,
-                    pdt_min_equity: 25000.0,
-                    max_day_trades_under_pdt: 3,
-                    max_trades_per_pattern_per_day: 5,
-                    stop_pattern_after_consecutive_losses: 3,
-                    required_win_rate_for_auto: 60.0,
-                    min_pattern_sample_size: 20,
-                    min_account_balance: 1000.0,
-                    emergency_liquidate_threshold: 500.0,
-                    pattern_profiles: std::collections::HashMap::new(),
-                    confidence_multipliers: vec![],
-                    pattern_performance_thresholds: Default::default(),
-                },
+            // Fall back to the validated, embedded copy of config/default.toml.
+            // Never fabricate limits by hand: a bad embedded config is a build
+            // bug and must stop startup rather than run without risk limits.
+            match AppConfig::embedded_default() {
+                Ok(mut config) => {
+                    config.broker.provider = "mock".to_string();
+                    config
+                }
+                Err(e) => {
+                    eprintln!("Embedded default config is invalid: {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }

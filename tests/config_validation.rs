@@ -148,9 +148,9 @@ emergency_liquidate_threshold = 0.0
     temp_file.write_all(zero_values_toml.as_bytes()).unwrap();
     temp_file.flush().unwrap();
 
-    let config = AppConfig::from_file(temp_file.path()).unwrap();
-    assert_eq!(config.database.max_connections, 0);
-    assert_eq!(config.risk.max_daily_loss_dollars, 0.0);
+    // An all-zero risk config is a disabled risk config and must be rejected.
+    let result = AppConfig::from_file(temp_file.path());
+    assert!(result.is_err(), "all-zero risk limits must be rejected");
 
     // Test very large values
     let large_values_toml = r#"
@@ -170,10 +170,10 @@ file_path = "test.log"
 
 [risk]
 max_daily_loss_dollars = 1000000.0
-max_daily_loss_percent = 1000.0
+max_daily_loss_percent = 100.0
 halt_trading_on_limit = true
 max_position_size_dollars = 10000000.0
-max_position_size_percent = 1000.0
+max_position_size_percent = 100.0
 max_concurrent_positions = 10000
 enforce_pdt_rule = true
 pdt_min_equity = 10000000.0

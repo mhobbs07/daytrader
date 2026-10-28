@@ -25,7 +25,7 @@ mod tests {
     #[test]
     fn test_risk_engine_construction() {
         // Verify RiskEngine can be constructed and exports are accessible
-        let config = RiskConfig::default();
+        let config = RiskConfig::test_fixture();
         let event_bus = Arc::new(EventBus::new(100));
         let account_id = AccountId::new("TEST_ACCOUNT");
         let initial_equity = Decimal::from(100_000);
