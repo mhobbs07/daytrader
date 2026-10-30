@@ -47,7 +47,9 @@ export const useMarketStore = create<MarketStore>((set, _get) => ({
         symbol,
         bid: Number(event.payload.bid),
         ask: Number(event.payload.ask),
-        last: Number(event.payload.bid),
+        // The event payload carries no last-trade price; use the documented
+        // midpoint fallback to match QuoteResponse's backend semantics.
+        last: (Number(event.payload.bid) + Number(event.payload.ask)) / 2,
         timestamp: event.payload.timestamp,
       };
       set(state => {
