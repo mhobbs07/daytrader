@@ -87,8 +87,25 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Signal generation error types
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum SignalError {
+    /// The candle window passed to signal generation spans more than one symbol
+    #[error("Mixed symbols in candle window: expected {expected}, found {found}")]
+    MixedSymbols {
+        /// Symbol of the first candle in the window
+        expected: Symbol,
+        /// First differing symbol encountered
+        found: Symbol,
+    },
+
+    /// Underlying pattern error
+    #[error(transparent)]
+    Pattern(#[from] PatternError),
+}
+
 /// Result type for signal generation operations
-pub type SignalResult<T> = Result<T, PatternError>;
+pub type SignalResult<T> = Result<T, SignalError>;
 
 /// Trading signal with enhanced context and confidence scoring
 ///
@@ -888,6 +905,14 @@ impl SignalEngine {
     }
 
     /// Generates trading signals from pattern results and candle data
+    ///
+    /// All candles in `candles` must belong to the same symbol; the produced
+    /// signals carry that symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SignalError::MixedSymbols`] if `candles` spans more than one
+    /// symbol.
     pub async fn generate_signals(
         &mut self,
         pattern_results: &[PatternResult],
@@ -910,25 +935,29 @@ impl SignalEngine {
     ) -> SignalResult<Vec<TradingSignal>> {
         use futures::future::join_all;
 
-        // Group patterns by symbol for parallel processing
-        let mut patterns_by_symbol: HashMap<String, Vec<&PatternResult>> = HashMap::new();
-
-        for pattern in pattern_results {
-            // In a full implementation, patterns would have symbol information
-            // For now, assume all patterns are for the same symbol
-            let symbol_key = "DEFAULT".to_string();
-            patterns_by_symbol
-                .entry(symbol_key)
-                .or_insert_with(Vec::new)
-                .push(pattern);
+        // The candle window determines the symbol; it must be homogeneous.
+        let Some(first) = candles.first() else {
+            return Ok(Vec::new());
+        };
+        let window_symbol = first.symbol.clone();
+        if let Some(other) = candles.iter().find(|c| c.symbol != window_symbol) {
+            return Err(SignalError::MixedSymbols {
+                expected: window_symbol,
+                found: other.symbol.clone(),
+            });
         }
+
+        // Group patterns by symbol (a single group: the window's symbol)
+        let mut patterns_by_symbol: HashMap<Symbol, Vec<&PatternResult>> = HashMap::new();
+        patterns_by_symbol
+            .entry(window_symbol)
+            .or_default()
+            .extend(pattern_results.iter());
 
         // Process each symbol in parallel
         let mut signal_futures = Vec::new();
 
-        for (symbol_str, patterns) in patterns_by_symbol {
-            let symbol =
-                Symbol::new(&symbol_str).unwrap_or_else(|_| Symbol::new("UNKNOWN").unwrap());
+        for (symbol, patterns) in patterns_by_symbol {
             let patterns_clone = patterns.iter().map(|&p| p.clone()).collect::<Vec<_>>();
             let candles_clone = candles.to_vec();
 
@@ -1451,5 +1480,102 @@ mod tests {
 
         cache.clear();
         assert_eq!(cache.size(), 0);
+    }
+
+    fn candle_window(symbol: &str, len: i64) -> Vec<Candle> {
+        let symbol = Symbol::new(symbol).unwrap();
+        let start = Utc::now() - chrono::Duration::minutes(len);
+        (0..len)
+            .map(|i| {
+                let base = Decimal::new(10_000 + i * 10, 2);
+                Candle {
+                    symbol: symbol.clone(),
+                    timestamp: start + chrono::Duration::minutes(i),
+                    open: Price::new(base).unwrap(),
+                    high: Price::new(base + Decimal::ONE).unwrap(),
+                    low: Price::new(base - Decimal::ONE).unwrap(),
+                    close: Price::new(base + Decimal::new(50, 2)).unwrap(),
+                    volume: 10_000,
+                }
+            })
+            .collect()
+    }
+
+    fn bullish_pattern() -> PatternResult {
+        PatternResult::new(
+            PatternName::new("hammer"),
+            SignalType::Buy,
+            Confidence::new(0.9).unwrap(),
+            Price::new(Decimal::new(10050, 2)).unwrap(),
+        )
+    }
+
+    fn permissive_config() -> SignalConfig {
+        SignalConfig {
+            min_confidence: 0.1,
+            enable_market_context: false,
+            ..SignalConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_signals_uses_candle_symbol() {
+        let mut engine = SignalEngine::new(permissive_config());
+        let candles = candle_window("MSFT", 5);
+
+        let signals = engine
+            .generate_signals(&[bullish_pattern()], &candles)
+            .await
+            .unwrap();
+
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].symbol.as_str(), "MSFT");
+        assert_eq!(signals[0].signal_type, SignalType::Buy);
+    }
+
+    #[tokio::test]
+    async fn test_generate_signals_does_not_dedupe_across_symbols() {
+        let mut engine = SignalEngine::new(permissive_config());
+        let patterns = [bullish_pattern()];
+
+        let msft = engine
+            .generate_signals(&patterns, &candle_window("MSFT", 5))
+            .await
+            .unwrap();
+        let aapl = engine
+            .generate_signals(&patterns, &candle_window("AAPL", 5))
+            .await
+            .unwrap();
+
+        assert_eq!(msft.len(), 1);
+        assert_eq!(aapl.len(), 1);
+        assert_eq!(msft[0].symbol.as_str(), "MSFT");
+        assert_eq!(aapl[0].symbol.as_str(), "AAPL");
+
+        // Same symbol again within the dedup window is still suppressed
+        let msft_again = engine
+            .generate_signals(&patterns, &candle_window("MSFT", 5))
+            .await
+            .unwrap();
+        assert!(msft_again.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signals_rejects_mixed_symbol_window() {
+        let mut engine = SignalEngine::new(permissive_config());
+        let mut candles = candle_window("MSFT", 3);
+        candles.extend(candle_window("AAPL", 2));
+
+        let result = engine
+            .generate_signals(&[bullish_pattern()], &candles)
+            .await;
+
+        match result {
+            Err(SignalError::MixedSymbols { expected, found }) => {
+                assert_eq!(expected.as_str(), "MSFT");
+                assert_eq!(found.as_str(), "AAPL");
+            }
+            other => panic!("expected MixedSymbols error, got {other:?}"),
+        }
     }
 }
