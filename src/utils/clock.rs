@@ -42,6 +42,43 @@ impl Clock for FixedClock {
     }
 }
 
+/// Clock advanced explicitly by its owner, for historical replay
+///
+/// The backtester sets this to each candle's timestamp so every time-aware
+/// component (market-hours checks, order timestamps) observes replay time
+/// rather than wall-clock time. Backed by an atomic so `now()` stays a
+/// cheap sync call shareable across tasks.
+#[derive(Debug, Clone, Default)]
+pub struct SteppedClock {
+    millis: std::sync::Arc<std::sync::atomic::AtomicI64>,
+}
+
+impl SteppedClock {
+    /// Creates a clock starting at `instant`.
+    pub fn new(instant: DateTime<Utc>) -> Self {
+        let clock = Self::default();
+        clock.set(instant);
+        clock
+    }
+
+    /// Moves the clock to `instant`. Clones observe the change immediately.
+    pub fn set(&self, instant: DateTime<Utc>) {
+        self.millis.store(
+            instant.timestamp_millis(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+}
+
+impl Clock for SteppedClock {
+    fn now(&self) -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp_millis(
+            self.millis.load(std::sync::atomic::Ordering::SeqCst),
+        )
+        .unwrap_or_else(Utc::now)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,5 +100,18 @@ mod tests {
         assert_eq!(clock.now(), instant);
         // Stays pinned across calls
         assert_eq!(clock.now(), instant);
+    }
+
+    #[test]
+    fn test_stepped_clock_set_is_visible_to_clones() {
+        let t1 = Utc.with_ymd_and_hms(2024, 6, 12, 15, 0, 0).unwrap();
+        let t2 = Utc.with_ymd_and_hms(2024, 6, 12, 15, 1, 0).unwrap();
+
+        let clock = SteppedClock::new(t1);
+        let observer = clock.clone();
+        assert_eq!(observer.now(), t1);
+
+        clock.set(t2);
+        assert_eq!(observer.now(), t2, "clones share the same instant");
     }
 }

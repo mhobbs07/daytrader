@@ -183,12 +183,11 @@ impl MarketDataProvider for AlpacaProvider {
         end: DateTime<Utc>,
         timeframe: Timeframe,
     ) -> Result<Vec<Candle>, BrokerError> {
-        // Historical candles are fetched via REST API
-        // This would need to be implemented in the REST client
-        // For now, return an error
-        Err(BrokerError::ApiError(
-            "Historical candles not yet implemented".to_string(),
-        ))
+        // Historical candles come from the Market Data REST API (works
+        // without a WebSocket connection)
+        self.rest_client
+            .get_bars(symbol, start, end, timeframe)
+            .await
     }
 
     async fn start_stream(&self) -> Result<(), BrokerError> {

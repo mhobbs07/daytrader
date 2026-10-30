@@ -3,6 +3,7 @@ import { useSystemStore } from '../store/systemStore';
 import { useMarketStore } from '../store/marketStore';
 import { usePatternStore } from '../store/patternStore';
 import { useRiskStore } from '../store/riskStore';
+import { useExecutionStore } from '../store/executionStore';
 
 interface StoreCleanupProps {
   children: React.ReactNode;
@@ -20,6 +21,7 @@ export const StoreCleanup: React.FC<StoreCleanupProps> = ({ children }) => {
       useMarketStore.getState().dispose();
       usePatternStore.getState().dispose();
       useRiskStore.getState().dispose();
+      useExecutionStore.getState().dispose();
     };
   }, []);
 

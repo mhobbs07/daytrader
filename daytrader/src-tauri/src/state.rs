@@ -4,6 +4,8 @@ use daytrader::{
     db::{Database, repositories::PerformanceRepository, traits::PdtRepositoryTrait},
     events::bus::EventBus,
     events::types::PatternSignal,
+    execution::engine::ExecutionEngine,
+    orders::engine::OrderEngine,
     patterns::PatternRegistry,
     risk::RiskEngine,
     risk::pdt::PdtEnforcer,
@@ -122,6 +124,13 @@ pub struct AppState {
     pub performance_repository: Option<Arc<PerformanceRepository>>,
     // Account information
     pub account_id: i64, // Numeric account ID for database operations
+    // Trading loop engines. Present when the database is available; the
+    // dashboard degrades to display-only mode when they are `None`.
+    pub order_engine: Option<Arc<OrderEngine>>,
+    pub execution_engine: Option<Arc<ExecutionEngine>>,
+    /// P&L position tracker (positions module) — distinct from
+    /// `position_tracker`, the risk engine's FIFO day-trade tracker.
+    pub pnl_tracker: Option<Arc<daytrader::positions::PositionTracker>>,
 }
 
 impl AppState {
@@ -150,6 +159,9 @@ impl AppState {
             performance_repository: None,
             // Default account ID
             account_id: 1, // Default account ID
+            order_engine: None,
+            execution_engine: None,
+            pnl_tracker: None,
         }
     }
 
@@ -181,6 +193,9 @@ impl AppState {
             performance_repository: None,
             // Default account ID
             account_id: 1,
+            order_engine: None,
+            execution_engine: None,
+            pnl_tracker: None,
         }
     }
 
@@ -226,6 +241,9 @@ impl AppState {
             performance_repository: Some(performance_repository),
             // Account information
             account_id,
+            order_engine: None,
+            execution_engine: None,
+            pnl_tracker: None,
         })
     }
 

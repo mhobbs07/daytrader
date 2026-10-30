@@ -23,6 +23,12 @@ pub struct MockConfig {
     pub simulate_errors: bool,
     /// Error rate (0.0 to 1.0)
     pub error_rate: f64,
+    /// Simulate fills: accepted orders transition to `Filled` on the next
+    /// `get_order` poll, at the limit price or the last mock quote.
+    ///
+    /// Off by default so existing tests observe stable `Accepted` state;
+    /// demo/paper wiring opts in to get a complete order lifecycle.
+    pub auto_fill_orders: bool,
 }
 
 impl Default for MockConfig {
@@ -31,6 +37,7 @@ impl Default for MockConfig {
             latency_ms: 0,
             simulate_errors: false,
             error_rate: 0.0,
+            auto_fill_orders: false,
         }
     }
 }
@@ -350,6 +357,32 @@ impl OrderExecutionProvider for MockBroker {
             return Err(BrokerError::ApiError("Mock error".to_string()));
         }
 
+        if self.config.auto_fill_orders {
+            let mut state = self.state.write();
+            // Fill price: limit price if present, else last mock quote. Without
+            // either there is no price to fill at, so the order stays accepted.
+            let fill_price = state.orders.get(order_id.as_str()).and_then(|order| {
+                order
+                    .limit_price
+                    .or_else(|| state.quotes.get(order.symbol.as_str()).map(|q| q.last))
+            });
+            if let Some(order) = state.orders.get_mut(order_id.as_str()) {
+                if order.status == OrderStatus::Accepted {
+                    if let Some(price) = fill_price {
+                        order.status = OrderStatus::Filled;
+                        order.filled_quantity = order.quantity.value();
+                        order.filled_avg_price = Some(price);
+                        order.filled_at = Some(Utc::now());
+                    }
+                }
+            }
+            return state
+                .orders
+                .get(order_id.as_str())
+                .cloned()
+                .ok_or_else(|| BrokerError::ApiError(format!("Order not found: {}", order_id)));
+        }
+
         let state = self.state.read();
         state
             .orders
@@ -501,11 +534,84 @@ mod tests {
             latency_ms: 0,
             simulate_errors: true,
             error_rate: 1.0, // Always error
+            ..MockConfig::default()
         };
         let broker = MockBroker::new(config);
         let symbol = Symbol::new("AAPL").unwrap();
 
         let result = broker.get_quote(&symbol).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_auto_fill_limit_order_fills_at_limit_price() {
+        let config = MockConfig {
+            auto_fill_orders: true,
+            ..MockConfig::default()
+        };
+        let broker = MockBroker::new(config);
+        let symbol = Symbol::new("AAPL").unwrap();
+        let qty = Quantity::new(100).unwrap();
+        let limit = Price::new(Decimal::new(15000, 2)).unwrap();
+
+        let order = Order::limit(symbol, OrderSide::Buy, qty, limit);
+        let order_id = broker.place_order(order).await.unwrap();
+
+        let filled = broker.get_order(&order_id).await.unwrap();
+        assert_eq!(filled.status, OrderStatus::Filled);
+        assert_eq!(filled.filled_quantity, 100);
+        assert_eq!(filled.filled_avg_price, Some(limit));
+        assert!(filled.filled_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_auto_fill_market_order_fills_at_last_quote() {
+        let config = MockConfig {
+            auto_fill_orders: true,
+            ..MockConfig::default()
+        };
+        let broker = MockBroker::new(config);
+        let symbol = Symbol::new("AAPL").unwrap();
+
+        let quote = create_mock_quote(symbol.clone(), Decimal::new(15234, 2));
+        broker.set_mock_quote(quote.clone());
+
+        let order = Order::market(symbol, OrderSide::Buy, Quantity::new(10).unwrap());
+        let order_id = broker.place_order(order).await.unwrap();
+
+        let filled = broker.get_order(&order_id).await.unwrap();
+        assert_eq!(filled.status, OrderStatus::Filled);
+        assert_eq!(filled.filled_avg_price, Some(quote.last));
+    }
+
+    #[tokio::test]
+    async fn test_auto_fill_market_order_without_quote_stays_accepted() {
+        let config = MockConfig {
+            auto_fill_orders: true,
+            ..MockConfig::default()
+        };
+        let broker = MockBroker::new(config);
+        let symbol = Symbol::new("AAPL").unwrap();
+
+        // No quote set and no limit price: there is no price to fill at
+        let order = Order::market(symbol, OrderSide::Buy, Quantity::new(10).unwrap());
+        let order_id = broker.place_order(order).await.unwrap();
+
+        let pending = broker.get_order(&order_id).await.unwrap();
+        assert_eq!(pending.status, OrderStatus::Accepted);
+        assert_eq!(pending.filled_avg_price, None);
+    }
+
+    #[tokio::test]
+    async fn test_auto_fill_disabled_by_default_keeps_accepted() {
+        let broker = MockBroker::default();
+        let symbol = Symbol::new("AAPL").unwrap();
+        let limit = Price::new(Decimal::new(15000, 2)).unwrap();
+
+        let order = Order::limit(symbol, OrderSide::Buy, Quantity::new(100).unwrap(), limit);
+        let order_id = broker.place_order(order).await.unwrap();
+
+        let retrieved = broker.get_order(&order_id).await.unwrap();
+        assert_eq!(retrieved.status, OrderStatus::Accepted);
     }
 }

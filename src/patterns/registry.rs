@@ -296,6 +296,11 @@ impl PatternRegistry {
     ///
     /// Runs pattern detection in parallel for all enabled patterns.
     /// Returns a vector of all detected patterns sorted by confidence.
+    ///
+    /// `candles` MUST be ordered newest-first: detectors evaluate
+    /// `candles[0]` as the current bar and treat `candles[1..]` as history
+    /// (e.g. morning star reads `candles[2]` as the oldest of its three).
+    /// Callers holding chronological data must pass a reversed view.
     pub async fn detect_all(
         &self,
         candles: &[Candle],

@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use super::config::AlpacaConfig;
 use super::ratelimit::{RateLimiter, RateLimiterConfig};
-use super::types::{AlpacaAccount, AlpacaOrder, AlpacaPosition, PlaceOrderRequest};
+use super::types::{
+    AlpacaAccount, AlpacaBarsResponse, AlpacaOrder, AlpacaPosition, PlaceOrderRequest,
+};
 use crate::brokers::traits::{Account, Candle, Order, OrderExecutionProvider, Position, Timeframe};
 use crate::brokers::types::{OrderId, Reason, Symbol};
 use crate::utils::errors::BrokerError;
@@ -59,6 +61,31 @@ impl RestClient {
 
         let url = format!("{}{}", self.config.base_url, path);
         let request = self.client.get(&url);
+        let request = self.add_auth_headers(request);
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| BrokerError::ConnectionFailed(e.to_string()))?;
+
+        self.handle_response(response).await
+    }
+
+    /// Makes a GET request to the Market Data API host
+    ///
+    /// Historical data lives on `data.alpaca.markets`, a different host from
+    /// the paper/live trading API served by [`Self::get`].
+    async fn get_data<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, BrokerError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}{}", self.config.data_base_url, path);
+        // .query() percent-encodes values; page tokens are base64-like and
+        // can contain '+', '/', '=' which raw concatenation would corrupt
+        let request = self.client.get(&url).query(query);
         let request = self.add_auth_headers(request);
 
         let response = request
@@ -190,6 +217,66 @@ impl RestClient {
             }
             _ => BrokerError::ApiError(format!("HTTP {}: {}", status, message)),
         }
+    }
+
+    /// Fetches historical OHLCV bars from the Market Data API v2
+    ///
+    /// Follows `next_page_token` pagination until the requested window is
+    /// exhausted, so a multi-year 1-minute request returns every bar. Bars
+    /// are validated at the boundary (positive prices, high >= low) and
+    /// returned oldest-first as delivered by Alpaca.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on connection failure, an API error response, or a
+    /// bar that fails validation.
+    pub async fn get_bars(
+        &self,
+        symbol: &Symbol,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        timeframe: Timeframe,
+    ) -> Result<Vec<Candle>, BrokerError> {
+        let mut candles = Vec::new();
+        let mut page_token: Option<String> = None;
+        let path = format!("/v2/stocks/{}/bars", symbol.as_str());
+
+        loop {
+            let mut query: Vec<(&str, String)> = vec![
+                ("timeframe", timeframe_param(timeframe).to_string()),
+                ("start", start.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+                ("end", end.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+                ("limit", "10000".to_string()),
+                ("adjustment", "raw".to_string()),
+            ];
+            if let Some(token) = &page_token {
+                query.push(("page_token", token.clone()));
+            }
+
+            let response: AlpacaBarsResponse = self.get_data(&path, &query).await?;
+
+            for bar in response.bars.unwrap_or_default() {
+                candles.push(bar.into_candle(symbol)?);
+            }
+
+            match response.next_page_token {
+                Some(token) if !token.is_empty() => page_token = Some(token),
+                _ => break,
+            }
+        }
+
+        Ok(candles)
+    }
+}
+
+/// Maps a domain [`Timeframe`] to the Alpaca data API `timeframe` parameter
+pub(crate) fn timeframe_param(timeframe: Timeframe) -> &'static str {
+    match timeframe {
+        Timeframe::OneMinute => "1Min",
+        Timeframe::FiveMinutes => "5Min",
+        Timeframe::FifteenMinutes => "15Min",
+        Timeframe::OneHour => "1Hour",
+        Timeframe::OneDay => "1Day",
     }
 }
 
@@ -375,6 +462,41 @@ mod tests {
         let acquired =
             tokio::time::timeout(Duration::from_secs(120), client.rate_limiter.acquire()).await;
         assert!(acquired.is_ok(), "expected acquire to eventually succeed");
+    }
+
+    #[test]
+    fn test_timeframe_param_maps_all_variants() {
+        assert_eq!(timeframe_param(Timeframe::OneMinute), "1Min");
+        assert_eq!(timeframe_param(Timeframe::FiveMinutes), "5Min");
+        assert_eq!(timeframe_param(Timeframe::FifteenMinutes), "15Min");
+        assert_eq!(timeframe_param(Timeframe::OneHour), "1Hour");
+        assert_eq!(timeframe_param(Timeframe::OneDay), "1Day");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Alpaca credentials (ALPACA_API_KEY/ALPACA_API_SECRET)"]
+    async fn test_get_bars_live_paper_account() {
+        use chrono::TimeZone;
+
+        let config = AlpacaConfig::paper().with_credentials(
+            std::env::var("ALPACA_API_KEY").unwrap_or_default(),
+            std::env::var("ALPACA_API_SECRET").unwrap_or_default(),
+        );
+        let client = RestClient::new(config);
+        let symbol = Symbol::new("AAPL").unwrap();
+
+        let candles = client
+            .get_bars(
+                &symbol,
+                Utc.with_ymd_and_hms(2024, 6, 10, 13, 30, 0).unwrap(),
+                Utc.with_ymd_and_hms(2024, 6, 10, 20, 0, 0).unwrap(),
+                Timeframe::OneMinute,
+            )
+            .await
+            .unwrap();
+
+        assert!(!candles.is_empty(), "expected bars for a full trading day");
+        assert!(candles.windows(2).all(|w| w[0].timestamp <= w[1].timestamp));
     }
 
     // Note: Integration tests with actual API calls would go in tests/ directory
