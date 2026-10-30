@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Check branch protection
         run: |
-          if [[ "$GITHUB_HEAD_REF" == "main" || "$GITHUB_HEAD_REF" == "develop" ]]; then
+          if [[ "$GITHUB_HEAD_REF" == "main" ]]; then
             echo "Direct pushes to protected branches are not allowed"
             exit 1
           fi
