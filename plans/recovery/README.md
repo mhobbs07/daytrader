@@ -29,8 +29,8 @@ A verdict is only as good as the machine that produces it, so the program first 
 | 1 | `phase-1-core-and-workspace.md` | One definition per domain concept, money as integer micros, `Clock` everywhere, crate-enforced boundaries | Workspace of crates builds; zero `Utc::now()` outside `SystemClock`; converters deleted; no `REAL` money columns; money-exactness fixture passes |
 | 2 | `phase-2-risk-correctness.md` | Every known risk-engine bug fixed with a scenario test | `dt-risk` scenario suite replays a scripted day and asserts every halt and rejection |
 | 3 | `phase-3-to-L-outline.md` | One correct pipeline **in simulation**: synchronous risk gate, fills into one portfolio, exits, persistence and rehydration, against `SimBroker` | A scripted sim session opens and closes trades, survives a restart without losing state, and every order passed the risk gate |
-| 4 | `phase-3-to-L-outline.md` | Research platform: data-quality gates, realistic fills, PDT and EOD in replay, walk-forward and purged CV, metrics, CLI, determinism | Roadmap R1 definition of done; then the **⭑ Go/No-Go checkpoint** (B-222) |
-| 5 | `phase-3-to-L-outline.md` | After the verdict: point-in-time features and the `SignalSource` boundary, regimes, universe scanner, research UI, ML in shadow, **in the order the verdict directs** | Per item, from the roadmap's R2–R5 definitions of done |
+| 4 | `phase-3-to-L-outline.md` | Research platform: data-quality gates, realistic fills, PDT and EOD in replay, walk-forward and purged CV, regimes, metrics, CLI, determinism | Roadmap R1 definition of done; then the **⭑ Go/No-Go checkpoint** (B-222) |
+| 5 | `phase-3-to-L-outline.md` | After the verdict: point-in-time features and the `SignalSource` boundary, universe scanner, research UI, ML in shadow, **in the order the verdict directs** | Per item, from the roadmap's R2–R5 definitions of done |
 | L | `phase-3-to-L-outline.md` | Live capital, only on an explicit decision: live broker connectivity, roadmap Phase L hardening, 30 trading days of paper, then opt-in | Paper/backtest gap within tolerance; owner sign-off recorded in `docs/sessions/` |
 
 Phases 3 onward are outlined, not task-specified. They get task specs when Phase 2 exits, because Phase 1 renames and moves most of what they touch.
@@ -45,7 +45,7 @@ Phases 3 onward are outlined, not task-specified. They get task specs when Phase
 | R0.6 dependency cleanup | Phase 0 deletions; upgrades after Phase 0 | B-208 → B-095; upgrades stay B-208 |
 | R0.7 data-quality gates and divergence audit | Phase 4, first task | B-209 |
 | R1 backtester → research platform | Phase 4 | B-210 to B-213 |
-| R2 domain leaf, `SignalSource`, PIT feature store, regimes | Domain leaf → Phase 1 (`dt-core`); the rest → Phase 5 | B-214 → B-101 to B-117; B-215, B-216 |
+| R2 domain leaf, `SignalSource`, PIT feature store, regimes | Domain leaf → Phase 1 (`dt-core`); regimes → Phase 4 (the verdict is per regime); the rest → Phase 5 | B-214 → B-101 to B-117; B-216; B-215 |
 | R3 scanner, R4 research UI, R5 ML | Phase 5 | B-217 to B-220 |
 | Phase L | Phase L, together with the recovery plan's live-connectivity work | specified at Phase L |
 

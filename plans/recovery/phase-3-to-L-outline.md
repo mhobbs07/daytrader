@@ -41,7 +41,8 @@ The core deliverable. Implements roadmap R0.7 and R1 on top of the Phase 3 pipel
 | B-223 | Corporate-action adjustment correctness before the harness relies on it: timestamp-ordered dividend references, distinct same-day dividends and corrections, per-action (not per-candle) factor computation, split-adjusted volume, and an explicit as-of bound so future actions never alter a historical backtest. Found in the #39 review; `adjust_candles` has no runtime caller yet. | R0.1 |
 | B-210 | Backtest realism: `FillModel` trait (spread crossing, square-root impact, participation; limits fill only when price trades **through**), short side with borrow model, PDT accrual during replay, `HoldingPolicy` with end-of-day liquidation. Slippage and commission are applied at the fill so the portfolio and the report agree. | R1 |
 | B-211 | Walk-forward folds, purged K-fold with embargo, deflated Sharpe fed by the sweep's trial count, OOS/IS ratio rejection below 0.5, plateau-robustness score. | R1 |
-| B-212 | Metric suite (gross and after-cost), Monte Carlo trade-order bootstrap, per-pattern × regime × hour attribution, benchmark vs SPY. | R1 |
+| B-216 | Regime classification (threshold-on-percentiles first, not an HMM); regime-bucketed pattern stats. Moved here from Phase 5: B-212's attribution and the B-222 verdict are per regime, so they need it. | R2 |
+| B-212 | Metric suite (gross and after-cost), Monte Carlo trade-order bootstrap, per-pattern × regime × hour attribution (regimes from B-216), benchmark vs SPY. | R1 |
 | B-213 | `dtctl backtest` CLI; seeded RNGs; byte-identical results across runs and thread counts; lookahead detector (shift input one bar, assert signals shift exactly one bar and no metric improves); committed fixtures under `tests/data/` (a few liquid symbols, ~10 trading days spanning a DST change, a holiday and a known split) run in CI against blessed expected reports. | R1 + recovery's old Phase 4 |
 
 **Exit:** the roadmap's R1 definition of done (golden-file determinism across 100 runs and 1/4/16 threads; lookahead detector; a $10k account trades strictly less than a $50k one; throughput bench gated at <10% regression; CLI smoke test in CI).
@@ -62,7 +63,6 @@ Ordered by the Go/No-Go result, not fixed in advance. Designs are in the roadmap
 | ID | Item | Roadmap |
 |---|---|---|
 | B-215 | Sealed `SignalSource` trait with all detectors adapted; feature store with point-in-time `CHECK` constraints and a restatement log; one feature code path for live and backtest. | R2 |
-| B-216 | Regime classification (threshold-on-percentiles first, not an HMM); regime-bucketed pattern stats. | R2 |
 | B-217 | Universe scanner: point-in-time snapshots, liquidity gates, time-of-day-normalized RVOL and other free-tier factors, ranking with rationale; stored daily so the scanner itself is backtestable. | R3 |
 | B-218 | `tauri-specta` bindings behind a single `dto.rs` boundary; money crosses as a branded string. | R4 |
 | B-219 | Research UI: equity and drawdown curves, blotter, attribution heatmap, sweep surface, validity banner. | R4 |
@@ -77,8 +77,9 @@ Not started until the owner decides to trade real money. Listed so earlier phase
 **Live connectivity (from the recovery plan):**
 - `BrokerKind::{Sim, Paper, Live}` factory from config. `Live` requires `broker.live = true`, a URL that matches, and `DAYTRADER_CONFIRM_LIVE=<account id>` in the environment; the binary prints a banner and refuses otherwise.
 - Alpaca: `trade_updates` WebSocket for fills; reconnect on any exit with backoff, resubscribe and a pong timeout; wait for `authenticated` before subscribing; complete order-status enum; correct 403/422 mapping; `client_order_id`; fractional quantities; redacted `Debug` for secrets.
+- Fill reconciliation is automatic, not only a command. At startup and after every reconnect, the engine pulls orders, fills since the last applied fill, and positions over REST and applies what the stream missed. The risk gate accepts no new order until that completes. A periodic reconciliation poll runs alongside the stream, and drift it cannot repair halts trading.
 - `MarketDataSource` with `AlpacaStream` publishing bars into the Phase 3 pipeline.
-- `dtctl run --paper|--live` and `dtctl reconcile` (store vs broker, report and repair drift).
+- `dtctl run --paper|--live` and `dtctl reconcile` (the same reconciliation, run by hand: store vs broker, report and repair drift).
 - Tauri becomes a view over `dt-engine` state plus commands to toggle automation and flatten; the PDT panel reads the real enforcer.
 
 **Hardening (roadmap Phase L):** order-lifecycle typestate so submitting without a risk approval does not compile; PDT persistence reconciled against the broker at startup; pre-trade controls in the spirit of SEC 15c3-5 (fat-finger price collar, idempotency, rate and exposure caps); two-tier kill switch persisted across restarts; `keyring` credentials and an app lock; tamper-evident audit trail; `AutomationState { Disabled, ShadowOnly, Armed }`.

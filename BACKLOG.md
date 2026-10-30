@@ -66,8 +66,8 @@ Specs: `plans/recovery/` (`README.md` decides order and IDs; the research roadma
 Outlined only. A **[design]** task writes the Phase 3 and 4 specs when Phase 2 exits.
 
 - **Phase 3, one correct pipeline in simulation:** synchronous risk gate, fills into one portfolio, exits, persistence and rehydration against `SimBroker`. IDs assigned when specified.
-- **Phase 4, research platform:** B-209 (data quality, first), B-223 (adjustment correctness), B-210, B-211, B-212, B-213, then **B-222 Go/No-Go** (human). B-224 (bench engine shutdown) lands with B-213.
-- **Phase 5, after the verdict, order set by B-222:** B-215, B-216, B-217, B-218, B-219, B-220.
+- **Phase 4, research platform:** B-209 (data quality, first), B-223 (adjustment correctness), B-210, B-211, B-216 (regimes, needed by B-212's attribution), B-212, B-213, then **B-222 Go/No-Go** (human). B-224 (bench engine shutdown) lands with B-213.
+- **Phase 5, after the verdict, order set by B-222:** B-215, B-217, B-218, B-219, B-220.
 - **Phase L, only on a decision to trade real money:** live connectivity plus roadmap Phase L hardening, then 30 trading days of paper.
 
 Absorbed: B-066 (SQLite PDT repository) into B-127; B-067 (Quote unification) into B-102/B-103; B-070 (architecture reconciliation) into B-110 to B-117; B-074 into B-090 to B-094; B-075 into B-088/B-089; B-061 (emergency liquidation) into B-129 and Phase L.
@@ -106,7 +106,7 @@ Designs: `plans/2026-07-28-research-platform-roadmap.md`. **Order is set by the 
 | B-213 | Backtest CLI (`src/bin/backtest.rs`) + determinism and lookahead-detector gates | High | R1 → P4 | `src/bin/` |
 | B-214 | `src/domain/` leaf module; drain architecture ratchet to empty (supersedes B-067, B-070) Overlaps recovery B-101 (`dt-core`) and B-110 to B-117; reconcile in the plan merge. | High | R2 → P1 (`dt-core`) | `src/domain/`, `src/events/`, `src/db/` |
 | B-215 | Sealed `SignalSource` trait; adapt all 9 detectors; feature store with PIT `CHECK` constraints + restatement log | High | R2 → P5 | `src/signals/` |
-| B-216 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 → P5 | `src/patterns/`, `src/risk/pattern_stats.rs` |
+| B-216 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 → P4, before B-212 | `src/patterns/`, `src/risk/pattern_stats.rs` |
 | B-217 | Universe scanner: PIT snapshots, free-tier factors (RVOL time-of-day normalized, gap, ATR%, momentum, pattern prior), ranking with rationale | Medium | R3 → P5 | `src/universe/` |
 | B-218 | `tauri-specta` bindings + `dto.rs` boundary; money crosses as branded string (supersedes hand-written TS types) | Medium | R4 → P5 | `daytrader/src-tauri/src/dto.rs`, `daytrader/src/types/` |
 | B-219 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 → P5 | `daytrader/src/` |
