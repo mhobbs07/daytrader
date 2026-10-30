@@ -355,10 +355,11 @@ impl BarAdjustment {
     /// Whether bars under this adjustment are safe for pattern detection,
     /// indicator calculation, and backtesting.
     ///
-    /// `Raw` is not: split discontinuities are indistinguishable from gaps.
+    /// Only adjustments that include splits are: `Raw` and `Dividend` both leave
+    /// split discontinuities in place, which are indistinguishable from gaps.
     #[inline]
     pub fn is_analysis_safe(self) -> bool {
-        !matches!(self, Self::Raw)
+        matches!(self, Self::Split | Self::All)
     }
 }
 
@@ -637,7 +638,10 @@ mod tests {
     fn test_bar_adjustment_raw_is_not_analysis_safe() {
         assert!(!BarAdjustment::Raw.is_analysis_safe());
         assert!(BarAdjustment::Split.is_analysis_safe());
-        assert!(BarAdjustment::Dividend.is_analysis_safe());
+        assert!(
+            !BarAdjustment::Dividend.is_analysis_safe(),
+            "dividend-only bars keep split discontinuities"
+        );
         assert!(BarAdjustment::All.is_analysis_safe());
     }
 

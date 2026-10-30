@@ -150,7 +150,72 @@ impl Database {
     /// Connection settings (WAL, foreign keys, synchronous, cache size, and
     /// so on) are applied per connection by [`DatabaseConfig::connect_options`].
     async fn initialize(&self) -> Result<(), sqlx::Error> {
+        self.upgrade_legacy_candles().await?;
         self.create_schema().await
+    }
+
+    /// Rebuilds a `candles` table created before corporate-action adjustment.
+    ///
+    /// `schema.sql` uses `CREATE TABLE IF NOT EXISTS`, which leaves an older
+    /// `candles` table (no `adjustment` column) untouched, and the index on
+    /// `adjustment` that follows then fails, so such a database could not be
+    /// opened. Every pre-adjustment row was fetched with `adjustment=raw`, so
+    /// rows are labelled `raw`. The rebuild runs in one transaction, so an
+    /// interruption cannot leave the database without a `candles` table. The
+    /// check is by column presence, not a version record, so databases that
+    /// already have the column are never rebuilt.
+    async fn upgrade_legacy_candles(&self) -> Result<(), sqlx::Error> {
+        let has_candles: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'candles'",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        if has_candles.is_none() {
+            return Ok(());
+        }
+        let adjustment_columns: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('candles') WHERE name = 'adjustment'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if adjustment_columns > 0 {
+            return Ok(());
+        }
+
+        tracing::info!("Upgrading pre-adjustment candles table in place");
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "CREATE TABLE candles_upgraded (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume INTEGER NOT NULL,
+                broker TEXT NOT NULL,
+                adjustment TEXT NOT NULL DEFAULT 'raw'
+                    CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, timestamp, broker, adjustment)
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO candles_upgraded
+                (id, symbol, timestamp, open, high, low, close, volume, broker, adjustment, created_at)
+             SELECT id, symbol, timestamp, open, high, low, close, volume, broker, 'raw', created_at
+             FROM candles",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DROP TABLE candles").execute(&mut *tx).await?;
+        sqlx::query("ALTER TABLE candles_upgraded RENAME TO candles")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await
     }
 
     /// Creates the database schema
@@ -291,6 +356,59 @@ mod tests {
         }
 
         drop(connections);
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_new_legacy_candles_table_upgrades_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("legacy.db");
+
+        // A database created before corporate-action adjustment: `candles` has
+        // no `adjustment` column, so schema.sql's new index cannot be built.
+        let legacy = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE candles (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, \
+             timestamp TIMESTAMP NOT NULL, open REAL NOT NULL, high REAL NOT NULL, \
+             low REAL NOT NULL, close REAL NOT NULL, volume INTEGER NOT NULL, \
+             broker TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+             UNIQUE(symbol, timestamp, broker))",
+        )
+        .execute(&legacy)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker) \
+             VALUES ('AAPL', '2026-01-02 14:30:00', 100.0, 101.0, 99.0, 100.5, 1000, 'alpaca')",
+        )
+        .execute(&legacy)
+        .await
+        .unwrap();
+        legacy.close().await;
+
+        let db = Database::new(&db_path).await.unwrap();
+        let (symbol, adjustment): (String, String) =
+            sqlx::query_as("SELECT symbol, adjustment FROM candles")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(symbol, "AAPL");
+        assert_eq!(adjustment, "raw", "pre-adjustment rows were fetched raw");
+        db.close().await.unwrap();
+
+        // Reopening is a no-op, not a second rebuild.
+        let db = Database::new(&db_path).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM candles")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
         db.close().await.unwrap();
     }
 }

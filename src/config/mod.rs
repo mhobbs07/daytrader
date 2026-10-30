@@ -130,6 +130,11 @@ pub enum RiskConfigError {
     #[error("risk config field `{field}` must be finite, got {value}")]
     NotFinite { field: &'static str, value: f64 },
 
+    /// A numeric field is finite but too large for `Decimal`, which every
+    /// limit is converted to downstream.
+    #[error("risk config field `{field}` is out of range, got {value}")]
+    NotRepresentable { field: &'static str, value: f64 },
+
     /// A dollar amount that must be strictly positive was zero or negative.
     #[error("risk config field `{field}` must be > 0, got {value}")]
     NotPositive { field: &'static str, value: f64 },
@@ -287,11 +292,15 @@ fn validate_thresholds(t: &PatternPerformanceThresholds) -> Result<(), RiskConfi
 }
 
 fn finite(field: &'static str, value: f64) -> Result<f64, RiskConfigError> {
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(RiskConfigError::NotFinite { field, value })
+    if !value.is_finite() {
+        return Err(RiskConfigError::NotFinite { field, value });
     }
+    // Limits are converted with `Decimal::try_from(..)` downstream; reject
+    // anything that conversion would fail on here, as a config error.
+    if rust_decimal::Decimal::try_from(value).is_err() {
+        return Err(RiskConfigError::NotRepresentable { field, value });
+    }
+    Ok(value)
 }
 
 fn positive(field: &'static str, value: f64) -> Result<f64, RiskConfigError> {
@@ -755,6 +764,22 @@ mod tests {
         assert!(matches!(
             RiskConfig::try_from(r),
             Err(RiskConfigError::NotPositive {
+                field: "max_position_size_dollars",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_position_size_dollars_beyond_decimal_range_rejected() {
+        // Finite and positive, but `Decimal::try_from` fails on it; before the
+        // check this config was accepted and later panicked in
+        // `PositionSizeLimits::from_config`.
+        let mut r = raw();
+        r.max_position_size_dollars = 1e100;
+        assert!(matches!(
+            RiskConfig::try_from(r),
+            Err(RiskConfigError::NotRepresentable {
                 field: "max_position_size_dollars",
                 ..
             })

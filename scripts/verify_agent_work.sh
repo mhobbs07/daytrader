@@ -74,13 +74,22 @@ step_skip() {
 unlisted_test_failures() {
     local test_output="$1"
     local known_file="$2"
-    local name
+    local expected_failures="${3:-0}"
+    local failure_line='^test [^ ]+( - should panic)? \.\.\. FAILED'
+    local parsed name
     while IFS= read -r name; do
         [ -z "$name" ] && continue
         if [ ! -f "$known_file" ] || ! grep -q "^${name}:" "$known_file" 2>/dev/null; then
             echo "$name"
         fi
-    done < <(echo "$test_output" | grep -oE '^test [^ ]+ \.\.\. FAILED' | awk '{print $2}' | sort -u)
+    done < <(echo "$test_output" | grep -oE "$failure_line" | awk '{print $2}' | sort -u)
+
+    # Fail closed: a failure whose name could not be parsed must never pass as
+    # a known one (libtest prints `test NAME - should panic ... FAILED`).
+    parsed=$(echo "$test_output" | grep -cE "$failure_line" || true)
+    if [ "$parsed" -lt "$expected_failures" ]; then
+        echo "<$((expected_failures - parsed)) failing test(s) whose names could not be parsed>"
+    fi
 }
 
 echo -e "${BOLD}${BLUE}============================================${NC}"
@@ -146,7 +155,7 @@ if [ "$TEST_STATUS" -eq 124 ]; then
 elif [ "$TEST_STATUS" -eq 0 ]; then
     step_pass "Unit tests (${TEST_PASSED} passed)"
 elif [ "$TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
-    UNLISTED=$(unlisted_test_failures "$TEST_OUTPUT" "$KNOWN_ISSUES_FILE")
+    UNLISTED=$(unlisted_test_failures "$TEST_OUTPUT" "$KNOWN_ISSUES_FILE" "$TEST_FAILED")
     if [ -z "$UNLISTED" ]; then
         echo -e "  ${YELLOW}${TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
         echo -e "  ${YELLOW}Known failures are a ceiling, not a licence — shrink the file when you touch these areas.${NC}"
@@ -180,7 +189,7 @@ if [ "$MOCK_TEST_STATUS" -eq 124 ]; then
 elif [ "$MOCK_TEST_STATUS" -eq 0 ]; then
     step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed)"
 elif [ "$MOCK_TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
-    MOCK_UNLISTED=$(unlisted_test_failures "$MOCK_TEST_OUTPUT" "$KNOWN_ISSUES_FILE")
+    MOCK_UNLISTED=$(unlisted_test_failures "$MOCK_TEST_OUTPUT" "$KNOWN_ISSUES_FILE" "$MOCK_TEST_FAILED")
     if [ -z "$MOCK_UNLISTED" ]; then
         echo -e "  ${YELLOW}${MOCK_TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
         step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed, ${MOCK_TEST_FAILED} known failures)"
