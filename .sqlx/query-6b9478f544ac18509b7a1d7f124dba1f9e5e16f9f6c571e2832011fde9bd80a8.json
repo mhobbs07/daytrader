@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE positions SET\n                quantity = ?,\n                side = ?,\n                avg_entry_price = ?,\n                current_price = ?,\n                market_value = ?,\n                cost_basis = ?,\n                unrealized_pl = ?,\n                unrealized_pl_percent = ?,\n                realized_pl = ?,\n                updated_at = ?,\n                pattern_name = ?,\n                signal_confidence = ?,\n                entry_orders = ?,\n                exit_orders = ?\n            WHERE account_id = ? AND symbol = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 16
+    },
+    "nullable": []
+  },
+  "hash": "6b9478f544ac18509b7a1d7f124dba1f9e5e16f9f6c571e2832011fde9bd80a8"
+}

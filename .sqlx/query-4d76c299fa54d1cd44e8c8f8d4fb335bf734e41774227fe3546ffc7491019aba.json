@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pattern_signals SET outcome = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "4d76c299fa54d1cd44e8c8f8d4fb335bf734e41774227fe3546ffc7491019aba"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO schema_migrations (version, description) VALUES (1, 'Initial schema')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "c5365998744183d623b5374474a91abaa99fc77a22815b321183c2ca636959db"
+}

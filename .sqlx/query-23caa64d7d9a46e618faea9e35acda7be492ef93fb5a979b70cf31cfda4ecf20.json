@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT outcome FROM trading_signals WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "outcome",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "23caa64d7d9a46e618faea9e35acda7be492ef93fb5a979b70cf31cfda4ecf20"
+}

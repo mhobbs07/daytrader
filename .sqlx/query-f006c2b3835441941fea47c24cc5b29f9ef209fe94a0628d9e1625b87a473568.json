@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                COUNT(CASE WHEN realized_pl > 0 THEN 1 END) as \"winning_count!: i32\",\n                COUNT(CASE WHEN realized_pl <= 0 THEN 1 END) as \"losing_count!: i32\",\n                COALESCE(SUM(realized_pl), 0.0) as \"total_pl!: f64\",\n                COALESCE(AVG(realized_pl), 0.0) as \"avg_pl!: f64\"\n            FROM position_history\n            WHERE account_id = ? AND closed_at >= ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "winning_count!: i32",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "losing_count!: i32",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_pl!: f64",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "avg_pl!: f64",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f006c2b3835441941fea47c24cc5b29f9ef209fe94a0628d9e1625b87a473568"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO pattern_trade_history (\n                pattern_name, trade_timestamp, confidence, profit, was_profitable,\n                order_id, symbol, quantity, price, commission, notes, created_at\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "4e23b7f8e2f105a2d7b11ed3b04255e1b7d5fc3d34f415b08c11250b7a18de4f"
+}

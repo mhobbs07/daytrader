@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE orders SET status = ? WHERE broker_order_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7c147242054af5ce01697a6abcffa657e14f070fcad6fbbfaebcaf4a2dbb0093"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO positions (\n                account_id, symbol, quantity, side, avg_entry_price, current_price,\n                market_value, cost_basis, unrealized_pl, unrealized_pl_percent, realized_pl,\n                opened_at, updated_at, pattern_name, signal_confidence, entry_orders, exit_orders\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ON CONFLICT(account_id, symbol) DO UPDATE SET\n                quantity = excluded.quantity,\n                side = excluded.side,\n                avg_entry_price = excluded.avg_entry_price,\n                current_price = excluded.current_price,\n                market_value = excluded.market_value,\n                cost_basis = excluded.cost_basis,\n                unrealized_pl = excluded.unrealized_pl,\n                unrealized_pl_percent = excluded.unrealized_pl_percent,\n                realized_pl = excluded.realized_pl,\n                updated_at = excluded.updated_at,\n                pattern_name = excluded.pattern_name,\n                signal_confidence = excluded.signal_confidence,\n                entry_orders = excluded.entry_orders,\n                exit_orders = excluded.exit_orders\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 17
+    },
+    "nullable": []
+  },
+  "hash": "ea4fce6674f0ac03be26e939c30127029d352592753dd3588d8e4876648f750c"
+}

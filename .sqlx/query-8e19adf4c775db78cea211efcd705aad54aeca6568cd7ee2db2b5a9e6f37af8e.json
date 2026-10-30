@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO trading_signals (\n                id, symbol, signal_type, confidence, price_level, generated_at,\n                trend_type, trend_strength, volatility, market_strength,\n                components, metadata, acted_upon\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "8e19adf4c775db78cea211efcd705aad54aeca6568cd7ee2db2b5a9e6f37af8e"
+}

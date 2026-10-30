@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                COUNT(*) as \"total_signals!: i32\",\n                COALESCE(SUM(CASE WHEN signal_type = 'buy' THEN 1 ELSE 0 END), 0) as \"buy_signals!: i32\",\n                COALESCE(SUM(CASE WHEN signal_type = 'sell' THEN 1 ELSE 0 END), 0) as \"sell_signals!: i32\",\n                COALESCE(AVG(confidence), 0.0) as \"avg_confidence!: f64\",\n                COALESCE(SUM(CASE WHEN confidence >= 0.8 THEN 1 ELSE 0 END), 0) as \"high_confidence_signals!: i32\",\n                COALESCE(SUM(CASE WHEN acted_upon = TRUE THEN 1 ELSE 0 END), 0) as \"signals_acted_upon!: i32\",\n                COALESCE(SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END), 0) as \"win_count!: i32\",\n                COALESCE(SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END), 0) as \"loss_count!: i32\",\n                COALESCE(SUM(CASE WHEN outcome = 'pending' THEN 1 ELSE 0 END), 0) as \"pending_count!: i32\"\n            FROM trading_signals\n            WHERE generated_at >= ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "total_signals!: i32",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "buy_signals!: i32",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "sell_signals!: i32",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "avg_confidence!: f64",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "high_confidence_signals!: i32",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "signals_acted_upon!: i32",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "win_count!: i32",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "loss_count!: i32",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "pending_count!: i32",
+        "ordinal": 8,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c35eb4203831f570df575a4224e337ea82432a9642c3930d718d1a3b63615ed9"
+}

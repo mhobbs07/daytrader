@@ -28,8 +28,8 @@ PDT-compliant order execution. Rust backend library + Tauri 2 desktop app.
 ```bash
 git clone <repository-url>
 cd <repo>
-./scripts/setup_db.sh          # creates data/db/daytrader.db, prints the DATABASE_URL export
-cp .env.example .env           # then edit if needed (sqlx macros need DATABASE_URL)
+cp .env.example .env           # SQLX_OFFLINE=true: the build uses the committed .sqlx/ cache, no database needed
+./scripts/setup_db.sh          # optional: dev database, only needed to regenerate the .sqlx/ cache
 cd daytrader
 npm install
 npm run tauri dev              # Vite dev server on :1421 + Tauri desktop shell

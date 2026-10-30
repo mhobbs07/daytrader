@@ -10,14 +10,15 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
+# Copy the whole workspace: Cargo needs every member's manifest
+# (including daytrader/src-tauri) and the committed .sqlx/ offline cache.
+COPY . .
 
-# Copy source code
-COPY src ./src
+# sqlx macros compile against .sqlx/ instead of a live database.
+ENV SQLX_OFFLINE=true
 
-# Build release binary
-RUN cargo build --release --bin daytrader
+# Build only the root package's binary (the Tauri app is not part of the image)
+RUN cargo build --release --locked -p daytrader --bin daytrader
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -43,7 +44,6 @@ COPY --from=builder /app/target/release/daytrader /app/daytrader
 
 # Copy configuration
 COPY config/default.toml /app/config/default.toml
-COPY src/db/schema.sql /app/schema.sql
 
 # Switch to app user
 USER trader

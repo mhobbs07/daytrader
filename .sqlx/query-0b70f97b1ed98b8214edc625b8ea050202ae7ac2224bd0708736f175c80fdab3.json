@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                COUNT(DISTINCT ps.pattern_name) as \"total_patterns!: i32\",\n                COUNT(DISTINCT CASE WHEN ps.is_enabled THEN ps.pattern_name END) as \"enabled_patterns!: i32\",\n                COALESCE(SUM(ps.total_trades), 0) as \"total_trades!: i32\",\n                COALESCE(AVG(ps.win_rate), 0.0) as \"avg_win_rate!: f64\",\n                COALESCE(SUM(ps.total_profit), 0.0) as \"total_profit!: f64\"\n            FROM pattern_stats ps\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "total_patterns!: i32",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "enabled_patterns!: i32",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_trades!: i32",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "avg_win_rate!: f64",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "total_profit!: f64",
+        "ordinal": 4,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0b70f97b1ed98b8214edc625b8ea050202ae7ac2224bd0708736f175c80fdab3"
+}

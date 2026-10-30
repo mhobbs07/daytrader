@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO accounts (id, broker, account_number, account_type) VALUES (?, 'test', ?, 'paper')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ebb14ebc34901ad5b465cf71aba43c56f51f83f18822109e4b21fcc2df01e4e9"
+}

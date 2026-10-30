@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO schema_migrations (version, description) VALUES (2, 'Add trading_signals and indicator_values tables')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "9020505c8645e223a1fe88a1278c1ac5c1966d5847066426f340d4ddf5507514"
+}

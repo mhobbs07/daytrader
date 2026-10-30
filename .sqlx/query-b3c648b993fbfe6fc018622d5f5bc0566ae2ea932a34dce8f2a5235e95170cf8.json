@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE INDEX IF NOT EXISTS idx_trading_signals_confidence ON trading_signals(confidence DESC)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b3c648b993fbfe6fc018622d5f5bc0566ae2ea932a34dce8f2a5235e95170cf8"
+}

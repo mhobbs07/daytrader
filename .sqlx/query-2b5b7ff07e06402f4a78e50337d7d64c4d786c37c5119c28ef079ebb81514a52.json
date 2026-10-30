@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO pattern_stats (\n                pattern_name, total_signals, total_trades, winning_trades, losing_trades,\n                total_profit, win_rate, avg_profit_per_trade, consecutive_losses,\n                is_enabled, avg_confidence, confidence_weighted_win_rate, last_updated\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ON CONFLICT(pattern_name) DO UPDATE SET\n                total_signals = excluded.total_signals,\n                total_trades = excluded.total_trades,\n                winning_trades = excluded.winning_trades,\n                losing_trades = excluded.losing_trades,\n                total_profit = excluded.total_profit,\n                win_rate = excluded.win_rate,\n                avg_profit_per_trade = excluded.avg_profit_per_trade,\n                consecutive_losses = excluded.consecutive_losses,\n                is_enabled = excluded.is_enabled,\n                avg_confidence = excluded.avg_confidence,\n                confidence_weighted_win_rate = excluded.confidence_weighted_win_rate,\n                last_updated = excluded.last_updated\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "2b5b7ff07e06402f4a78e50337d7d64c4d786c37c5119c28ef079ebb81514a52"
+}

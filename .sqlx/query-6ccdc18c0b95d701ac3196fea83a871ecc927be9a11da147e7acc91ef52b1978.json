@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO position_history (\n                account_id, symbol, quantity, side, avg_entry_price, exit_price,\n                cost_basis, unrealized_pl, realized_pl, total_pl, opened_at, closed_at,\n                holding_period_minutes, close_reason, pattern_name, signal_confidence,\n                entry_orders, exit_orders\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 18
+    },
+    "nullable": []
+  },
+  "hash": "6ccdc18c0b95d701ac3196fea83a871ecc927be9a11da147e7acc91ef52b1978"
+}

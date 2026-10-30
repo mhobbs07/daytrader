@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO risk_events (\n                event_type, timestamp, account_id, pattern_name, violation_type,\n                severity, message, details, created_at\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "2b6fffc7b8bfdb5711ae8bc688d0493be5fd676e10f09533bacfabdc4f10ae21"
+}

@@ -1,6 +1,6 @@
 # Rust
+# Cargo.lock is committed: this workspace ships binaries, so builds must be reproducible.
 **/target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
 
@@ -10,7 +10,7 @@ Cargo.lock
 *.db-wal
 *.sqlite
 *.sqlite3
-.sqlx/
+# .sqlx/ is committed: it is the sqlx offline query cache the build compiles against.
 
 # Logs
 *.log

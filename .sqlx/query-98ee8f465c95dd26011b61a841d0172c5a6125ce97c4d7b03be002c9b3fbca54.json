@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM positions WHERE account_id = ? AND symbol = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "98ee8f465c95dd26011b61a841d0172c5a6125ce97c4d7b03be002c9b3fbca54"
+}
