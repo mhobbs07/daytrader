@@ -251,9 +251,16 @@ impl MarketDataProvider for MockBroker {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError> {
         self.simulate_latency().await;
-        self.record_call(format!("get_candles({}, {:?})", symbol, timeframe));
+        // Synthetic candles carry no corporate actions, but the requested
+        // adjustment is recorded so tests can assert that callers feeding
+        // detection never ask for unadjusted bars.
+        self.record_call(format!(
+            "get_candles({}, {:?}, {:?})",
+            symbol, timeframe, adjustment
+        ));
 
         if self.should_simulate_error() {
             return Err(BrokerError::ApiError("Mock error".to_string()));

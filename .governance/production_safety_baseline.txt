@@ -4,7 +4,7 @@
 unwrap	daytrader/src-tauri/src/commands/market_data.rs	2
 unwrap	daytrader/src-tauri/src/commands/patterns.rs	1
 unwrap	daytrader/src-tauri/src/lib.rs	1
-unwrap	daytrader/src-tauri/src/main.rs	10
+unwrap	daytrader/src-tauri/src/main.rs	1
 unwrap	daytrader/src-tauri/src/mock_driver.rs	5
 unwrap	src/brokers/alpaca/rest.rs	1
 unwrap	src/brokers/mock.rs	7

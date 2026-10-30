@@ -3,12 +3,14 @@
 //! These types map Alpaca's JSON responses to our domain types.
 //! They are not exposed publicly - only our domain types are.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::brokers::traits::{
-    Account, Candle, Order, OrderSide, OrderStatus, OrderType, Position, Quote, TimeInForce,
+    Account, Candle, CashDividendAnnouncement, CorporateActionAnnouncement, Order, OrderSide,
+    OrderStatus, OrderType, Position, Quote, SplitAnnouncement, TimeInForce,
 };
 use crate::brokers::types::{OrderId, Price, Quantity, Symbol};
 use crate::utils::errors::BrokerError;
@@ -350,6 +352,136 @@ pub struct AlpacaBarsResponse {
     pub next_page_token: Option<String>,
 }
 
+/// A single forward or reverse stock split from the Corporate Actions API.
+///
+/// # Verification status
+///
+/// This shape is implemented against Alpaca's documented Corporate Actions
+/// data API and has **not** been verified against a live response — no
+/// credentials were available in this environment. If a live call fails to
+/// deserialize, this struct (field names, and the grouping in
+/// [`AlpacaCorporateActionsByType`]) is the place to fix, alongside
+/// [`RestClient::get_corporate_actions`](super::rest::RestClient::get_corporate_actions)'s
+/// `#[ignore]`d live test.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlpacaSplit {
+    pub symbol: String,
+    pub ex_date: NaiveDate,
+    /// Old shares in the ratio, as a decimal string (e.g. `"1"`)
+    pub old_rate: String,
+    /// New shares in the ratio, as a decimal string (e.g. `"4"`)
+    pub new_rate: String,
+}
+
+impl AlpacaSplit {
+    /// Converts to a domain [`CorporateActionAnnouncement`].
+    fn into_announcement(self) -> Result<CorporateActionAnnouncement, BrokerError> {
+        let from = integer_share_count(&self.symbol, "old_rate", &self.old_rate)?;
+        let to = integer_share_count(&self.symbol, "new_rate", &self.new_rate)?;
+
+        Ok(CorporateActionAnnouncement::Split(SplitAnnouncement {
+            ex_date: self.ex_date,
+            from,
+            to,
+        }))
+    }
+}
+
+/// Parses a split ratio field (`old_rate`/`new_rate`) as a whole share
+/// count.
+///
+/// `Decimal::to_u32` rounds rather than rejecting a fractional value (e.g.
+/// `1.5` would silently become `2`), which would corrupt a split ratio
+/// without any error — so the fractional part is checked explicitly first.
+fn integer_share_count(symbol: &str, field: &str, raw: &str) -> Result<u32, BrokerError> {
+    let value = parse_decimal(raw)?;
+    if value.fract() != Decimal::ZERO {
+        return Err(BrokerError::ApiError(format!(
+            "non-integer split {field} for {symbol}: {raw}"
+        )));
+    }
+    value.to_u32().ok_or_else(|| {
+        BrokerError::ApiError(format!("split {field} out of range for {symbol}: {raw}"))
+    })
+}
+
+/// A single cash dividend from the Corporate Actions API. See
+/// [`AlpacaSplit`]'s verification-status caveat — it applies here too.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlpacaCashDividend {
+    pub symbol: String,
+    pub ex_date: NaiveDate,
+    /// Cash amount per share, as a decimal string (e.g. `"0.24"`)
+    pub rate: String,
+}
+
+impl AlpacaCashDividend {
+    /// Converts to a domain [`CorporateActionAnnouncement`].
+    fn into_announcement(self) -> Result<CorporateActionAnnouncement, BrokerError> {
+        let amount = parse_decimal(&self.rate)?;
+        Ok(CorporateActionAnnouncement::CashDividend(
+            CashDividendAnnouncement {
+                ex_date: self.ex_date,
+                amount_per_share: amount,
+            },
+        ))
+    }
+}
+
+/// Corporate actions grouped by type, as returned by the Corporate Actions
+/// API. Alpaca groups announcements by type rather than returning a flat
+/// list; only the two types this codebase models (forward/reverse splits,
+/// cash dividends) are deserialized here — every other type (mergers,
+/// spinoffs, name changes, ...) is simply absent from this struct, and
+/// `#[serde(default)]` means its presence in a real response does not break
+/// deserialization.
+#[derive(Debug, Default, Deserialize)]
+pub struct AlpacaCorporateActionsByType {
+    #[serde(default)]
+    pub forward_splits: Vec<AlpacaSplit>,
+    #[serde(default)]
+    pub reverse_splits: Vec<AlpacaSplit>,
+    #[serde(default)]
+    pub cash_dividends: Vec<AlpacaCashDividend>,
+}
+
+/// Response envelope for the Corporate Actions API.
+///
+/// See [`AlpacaSplit`]'s verification-status caveat.
+#[derive(Debug, Default, Deserialize)]
+pub struct AlpacaCorporateActionsResponse {
+    #[serde(default)]
+    pub corporate_actions: AlpacaCorporateActionsByType,
+    #[serde(default)]
+    pub next_page_token: Option<String>,
+}
+
+impl AlpacaCorporateActionsResponse {
+    /// Flattens every modeled action across both split directions and cash
+    /// dividends into domain announcements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any entry fails to convert (e.g. a non-integer
+    /// split ratio).
+    pub(crate) fn into_announcements(
+        self,
+    ) -> Result<Vec<CorporateActionAnnouncement>, BrokerError> {
+        self.corporate_actions
+            .forward_splits
+            .into_iter()
+            .chain(self.corporate_actions.reverse_splits)
+            .map(AlpacaSplit::into_announcement)
+            .chain(
+                self.corporate_actions
+                    .cash_dividends
+                    .into_iter()
+                    .map(AlpacaCashDividend::into_announcement),
+            )
+            .collect()
+    }
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -564,6 +696,121 @@ mod tests {
         };
         let result = bar.into_candle(&Symbol::new("AAPL").unwrap());
         assert!(matches!(result, Err(BrokerError::ApiError(_))));
+    }
+
+    #[test]
+    fn test_corporate_actions_response_deserializes_documented_shape() {
+        // Self-consistency check against the shape this module is
+        // implemented against — not a live-verified fixture. See
+        // AlpacaSplit's doc comment.
+        let json = r#"{
+            "corporate_actions": {
+                "forward_splits": [
+                    {"symbol": "AAPL", "ex_date": "2020-08-31", "old_rate": "1", "new_rate": "4"}
+                ],
+                "reverse_splits": [],
+                "cash_dividends": [
+                    {"symbol": "AAPL", "ex_date": "2020-05-08", "rate": "0.82"}
+                ]
+            },
+            "next_page_token": null
+        }"#;
+        let response: AlpacaCorporateActionsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.corporate_actions.forward_splits.len(), 1);
+        assert_eq!(response.corporate_actions.cash_dividends.len(), 1);
+        assert!(response.next_page_token.is_none());
+    }
+
+    #[test]
+    fn test_corporate_actions_response_ignores_unmodeled_types() {
+        // Alpaca's real payload includes many more groups (mergers,
+        // spinoffs, ...); this codebase only models splits and cash
+        // dividends, and unknown keys must not break deserialization.
+        let json = r#"{
+            "corporate_actions": {
+                "forward_splits": [],
+                "reverse_splits": [],
+                "cash_dividends": [],
+                "cash_mergers": [{"symbol": "XYZ", "some_field": "value"}]
+            },
+            "next_page_token": null
+        }"#;
+        let response: AlpacaCorporateActionsResponse = serde_json::from_str(json).unwrap();
+        assert!(response.corporate_actions.forward_splits.is_empty());
+    }
+
+    #[test]
+    fn test_split_into_announcement_forward() {
+        let split = AlpacaSplit {
+            symbol: "AAPL".to_string(),
+            ex_date: "2020-08-31".parse().unwrap(),
+            old_rate: "1".to_string(),
+            new_rate: "4".to_string(),
+        };
+        let announcement = split.into_announcement().unwrap();
+        match announcement {
+            CorporateActionAnnouncement::Split(s) => {
+                assert_eq!(s.from, 1);
+                assert_eq!(s.to, 4);
+            }
+            other => panic!("expected Split, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_split_into_announcement_rejects_non_integer_rate() {
+        let split = AlpacaSplit {
+            symbol: "AAPL".to_string(),
+            ex_date: "2020-08-31".parse().unwrap(),
+            old_rate: "1.5".to_string(),
+            new_rate: "4".to_string(),
+        };
+        assert!(split.into_announcement().is_err());
+    }
+
+    #[test]
+    fn test_cash_dividend_into_announcement() {
+        let dividend = AlpacaCashDividend {
+            symbol: "KO".to_string(),
+            ex_date: "2024-03-15".parse().unwrap(),
+            rate: "0.485".to_string(),
+        };
+        let announcement = dividend.into_announcement().unwrap();
+        match announcement {
+            CorporateActionAnnouncement::CashDividend(d) => {
+                assert_eq!(d.amount_per_share, Decimal::new(485, 3));
+            }
+            other => panic!("expected CashDividend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_corporate_actions_response_into_announcements_flattens_all_groups() {
+        let response = AlpacaCorporateActionsResponse {
+            corporate_actions: AlpacaCorporateActionsByType {
+                forward_splits: vec![AlpacaSplit {
+                    symbol: "AAPL".to_string(),
+                    ex_date: "2020-08-31".parse().unwrap(),
+                    old_rate: "1".to_string(),
+                    new_rate: "4".to_string(),
+                }],
+                reverse_splits: vec![AlpacaSplit {
+                    symbol: "XYZ".to_string(),
+                    ex_date: "2024-01-15".parse().unwrap(),
+                    old_rate: "10".to_string(),
+                    new_rate: "1".to_string(),
+                }],
+                cash_dividends: vec![AlpacaCashDividend {
+                    symbol: "KO".to_string(),
+                    ex_date: "2024-03-15".parse().unwrap(),
+                    rate: "0.485".to_string(),
+                }],
+            },
+            next_page_token: None,
+        };
+
+        let announcements = response.into_announcements().unwrap();
+        assert_eq!(announcements.len(), 3);
     }
 
     #[test]

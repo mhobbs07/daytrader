@@ -144,12 +144,75 @@ Summarize:
 - Verification results
 - Estimated token cost tier (low/medium/high based on agent models used)
 
+## Mandatory Agent Prompt Boilerplate
+
+Every spawned agent's prompt MUST include the following block verbatim. These
+are not style preferences — each one corresponds to a failure observed in a
+real swarm run on 2026-07-28 where all three agents finished with **zero
+commits** and substantial work stranded in worktrees.
+
+```
+COMMIT DISCIPLINE (read before you start working):
+1. Commit EARLY and commit OFTEN. An uncommitted change in a worktree is one
+   cleanup away from being lost. Commit as soon as a coherent unit of work
+   compiles — do not wait until everything is perfect.
+2. NEVER run a long verification (verify_agent_work.sh, full cargo test,
+   cargo bench, cargo test --doc) in the background and then stop your turn.
+   Stopping with a background job pending ends your turn with the work
+   UNCOMMITTED. Run verification in the FOREGROUND, or commit first and
+   verify afterwards.
+3. Verification is not a precondition for committing. Commit, then verify,
+   then commit the fixes. Never the reverse.
+4. `cargo test --doc` is NOT part of the gate (backlog B-068). Never block on it.
+5. Scope your test runs. `cargo test --lib <module>` is usually enough; the
+   full workspace build across the Tauri sub-crate takes minutes.
+
+SHELL ENVIRONMENT:
+- Every Bash call is a FRESH shell. `export` does NOT persist between calls.
+- Chain env with the command in the SAME call:
+  `export DATABASE_URL="sqlite://$(pwd)/data/db/daytrader.db" && cargo test --lib`
+- sqlx uses compile-time-checked macros; a wrong DATABASE_URL produces
+  confusing "unable to open database" errors from cargo check and from the
+  pre-commit hook.
+
+HONESTY REQUIREMENTS:
+- If a test cannot be made to pass, LEAVE IT FAILING and report exactly what
+  fails and why. Never delete a test or weaken an assertion to reach green.
+- If you cannot verify an external API's shape, implement against the
+  documented shape, mark the live test `#[ignore]`d with the reason, and SAY
+  SO in your report. Do not present a guess as verified.
+- Report measured numbers, not claims. "Benchmarks pass" is not a result;
+  "hammer_detection: 1.28 µs" is.
+- If something in your task description turns out to be wrong, say so.
+```
+
 ## Rules
 
 - ALWAYS get user approval on the plan before spawning agents
 - ALWAYS use the model budget policy (sonnet for all subagents, opus only for orchestration — haiku is prohibited)
-- Each agent MUST commit before its worktree is cleaned up
+- ALWAYS include the Mandatory Agent Prompt Boilerplate above in every agent prompt
+- Each agent MUST commit before its worktree is cleaned up — verify this yourself
+  with `git -C <worktree> log` rather than trusting the agent's report
 - Each agent MUST respect its module's CLAUDE.md boundary rules
 - Do NOT spawn more than 4 agents at once (cost control)
 - If only one layer is affected, do NOT use a swarm — just do the work directly
+- Reserve `BACKLOG.md`, `.governance/*`, and `scripts/verify_agent_work.sh` to
+  yourself. Three agents editing the same file is a guaranteed merge conflict;
+  update them centrally after merging.
+- Assign migration numbers up front if more than one agent adds a migration
 - Clean up worktrees after successful merge
+
+## Orchestrator Responsibilities
+
+- **Verify the worktree base.** `worktree.baseRef` is set to `head` in
+  `.claude/settings.json` so agents inherit the current branch. If that setting
+  is ever removed, worktrees branch from the remote default branch instead and
+  agents will work against stale code — one agent in the 2026-07-28 run found
+  `src/data/` missing entirely and invented a stub to compensate. Check with
+  `git -C <worktree> log --oneline -1` immediately after spawning.
+- **Take over rather than re-prompting indefinitely.** If an agent fails to
+  commit after two explicit instructions, inspect its worktree and commit the
+  work yourself. Two attempts is the limit.
+- **Re-verify after merging.** An agent's local verification ran against its own
+  base. Rebase onto the feature branch and run the full gate there before
+  trusting any result.

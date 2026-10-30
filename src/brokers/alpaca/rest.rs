@@ -1,7 +1,7 @@
 //! Alpaca REST API client for order execution
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,9 +9,13 @@ use std::time::Duration;
 use super::config::AlpacaConfig;
 use super::ratelimit::{RateLimiter, RateLimiterConfig};
 use super::types::{
-    AlpacaAccount, AlpacaBarsResponse, AlpacaOrder, AlpacaPosition, PlaceOrderRequest,
+    AlpacaAccount, AlpacaBarsResponse, AlpacaCorporateActionsResponse, AlpacaOrder, AlpacaPosition,
+    PlaceOrderRequest,
 };
-use crate::brokers::traits::{Account, Candle, Order, OrderExecutionProvider, Position, Timeframe};
+use crate::brokers::traits::{
+    Account, BarAdjustment, Candle, CorporateActionAnnouncement, Order, OrderExecutionProvider,
+    Position, Timeframe,
+};
 use crate::brokers::types::{OrderId, Reason, Symbol};
 use crate::utils::errors::BrokerError;
 
@@ -226,6 +230,11 @@ impl RestClient {
     /// are validated at the boundary (positive prices, high >= low) and
     /// returned oldest-first as delivered by Alpaca.
     ///
+    /// `adjustment` is correctness-critical: [`BarAdjustment::Raw`] returns
+    /// as-traded prices, in which a stock split appears as a large gap that
+    /// pattern detectors cannot distinguish from a real move. Pass
+    /// [`BarAdjustment::All`] for anything feeding detection or backtesting.
+    ///
     /// # Errors
     ///
     /// Returns an error on connection failure, an API error response, or a
@@ -236,6 +245,7 @@ impl RestClient {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError> {
         let mut candles = Vec::new();
         let mut page_token: Option<String> = None;
@@ -247,7 +257,7 @@ impl RestClient {
                 ("start", start.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
                 ("end", end.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
                 ("limit", "10000".to_string()),
-                ("adjustment", "raw".to_string()),
+                ("adjustment", adjustment.as_param().to_string()),
             ];
             if let Some(token) = &page_token {
                 query.push(("page_token", token.clone()));
@@ -266,6 +276,63 @@ impl RestClient {
         }
 
         Ok(candles)
+    }
+
+    /// Fetches corporate actions (stock splits and cash dividends) affecting
+    /// `symbol` with `ex_date` in `[start, end]`, from the Market Data API's
+    /// Corporate Actions endpoint. Follows `next_page_token` pagination the
+    /// same way [`Self::get_bars`] does.
+    ///
+    /// # Verification status
+    ///
+    /// This is implemented against Alpaca's documented Corporate Actions API
+    /// shape and has **not** been exercised against a live response in this
+    /// environment — no credentials were available. See
+    /// `test_get_corporate_actions_live_paper_account`, `#[ignore]`d for the
+    /// same reason [`Self::get_bars`]'s live test is. If the shape turns out
+    /// to be wrong, the fix is in `super::types::AlpacaCorporateActionsResponse`
+    /// and its nested types, not here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on connection failure, an API error response, or an
+    /// action that fails to convert to the domain representation (e.g. a
+    /// non-integer split ratio).
+    pub async fn get_corporate_actions(
+        &self,
+        symbol: &Symbol,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<CorporateActionAnnouncement>, BrokerError> {
+        let mut announcements = Vec::new();
+        let mut page_token: Option<String> = None;
+        let path = "/v1/corporate-actions";
+
+        loop {
+            let mut query: Vec<(&str, String)> = vec![
+                ("symbols", symbol.as_str().to_string()),
+                (
+                    "types",
+                    "forward_split,reverse_split,cash_dividend".to_string(),
+                ),
+                ("start", start.format("%Y-%m-%d").to_string()),
+                ("end", end.format("%Y-%m-%d").to_string()),
+            ];
+            if let Some(token) = &page_token {
+                query.push(("page_token", token.clone()));
+            }
+
+            let response: AlpacaCorporateActionsResponse = self.get_data(path, &query).await?;
+            let next_page_token = response.next_page_token.clone();
+            announcements.extend(response.into_announcements()?);
+
+            match next_page_token {
+                Some(token) if !token.is_empty() => page_token = Some(token),
+                _ => break,
+            }
+        }
+
+        Ok(announcements)
     }
 }
 
@@ -491,12 +558,40 @@ mod tests {
                 Utc.with_ymd_and_hms(2024, 6, 10, 13, 30, 0).unwrap(),
                 Utc.with_ymd_and_hms(2024, 6, 10, 20, 0, 0).unwrap(),
                 Timeframe::OneMinute,
+                BarAdjustment::All,
             )
             .await
             .unwrap();
 
         assert!(!candles.is_empty(), "expected bars for a full trading day");
         assert!(candles.windows(2).all(|w| w[0].timestamp <= w[1].timestamp));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Alpaca credentials (ALPACA_API_KEY/ALPACA_API_SECRET); corporate-actions endpoint shape unverified against a live response"]
+    async fn test_get_corporate_actions_live_paper_account() {
+        let config = AlpacaConfig::paper().with_credentials(
+            std::env::var("ALPACA_API_KEY").unwrap_or_default(),
+            std::env::var("ALPACA_API_SECRET").unwrap_or_default(),
+        );
+        let client = RestClient::new(config);
+        let symbol = Symbol::new("AAPL").unwrap();
+
+        // AAPL executed a well-documented 4:1 forward split with ex-date
+        // 2020-08-31; this window should return at least that action.
+        let actions = client
+            .get_corporate_actions(
+                &symbol,
+                chrono::NaiveDate::from_ymd_opt(2020, 8, 1).unwrap(),
+                chrono::NaiveDate::from_ymd_opt(2020, 9, 30).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            !actions.is_empty(),
+            "expected at least the known 2020-08-31 AAPL split"
+        );
     }
 
     // Note: Integration tests with actual API calls would go in tests/ directory

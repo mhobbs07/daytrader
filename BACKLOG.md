@@ -39,8 +39,8 @@ Specs: `plans/recovery/`. State as of 2026-10-30: B-086 is done. `main` is the o
 | B-093 | Clippy `-D warnings` clean: `risk` (split by file) | agent | M | Pending |
 | B-094 | Clippy `-D warnings` clean: `orders`, `positions`, `execution`, Tauri, tests, benches; deny `unwrap_used`/`expect_used` in non-test code; flip CI + local to `-D warnings` | agent | M | Pending |
 | B-095 | Delete dead code (`retry.rs`, `SignalStreamingPipeline`, `MigrationManager` + `migrations/`, `OrderRepository`, …) and 15 unused dependencies | agent | M | Pending |
-| B-096 | Fix or delete benches so `cargo bench --no-run` compiles | agent | S | Pending |
-| B-097 | `config/default.toml` loads completely (`risk.*` nesting, `deny_unknown_fields`, real assertions in `config_validation`) | agent | S | Pending |
+| B-096 | Fix or delete benches so `cargo bench --no-run` compiles | agent | S | Done 2026-10-28 via B-221 (benches repaired on the sweep branch, landed by the r0 integration PR) |
+| B-097 | `config/default.toml` loads completely (`risk.*` nesting, `deny_unknown_fields`, real assertions in `config_validation`) | agent | S | Partly done via B-205 (validated `RawRiskConfig` → `RiskConfig`, all-zero limits rejected); still open: `risk.*` nesting in `default.toml`, `deny_unknown_fields`, profile/multiplier count assertions |
 | B-098 | Documents tell the truth: `STATUS.md`, archive `plans/` + phase reports to `docs/history/`, fix README/onboarding, delete `IMPORTANT-CARGO-FIX.md`/`cargo.sh` | agent | M | Pending |
 | B-081 | (existing) 27 `#[ignore]`d tests pass or are deleted with reasons | agent | M | Pending |
 
@@ -77,9 +77,47 @@ Outlined only. A **[design]** task writes their specs when Phase 2 exits. B-066 
 | B-067 | Unify Quote types (`brokers::traits::Quote` has symbol/last/u32 sizes vs `events::types::Quote` with Quantity sizes) or document the boundary mapping as intentional | Medium | 2026-07-06 Candle-unification analysis | `src/brokers/traits.rs`, `src/events/types.rs` |
 | B-068 | Run doctests in the verification pipeline (`cargo test --doc`); known pre-existing doctest failures in risk/limits.rs flagged in PR #20 | Medium | 2026-07-06 tauri compile fix | `scripts/verify_agent_work.sh` |
 | B-070 | Architecture reconciliation: hidden boundary violations found when checker was tightened to catch inline qualified paths — patterns<->risk is circular (risk->patterns already eliminated by B-058), db -> risk/orders/positions inverts layering, events -> patterns. Baselined (ratchet) in `.governance/architecture_violations_baseline.txt`; burn down edge by edge. (domain -> db edges resolved 2026-07-07 by deleting the never-compiled `src/domain/`/`src/infrastructure/` modules in B-064) | Medium | 2026-07-06 checker fix | `src/patterns/signals.rs`, `src/db/`, `src/events/types.rs` |
-| B-074 | Clean up ~130 accumulated clippy/rustc warnings so `cargo clippy -- -D warnings` passes (documented invariant; GitHub CI enforces it and failed on PR #24; local pipeline is warn-only with a TODO to tighten — tighten it once clean) | Medium | 2026-07-07 PR #24 CI failure | `src/` (risk, positions, orders, brokers, events, db, utils) |
+| B-074 | **Superseded by recovery B-090 to B-094.** Warning count re-measured 2026-07-28: `cargo check --lib` alone emits **693** warnings, not ~130. Clean up accumulated clippy/rustc warnings so `cargo clippy -- -D warnings` passes (documented invariant; GitHub CI enforces it and failed on PR #24; local pipeline is warn-only with a TODO to tighten — tighten it once clean) | Medium | 2026-07-07 PR #24 CI failure | `src/` (risk, positions, orders, brokers, events, db, utils) |
 | B-075 | Fix GitHub CI for sqlx macros: docs + test jobs fail with "set DATABASE_URL" because CI provisions no database (commit `.sqlx/` offline cache via `cargo sqlx prepare` + set `SQLX_OFFLINE=true`, or provision sqlite in workflows); also CI triggers only on PRs to main/develop, so staging PRs get zero CI — NEEDS OWNER APPROVAL (CI/CD change) | Medium | 2026-07-07 PR #24 CI failure | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
 | B-081 | Ignored-test burn-down REMAINDER: (a) 4 tests re-ignored with accurate reasons — PdtLimit rule counting semantics (`test_pdt_edge_cases`, `test_pdt_e2e_workflow`: violations fire for every predicted day trade under equity threshold, not only past the 3-trade allowance), `PatternPerformanceUpdate` not published on detection without prior stats (`test_pattern_specific_events`), daily-reset test needs public-API rewrite (`test_daily_reset_timing`); (b) 5 PostgreSQL-era pipeline tests in pattern_streaming_pipeline_integration.rs to port to in-memory SQLite (incl. `test_end_to_end_candle_to_signal_pipeline`); (c) unit-level `.governance/known_test_issues.txt` baseline audit; (d) fold in B-068 doctests | Medium | 2026-07-08 session review | `tests/`, `src/risk/`, `.governance/known_test_issues.txt` |
+
+### Priority: Research Platform (R0–R5)
+
+Roadmap: `plans/2026-07-28-research-platform-roadmap.md`. Goal is a trustworthy
+verdict on whether edge exists, not live trading. **Automation gate stays OFF
+until Phase L.** Ordering: R0 → R1 → Go/No-Go checkpoint → R2/R3/R5 as the
+verdict directs.
+
+> **IDs renumbered 2026-10-30.** This track was planned on `feat/r0-parallel-sweep` with IDs B-085 to B-103, which collide with the Recovery Program. Old to new: B-085 → B-201, B-086 → B-202, B-086b → B-203, B-088 → B-205, B-089a → B-207, B-103 → B-221, B-087 → B-204, B-089 → B-206, B-090 → B-208, B-091 → B-209, B-092 → B-210, B-093 → B-211, B-094 → B-212, B-095 → B-213, B-096 → B-214, B-097 → B-215, B-098 → B-216, B-099 → B-217, B-100 → B-218, B-101 → B-219, B-102 → B-220. Commit messages on that branch keep the old IDs. The two plans are to be merged into one (see `plans/recovery/README.md`).
+
+| ID | Task | Priority | Phase | Scope |
+|----|------|----------|-------|-------|
+| B-204 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) **Decided 2026-10-30 (owner): integer micros.** Supersedes the recovery plan's decimal-text storage; `Money` in `dt-core` (B-101) uses this representation and B-108 migrates the columns. | Critical | R0.2 | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
+| B-206 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) Folded into recovery B-089 to B-094. | High | R0.5 | `scripts/`, `.governance/` |
+| B-208 | Dependency cleanup: delete `ta`/`once_cell`/`tower`/`crossbeam`/`rusqlite` (0–2 refs each); upgrade reqwest 0.11→0.13, tungstenite 0.21→0.30, thiserror 1→2, sqlx 0.8→0.9 Dependency deletions folded into recovery B-095; the version upgrades remain here. | Medium | R0.6 | `Cargo.toml` |
+| B-209 | Data-quality gates + `data_quality_events` quarantine table; free-tier divergence audit → `docs/data-validity.md` | High | R0.7 | `src/data/validation.rs` |
+| B-210 | Backtester realism: `FillModel` trait (spread/impact/participation), short side, PDT accrual during replay, EOD liquidation | Critical | R1 | `src/execution/backtest.rs` |
+| B-211 | Walk-forward + purged K-fold with embargo; deflated Sharpe fed by sweep trial count | Critical | R1 | `src/execution/` |
+| B-212 | Metric suite + Monte Carlo bootstrap + per-pattern × regime × hour attribution | High | R1 | `src/execution/`, `src/utils/stats.rs` |
+| B-213 | Backtest CLI (`src/bin/backtest.rs`) + determinism and lookahead-detector gates | High | R1 | `src/bin/` |
+| B-214 | `src/domain/` leaf module; drain architecture ratchet to empty (supersedes B-067, B-070) Overlaps recovery B-101 (`dt-core`) and B-110 to B-117; reconcile in the plan merge. | High | R2 | `src/domain/`, `src/events/`, `src/db/` |
+| B-215 | Sealed `SignalSource` trait; adapt all 9 detectors; feature store with PIT `CHECK` constraints + restatement log | High | R2 | `src/signals/` |
+| B-216 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 | `src/patterns/`, `src/risk/pattern_stats.rs` |
+| B-217 | Universe scanner: PIT snapshots, free-tier factors (RVOL time-of-day normalized, gap, ATR%, momentum, pattern prior), ranking with rationale | Medium | R3 | `src/universe/` |
+| B-218 | `tauri-specta` bindings + `dto.rs` boundary; money crosses as branded string (supersedes hand-written TS types) | Medium | R4 | `daytrader/src-tauri/src/dto.rs`, `daytrader/src/types/` |
+| B-219 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 | `daytrader/src/` |
+| B-220 | ML signal layer: ONNX via `ort` behind `--features ml`, model registry, shadow-only evaluation, drift/decay/crowding metrics | Low | R5 | `src/signals/ml/` |
+
+#### Research track: completed on the sweep branch (landed on `main` by the r0 integration PR)
+
+| ID | Was | Task | Completed | Branch | Notes |
+|----|-----|------|-----------|--------|-------|
+| B-201 | B-085 | R0.3 — remove `to_string().parse()` decimal round-trip from the pattern-detection hot path | 2026-07-28 | `refactor/r0-measurement-integrity` | 16 sites across `patterns/{traits,utils,multi_candle}.rs`, `brokers/types.rs`, `risk/types.rs`; all collapsed onto the canonical `patterns::utils::decimal_to_ratio` |
+| B-202 | B-086 | R0.1 step 1 — typed `BarAdjustment` + candle provenance | 2026-07-28 | `refactor/r0-measurement-integrity` | `adjustment=raw` was hardcoded; now a `#[non_exhaustive]` enum defaulting to `All`, threaded through `get_bars`/`MarketDataProvider`/storage. Schema v3 adds an `adjustment` discriminator to the candles uniqueness key so price bases cannot collide. Step 2 (raw + factor table, query-time adjustment) still open |
+| B-203 | B-086b | R0.1 step 2 — corporate-action factors + query-time adjustment | 2026-10-28 | `feat/r0-parallel-sweep` | Migration v4, `src/data/corporate_actions.rs`, query-time factor adjustment, 4:1-split-produces-no-signal regression test |
+| B-205 | B-088 | R0.4 — config type spine (`RawRiskConfig` → `TryFrom` → `RiskConfig`) | 2026-10-28 | `feat/r0-parallel-sweep` | `derive(Default)` removed; `RiskConfig` deserializes via `#[serde(try_from)]` so every load path validates (scalars, pattern profiles, confidence bands, performance thresholds) with typed `RiskConfigError`. Tauri fallback uses embedded `config/default.toml`. Follow-ups: private fields/newtypes; gate `test_fixture()` behind cfg; fail hard on invalid user config instead of falling back |
+| B-207 | B-089a | R0.5 — gate matched failure *counts*, not test *names* | 2026-07-28 | `refactor/r0-measurement-integrity` | Any N new failures passed while N stayed under the known-issues ceiling; caught a real `data::ingestion` regression only by manual inspection. Now fails on any failing test absent from the baseline |
+| B-221 | B-103 | R0.5 — repair the `benches/` suite + `scripts/verify_perf.sh` | 2026-10-28 | `feat/r0-parallel-sweep` | All 5 criterion suites compile against the current API (no benchmarks deleted). Found Cargo.toml lacked `[[bench]] harness = false`, so benches had run zero criterion benchmarks; added. New `scripts/verify_perf.sh` (compile gate; `--quick` runs each bench once). Not yet wired into verify/CI (B-089) |
 
 ### Priority: Low (Enhancements)
 

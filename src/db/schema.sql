@@ -22,11 +22,16 @@ CREATE TABLE IF NOT EXISTS candles (
     close REAL NOT NULL,
     volume INTEGER NOT NULL,
     broker TEXT NOT NULL,
+    -- Corporate-action treatment. Bars under different adjustments are
+    -- different series and must not collide; see BarAdjustment.
+    adjustment TEXT NOT NULL DEFAULT 'raw'
+        CHECK(adjustment IN ('raw', 'split', 'dividend', 'all')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(symbol, timestamp, broker)
+    UNIQUE(symbol, timestamp, broker, adjustment)
 );
 
 CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_candles_adjustment ON candles(symbol, adjustment, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp DESC);
 
 -- Positions (Active Positions Only)
@@ -459,3 +464,36 @@ CREATE TABLE IF NOT EXISTS indicator_values (
 );
 
 CREATE INDEX IF NOT EXISTS idx_indicator_values_symbol_time ON indicator_values(symbol, timestamp DESC);
+
+-- Corporate Actions (Phase R0.1 step 2 — B-086)
+-- Ledger of splits and cash dividends used to back-adjust raw candles at
+-- query time. Bars are stored raw (see candles.adjustment='raw') and never
+-- rewritten in place; crate::data::corporate_actions computes adjustment
+-- factors from these rows on read. See migrations/004_corporate_actions.sql
+-- for the full rationale.
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    ex_date DATE NOT NULL,
+    action_type TEXT NOT NULL CHECK(action_type IN ('split', 'cash_dividend')),
+    split_from INTEGER,
+    split_to INTEGER,
+    -- REAL pending the B-087 Money<6> integer-micros migration; convert this
+    -- column alongside the rest when it lands.
+    cash_amount REAL,
+    source TEXT NOT NULL,
+    ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK (
+        (action_type = 'split'
+            AND split_from IS NOT NULL AND split_from > 0
+            AND split_to IS NOT NULL AND split_to > 0
+            AND cash_amount IS NULL)
+        OR
+        (action_type = 'cash_dividend'
+            AND cash_amount IS NOT NULL AND cash_amount > 0
+            AND split_from IS NULL AND split_to IS NULL)
+    ),
+    UNIQUE(symbol, ex_date, action_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_corporate_actions_symbol_date ON corporate_actions(symbol, ex_date);

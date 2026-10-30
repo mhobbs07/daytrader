@@ -7,10 +7,10 @@
 //! - Event processing throughput
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use daytrader::brokers::types::{OrderId, Quantity, Symbol};
+use daytrader::brokers::types::{Confidence, OrderId, Price, Quantity, Symbol};
 use daytrader::config::RiskConfig;
 use daytrader::events::bus::EventBus;
-use daytrader::events::types::{MarketEvent, Order, OrderSide, OrderStatus, OrderType};
+use daytrader::events::types::{Fill, MarketEvent, Order, OrderSide, OrderStatus, OrderType};
 use daytrader::risk::limits::DailyLossTracker;
 use daytrader::risk::pdt::PdtEnforcer;
 use daytrader::risk::rules::RiskRuleEngine;
@@ -125,7 +125,7 @@ fn bench_event_processing_throughput(c: &mut Criterion) {
     let initial_equity = Decimal::new(10000000, 2);
 
     // Create risk engine
-    let engine = daytrader::risk::RiskEngine::new(
+    let _engine = daytrader::risk::RiskEngine::new(
         config.clone(),
         Arc::clone(&event_bus),
         account_id.clone(),
@@ -459,7 +459,7 @@ fn bench_complex_portfolio_risk(c: &mut Criterion) {
                 ];
                 for (i, symbol) in symbols.iter().enumerate() {
                     let position = daytrader::events::types::Position {
-                        symbol: Symbol::new(symbol).unwrap(),
+                        symbol: Symbol::new(*symbol).unwrap(),
                         quantity: Quantity::new(100 * (i + 1) as u32).unwrap(),
                         average_entry_price: Price::new(Decimal::new(10000 + i as i64 * 1000, 2))
                             .unwrap(),
@@ -505,8 +505,6 @@ fn bench_emergency_liquidation_decisions(c: &mut Criterion) {
                 // Simulate emergency loss scenario
                 let emergency_fill = Fill {
                     order_id: OrderId::new("emergency-fill"),
-                    symbol: Symbol::new("CRASH").unwrap(),
-                    side: OrderSide::Sell,
                     filled_quantity: Quantity::new(1000).unwrap(),
                     filled_price: Price::new(Decimal::new(5000, 2)).unwrap(),
                     filled_at: chrono::Utc::now(),
@@ -550,8 +548,8 @@ fn bench_pattern_risk_evaluation(c: &mut Criterion) {
                 let patterns = ["hammer", "doji", "engulfing", "marubozu", "harami"];
                 for (i, pattern) in patterns.iter().enumerate() {
                     let signal = daytrader::events::types::PatternSignal {
-                        symbol: Symbol::new(&format!("PATTERN{}", i)).unwrap(),
-                        pattern_name: daytrader::brokers::types::PatternName::new(pattern),
+                        symbol: Symbol::new(format!("PATTERN{}", i)).unwrap(),
+                        pattern_name: daytrader::brokers::types::PatternName::new(*pattern),
                         signal_type: daytrader::events::types::SignalType::Buy,
                         confidence: Confidence::new(0.8).unwrap(),
                         detected_at: chrono::Utc::now(),
@@ -621,7 +619,7 @@ fn create_emergency_benchmark_config() -> RiskConfig {
 /// Helper function to create benchmark orders
 fn create_benchmark_order(id: u32) -> Arc<Order> {
     Arc::new(Order {
-        id: OrderId::new(&format!("bench-order-{}", id)),
+        id: OrderId::new(format!("bench-order-{}", id)),
         symbol: Symbol::new("AAPL").unwrap(),
         side: OrderSide::Buy,
         order_type: OrderType::Market,

@@ -64,6 +64,25 @@ step_skip() {
     echo ""
 }
 
+# Prints the names of failing tests that are NOT listed in the known-issues
+# baseline, one per line. Empty output means every failure is a known one.
+#
+# Previously the gate only compared the NUMBER of failures against the NUMBER
+# of lines in the baseline, so any N new failures passed silently as long as N
+# stayed under the ceiling. That is how a real regression in data::ingestion
+# reached a green run on 2026-07-28. Match by test name instead.
+unlisted_test_failures() {
+    local test_output="$1"
+    local known_file="$2"
+    local name
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        if [ ! -f "$known_file" ] || ! grep -q "^${name}:" "$known_file" 2>/dev/null; then
+            echo "$name"
+        fi
+    done < <(echo "$test_output" | grep -oE '^test [^ ]+ \.\.\. FAILED' | awk '{print $2}' | sort -u)
+}
+
 echo -e "${BOLD}${BLUE}============================================${NC}"
 echo -e "${BOLD}${BLUE}  Agent Work Verification Pipeline${NC}"
 echo -e "${BOLD}${BLUE}============================================${NC}"
@@ -127,14 +146,15 @@ if [ "$TEST_STATUS" -eq 124 ]; then
 elif [ "$TEST_STATUS" -eq 0 ]; then
     step_pass "Unit tests (${TEST_PASSED} passed)"
 elif [ "$TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
-    KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
-    if [ "$TEST_FAILED" -le "$KNOWN_COUNT" ]; then
+    UNLISTED=$(unlisted_test_failures "$TEST_OUTPUT" "$KNOWN_ISSUES_FILE")
+    if [ -z "$UNLISTED" ]; then
         echo -e "  ${YELLOW}${TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
         echo -e "  ${YELLOW}Known failures are a ceiling, not a licence — shrink the file when you touch these areas.${NC}"
         step_pass "Unit tests (${TEST_PASSED} passed, ${TEST_FAILED} known failures)"
     else
-        echo "$TEST_OUTPUT" | grep "FAILED"
-        step_fail "Unit tests (${TEST_FAILED} failures exceed ${KNOWN_COUNT} known issues)"
+        echo -e "  ${RED}Failing tests not listed in ${KNOWN_ISSUES_FILE}:${NC}"
+        echo "$UNLISTED" | sed 's/^/    /'
+        step_fail "Unit tests ($(echo "$UNLISTED" | wc -l | tr -d ' ') unlisted failure(s))"
     fi
 else
     echo "$TEST_OUTPUT" | grep -E "FAILED|error" | head -10
@@ -160,13 +180,14 @@ if [ "$MOCK_TEST_STATUS" -eq 124 ]; then
 elif [ "$MOCK_TEST_STATUS" -eq 0 ]; then
     step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed)"
 elif [ "$MOCK_TEST_FAILED" -gt 0 ] && [ -f "$KNOWN_ISSUES_FILE" ]; then
-    KNOWN_COUNT=$(grep -c "^[^#]" "$KNOWN_ISSUES_FILE" 2>/dev/null || echo "0")
-    if [ "$MOCK_TEST_FAILED" -le "$KNOWN_COUNT" ]; then
+    MOCK_UNLISTED=$(unlisted_test_failures "$MOCK_TEST_OUTPUT" "$KNOWN_ISSUES_FILE")
+    if [ -z "$MOCK_UNLISTED" ]; then
         echo -e "  ${YELLOW}${MOCK_TEST_FAILED} known failures (see ${KNOWN_ISSUES_FILE})${NC}"
         step_pass "Mock-feature unit tests (${MOCK_TEST_PASSED} passed, ${MOCK_TEST_FAILED} known failures)"
     else
-        echo "$MOCK_TEST_OUTPUT" | grep "FAILED"
-        step_fail "Mock-feature unit tests (${MOCK_TEST_FAILED} failures exceed ${KNOWN_COUNT} known issues)"
+        echo -e "  ${RED}Failing tests not listed in ${KNOWN_ISSUES_FILE}:${NC}"
+        echo "$MOCK_UNLISTED" | sed 's/^/    /'
+        step_fail "Mock-feature unit tests ($(echo "$MOCK_UNLISTED" | wc -l | tr -d ' ') unlisted failure(s))"
     fi
 else
     echo "$MOCK_TEST_OUTPUT" | grep -E "FAILED|error" | head -10

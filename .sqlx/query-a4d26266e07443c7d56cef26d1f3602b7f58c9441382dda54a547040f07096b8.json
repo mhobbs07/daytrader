@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO schema_migrations (version, description) VALUES (3, 'Add candle corporate-action adjustment discriminator')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "a4d26266e07443c7d56cef26d1f3602b7f58c9441382dda54a547040f07096b8"
+}
