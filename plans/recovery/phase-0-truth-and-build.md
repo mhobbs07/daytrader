@@ -15,7 +15,7 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Steps:**
 1. Merge [#29](https://github.com/mhobbs07/daytrader/pull/29) and its dependents into `staging` first (see merge order in README).
 2. `main` is an ancestor of `staging` (verified 2026-10-30), so open a PR `staging → main` and merge it with "Rebase and merge" or "Create a merge commit" (either is fine; no squash, to keep history).
-3. In GitHub settings: default branch = `main`; branch protection on `main`: require PR, require status checks `test`, `docs`, `governance` (names from B-089), no force-push, no deletion, include administrators.
+3. In GitHub settings: default branch = `main`; branch protection on `main`: require a PR, no force-push, no deletion, include administrators. **Do not require status checks yet.** CI is red until B-088 to B-094 land, so requiring `test`/`docs`/`governance` now would block every PR, including the ones that make CI green. Add the required checks as the last step of B-089, once CI is green on `main`.
 4. Delete `staging`, `staging-01`, and every branch whose PR is merged or closed. Dry run first:
    ```bash
    git fetch --prune
