@@ -28,7 +28,7 @@ Specs: `plans/recovery/`. Merge order for in-flight work: #31 (this plan) → B-
 
 | ID | Task | Who | Size | Status |
 |----|------|-----|------|--------|
-| B-085 | Fix hardcoded `"DEFAULT"` signal symbol in the live signal path (derive from candle window, reject mixed-symbol windows, drop backtester stamp) — PR into `feat/close-trading-loop` | agent | S | In Progress 2026-10-30 (`fix/signal-symbol-live-path`) |
+| B-085 | Fix hardcoded `"DEFAULT"` signal symbol in the live signal path (derive from candle window, reject mixed-symbol windows, drop backtester stamp) — PR into `feat/close-trading-loop` | agent | S | Done 2026-10-30 — PR #32 (`fix/signal-symbol-live-path`), awaiting merge |
 | B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Pending |
 | B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Pending |
 | B-088 | Hermetic sqlx build: commit `.sqlx/` + `Cargo.lock`, `SQLX_OFFLINE=true` everywhere, `setup_db.sh` without `sqlite3` CLI, `create_if_missing`, pragmas via `SqliteConnectOptions` | agent | M | Pending |
