@@ -105,5 +105,6 @@ Each PR: `git mv` the module into `crates/<name>/src`, add `Cargo.toml` with onl
 - [ ] One definition of Bar, Quote, Order, OrderStatus, Fill, Position, Signal, PatternStats; `grep -rn "struct Position\b\|struct Order\b\|struct Candle\b\|struct Fill\b" crates/ src/` returns only `dt-core`
 - [ ] `Utc::now()` grep (B-109) empty and enforced in CI
 - [ ] Money stored as `INTEGER` micros (B-204); `Quantity` is Decimal end to end
+- [ ] Money tests from roadmap R0.2: `Money` ↔ `Decimal` round-trip property test; a 1,000-trade P&L fixture equals the hand-computed exact value; money columns follow the `*_micros` naming convention and ratio columns are explicitly allow-listed as `REAL`; `grep -rn 'from_f64_retain\|to_f64()' crates/ src/` outside tests returns nothing
 - [ ] Workspace of 8 crates + `dtctl` + Tauri; root `src/` deleted
 - [ ] `verify_architecture.sh` and per-module `CLAUDE.md` deleted

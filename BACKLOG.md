@@ -20,9 +20,9 @@ Last Updated: 2026-10-30 (Recovery Program adopted — see `plans/recovery/READM
 
 ---
 
-## Recovery Program (supersedes the priority tiers below until Phase 2 exits)
+## Program: Recovery and Research (supersedes the priority tiers below)
 
-Specs: `plans/recovery/`. State as of 2026-10-30: B-086 is done. `main` is the only long-lived branch and is protected (PR required, administrators included, force-push and deletion blocked, no required status checks until B-089 makes CI green). `staging` and the stale branches are deleted; the unmerged ones are archived in a local bundle held by the owner. #29, #30, #31, #32, #34 and #35 are merged; #6 is closed as superseded. Open: #36 (UI quote midpoint fix). Next: B-088 (hermetic sqlx build), then B-089 and B-090 to B-094.
+Specs: `plans/recovery/` (`README.md` decides order and IDs; the research roadmap is merged into it and remains the design reference). Goal: a trustworthy verdict on whether the approach makes money (Phase 4 Go/No-Go), live capital only on a later decision (Phase L). State as of 2026-10-30: B-086 is done. `main` is the only long-lived branch and is protected (PR required, administrators included, force-push and deletion blocked, no required status checks until B-089 makes CI green). `staging` and the stale branches are deleted; the unmerged ones are archived in a local bundle held by the owner. #29, #30, #31, #32, #34 and #35 are merged; #6 is closed as superseded. Open: #36 (UI quote midpoint fix). Next: B-088 (hermetic sqlx build), then B-089 and B-090 to B-094.
 
 ### Phase 0: Truth and Build (`plans/recovery/phase-0-truth-and-build.md`)
 
@@ -61,9 +61,16 @@ Specs: `plans/recovery/`. State as of 2026-10-30: B-086 is done. `main` is the o
 | B-122–B-136 | One defect each: deadlock, `Lagged`, market-order notional, PDT off-by-one/window/UTC date/persistence, daily-loss wiring + commission sign + single halt, emergency threshold semantics, daily reset, inverted multiplier, rule engine sharing real trackers, un-awaited call + eager index, guards across `.await`, `PatternDetected` re-publish, ghost orders + partial-then-cancel | agent | S–M each | Pending |
 | B-137 | Scripted-day scenario suite demonstrably sensitive to each fix | agent | M | Pending |
 
-### Phases 3–5 (`plans/recovery/phase-3-to-5-outline.md`)
+### Phases 3, 4, 5 and L (`plans/recovery/phase-3-to-L-outline.md`)
 
-Outlined only. A **[design]** task writes their specs when Phase 2 exits. B-066 (SQLite PDT repository) is absorbed into B-127; B-067 (Quote unification) into B-102/B-103; B-070 (architecture reconciliation) into B-110–B-117; B-074 into B-090–B-094; B-075 into B-088/B-089; B-061 (emergency liquidation) into B-129 + Phase 3.
+Outlined only. A **[design]** task writes the Phase 3 and 4 specs when Phase 2 exits.
+
+- **Phase 3, one correct pipeline in simulation:** synchronous risk gate, fills into one portfolio, exits, persistence and rehydration against `SimBroker`. IDs assigned when specified.
+- **Phase 4, research platform:** B-209 (data quality, first), B-223 (adjustment correctness), B-210, B-211, B-216 (regimes, needed by B-212's attribution), B-212, B-213, then **B-222 Go/No-Go** (human). B-224 (bench engine shutdown) lands with B-213.
+- **Phase 5, after the verdict, order set by B-222:** B-215, B-217, B-218, B-219, B-220.
+- **Phase L, only on a decision to trade real money:** live connectivity plus roadmap Phase L hardening, then 30 trading days of paper.
+
+Absorbed: B-066 (SQLite PDT repository) into B-127; B-067 (Quote unification) into B-102/B-103; B-070 (architecture reconciliation) into B-110 to B-117; B-074 into B-090 to B-094; B-075 into B-088/B-089; B-061 (emergency liquidation) into B-129 and Phase L.
 
 ---
 
@@ -83,30 +90,31 @@ Outlined only. A **[design]** task writes their specs when Phase 2 exits. B-066 
 
 ### Priority: Research Platform (R0–R5)
 
-Roadmap: `plans/2026-07-28-research-platform-roadmap.md`. Goal is a trustworthy
-verdict on whether edge exists, not live trading. **Automation gate stays OFF
-until Phase L.** Ordering: R0 → R1 → Go/No-Go checkpoint → R2/R3/R5 as the
-verdict directs.
+Designs: `plans/2026-07-28-research-platform-roadmap.md`. **Order is set by the merged program in `plans/recovery/README.md`**; the Phase column below shows the roadmap section and, after the arrow, the program phase it now belongs to. **Automation gate stays OFF until Phase L.**
 
 > **IDs renumbered 2026-10-30.** This track was planned on `feat/r0-parallel-sweep` with IDs B-085 to B-103, which collide with the Recovery Program. Old to new: B-085 → B-201, B-086 → B-202, B-086b → B-203, B-088 → B-205, B-089a → B-207, B-103 → B-221, B-087 → B-204, B-089 → B-206, B-090 → B-208, B-091 → B-209, B-092 → B-210, B-093 → B-211, B-094 → B-212, B-095 → B-213, B-096 → B-214, B-097 → B-215, B-098 → B-216, B-099 → B-217, B-100 → B-218, B-101 → B-219, B-102 → B-220. Commit messages on that branch keep the old IDs. The two plans are to be merged into one (see `plans/recovery/README.md`).
 
 | ID | Task | Priority | Phase | Scope |
 |----|------|----------|-------|-------|
-| B-204 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) **Decided 2026-10-30 (owner): integer micros.** Supersedes the recovery plan's decimal-text storage; `Money` in `dt-core` (B-101) uses this representation and B-108 migrates the columns. | Critical | R0.2 | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
-| B-206 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) Folded into recovery B-089 to B-094. | High | R0.5 | `scripts/`, `.governance/` |
-| B-208 | Dependency cleanup: delete `ta`/`once_cell`/`tower`/`crossbeam`/`rusqlite` (0–2 refs each); upgrade reqwest 0.11→0.13, tungstenite 0.21→0.30, thiserror 1→2, sqlx 0.8→0.9 Dependency deletions folded into recovery B-095; the version upgrades remain here. | Medium | R0.6 | `Cargo.toml` |
-| B-209 | Data-quality gates + `data_quality_events` quarantine table; free-tier divergence audit → `docs/data-validity.md` | High | R0.7 | `src/data/validation.rs` |
-| B-210 | Backtester realism: `FillModel` trait (spread/impact/participation), short side, PDT accrual during replay, EOD liquidation | Critical | R1 | `src/execution/backtest.rs` |
-| B-211 | Walk-forward + purged K-fold with embargo; deflated Sharpe fed by sweep trial count | Critical | R1 | `src/execution/` |
-| B-212 | Metric suite + Monte Carlo bootstrap + per-pattern × regime × hour attribution | High | R1 | `src/execution/`, `src/utils/stats.rs` |
-| B-213 | Backtest CLI (`src/bin/backtest.rs`) + determinism and lookahead-detector gates | High | R1 | `src/bin/` |
-| B-214 | `src/domain/` leaf module; drain architecture ratchet to empty (supersedes B-067, B-070) Overlaps recovery B-101 (`dt-core`) and B-110 to B-117; reconcile in the plan merge. | High | R2 | `src/domain/`, `src/events/`, `src/db/` |
-| B-215 | Sealed `SignalSource` trait; adapt all 9 detectors; feature store with PIT `CHECK` constraints + restatement log | High | R2 | `src/signals/` |
-| B-216 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 | `src/patterns/`, `src/risk/pattern_stats.rs` |
-| B-217 | Universe scanner: PIT snapshots, free-tier factors (RVOL time-of-day normalized, gap, ATR%, momentum, pattern prior), ranking with rationale | Medium | R3 | `src/universe/` |
-| B-218 | `tauri-specta` bindings + `dto.rs` boundary; money crosses as branded string (supersedes hand-written TS types) | Medium | R4 | `daytrader/src-tauri/src/dto.rs`, `daytrader/src/types/` |
-| B-219 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 | `daytrader/src/` |
-| B-220 | ML signal layer: ONNX via `ort` behind `--features ml`, model registry, shadow-only evaluation, drift/decay/crowding metrics | Low | R5 | `src/signals/ml/` |
+| B-204 | Money → `Money<6>` fixed-point, SQLite `INTEGER` micros across ~24 tables (**BREAKING**, dev DB disposable) **Decided 2026-10-30 (owner): integer micros.** Supersedes the recovery plan's decimal-text storage; `Money` in `dt-core` (B-101) uses this representation and B-108 migrates the columns. | Critical | R0.2 → P1 (B-101, B-108) | `src/domain/money.rs`, `src/db/models.rs`, `migrations/003_*.sql` |
+| B-206 | Honest CI gate: clippy `-D warnings`, `known_test_issues.txt` → empty, `std::sync` → 0, add `cargo sqlx prepare --check`, `cargo-deny`, `cargo-machete` (supersedes/folds B-074, B-081) Folded into recovery B-089 to B-094. | High | R0.5 → P0 (B-089 to B-094) | `scripts/`, `.governance/` |
+| B-208 | Dependency cleanup: delete `ta`/`once_cell`/`tower`/`crossbeam`/`rusqlite` (0–2 refs each); upgrade reqwest 0.11→0.13, tungstenite 0.21→0.30, thiserror 1→2, sqlx 0.8→0.9 Dependency deletions folded into recovery B-095; the version upgrades remain here. | Medium | R0.6 → P0 deletions (B-095); upgrades after P0 | `Cargo.toml` |
+| B-209 | Data-quality gates + `data_quality_events` quarantine table; free-tier divergence audit → `docs/data-validity.md` | High | R0.7 → P4, first | `src/data/validation.rs` |
+| B-210 | Backtester realism: `FillModel` trait (spread/impact/participation), short side, PDT accrual during replay, EOD liquidation | Critical | R1 → P4 | `src/execution/backtest.rs` |
+| B-211 | Walk-forward + purged K-fold with embargo; deflated Sharpe fed by sweep trial count | Critical | R1 → P4 | `src/execution/` |
+| B-212 | Metric suite + Monte Carlo bootstrap + per-pattern × regime × hour attribution | High | R1 → P4 | `src/execution/`, `src/utils/stats.rs` |
+| B-213 | Backtest CLI (`src/bin/backtest.rs`) + determinism and lookahead-detector gates | High | R1 → P4 | `src/bin/` |
+| B-214 | `src/domain/` leaf module; drain architecture ratchet to empty (supersedes B-067, B-070) Overlaps recovery B-101 (`dt-core`) and B-110 to B-117; reconcile in the plan merge. | High | R2 → P1 (`dt-core`) | `src/domain/`, `src/events/`, `src/db/` |
+| B-215 | Sealed `SignalSource` trait; adapt all 9 detectors; feature store with PIT `CHECK` constraints + restatement log | High | R2 → P5 | `src/signals/` |
+| B-216 | Regime classification (threshold-based) + regime-bucketed pattern stats | High | R2 → P4, before B-212 | `src/patterns/`, `src/risk/pattern_stats.rs` |
+| B-217 | Universe scanner: PIT snapshots, free-tier factors (RVOL time-of-day normalized, gap, ATR%, momentum, pattern prior), ranking with rationale | Medium | R3 → P5 | `src/universe/` |
+| B-218 | `tauri-specta` bindings + `dto.rs` boundary; money crosses as branded string (supersedes hand-written TS types) | Medium | R4 → P5 | `daytrader/src-tauri/src/dto.rs`, `daytrader/src/types/` |
+| B-219 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 → P5 | `daytrader/src/` |
+| B-220 | ML signal layer: ONNX via `ort` behind `--features ml`, model registry, shadow-only evaluation, drift/decay/crowding metrics | Low | R5 → P5 | `src/signals/ml/` |
+| B-222 | ⭑ Go/No-Go checkpoint: run the detectors through the Phase 4 harness and decide (stop, scanner-first, or signals-first); record in `docs/sessions/` | Critical | → end of P4 (human) | `docs/sessions/` |
+| B-223 | Corporate-action adjustment correctness, before anything consumes it (from the #39 review): sort dividend reference prices by full timestamp, not date; keep distinct dividends on the same ex-date and apply amount corrections (action identity, not `(symbol, ex_date)`); compute each dividend's reference close and factor once per action instead of per candle (quadratic today); split-adjust volume by the inverse factor; bound actions by an explicit as-of date so future actions never alter a historical backtest (the roadmap's `AdjustedBars::as_of`). `adjust_candles` has no runtime caller yet, so none of this is live. | Critical | R0.1 → P4, before B-210 | `src/data/corporate_actions.rs` |
+| B-224 | Benches: risk benchmarks call `RiskEngine::start()` per iteration and never stop it, so detached receiver tasks accumulate and distort timings (from the #39 review). Give the engine a shutdown handle and use it in the benches before `verify_perf.sh` gates on them. | Medium | R0.5 → P4 (with B-213's throughput gate) | `benches/risk_benchmarks.rs`, `src/risk/engine.rs` |
+| B-225 | Flaky test: `performance_validation::test_signal_cache_performance` asserts `second <= first * 2` on two wall-clock timings of ~250µs, so scheduler noise fails it (seen once in a local verify run during #39; passed 11/11 on re-run). Replace the timing ratio with a deterministic check (e.g. cache hit counter) or move it to a criterion bench. Do not `#[ignore]` it. | Medium | → P0 (with B-081) | `tests/performance_validation.rs` |
 
 #### Research track: completed on the sweep branch (landed on `main` by the r0 integration PR)
 
