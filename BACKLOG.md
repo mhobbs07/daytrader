@@ -32,7 +32,7 @@ Specs: `plans/recovery/` (`README.md` decides order and IDs; the research roadma
 | B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Done 2026-10-30 (`main` at `936798b`; 3 branches kept on purpose: `fix/review-mcp-security-hardening` pending the MCP decision, and `fix/ui-quote-last-midpoint` plus `feat/b036-b039-frontend-consolidation` until #36 merges) |
 | B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Done 2026-10-30 — PR #34 merged into `staging` |
 | B-088 | Hermetic sqlx build: commit `.sqlx/` + `Cargo.lock`, `SQLX_OFFLINE=true` everywhere, `setup_db.sh` without `sqlite3` CLI, `create_if_missing`, pragmas via `SqliteConnectOptions` | agent | M | Done 2026-10-30 (`chore/b088-hermetic-sqlx`) |
-| B-089 | CI mirrors verify script, runs on every PR and trunk push, includes Tauri + frontend, no excused failures; delete `known_test_issues.txt` escape hatch | agent | M | In Progress 2026-10-30 (`chore/b089-ci-mirrors-verify`) |
+| B-089 | CI mirrors verify script, runs on every PR and trunk push, includes Tauri + frontend, no excused failures; delete `known_test_issues.txt` escape hatch | agent | M | Done 2026-10-30 — PR #42, all nine jobs green (run 41120644746). Escape hatch deleted (all 21 listed tests pass on `main`); clippy and rustdoc stay warn-only until B-094 flips both; doctests excluded pending B-068 |
 | B-090 | Clippy `-D warnings` clean: `utils`, `brokers`, `config`, `data` | agent | M | Pending |
 | B-091 | Clippy `-D warnings` clean: `events`, `db` | agent | M | Pending |
 | B-092 | Clippy `-D warnings` clean: `patterns` | agent | M | Pending |
