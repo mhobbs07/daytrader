@@ -1,184 +1,308 @@
-# DayTrader: Honest Whole-App Assessment (2026-10-30)
+# DayTrader: Honest Whole-App Assessment and Recovery Strategy (2026-10-30)
 
-Scope: architecture, logical flow, duplication, database/caches, real vs mock trading, connection setup, backtesting readiness, and a comparison against established trading frameworks. All claims below were checked against the code at commit `5b09248` (`main`). File references are `path:line`.
+**Branch audited:** `staging` at `e61e85a` (the integration branch, 124 files and ~9k lines ahead of `main`), plus the open PR [mhobbs07/daytrader#29](https://github.com/mhobbs07/daytrader/pull/29) `feat/close-trading-loop` at `6cd5450`, referred to below as **CTL**. `main` at `5b09248` is six months stale (last merge April 22) and does not compile from a clean clone; it is not a useful reference point and this report does not audit it further.
 
-Verification performed in this session:
+**What was verified in this session (not just read):**
 
-- `cargo check` at HEAD: **fails** (46 errors).
-- Scratch copy with a placeholder `src/data/mod.rs` and a prepared `DATABASE_URL`: library compiles with 71 warnings; benches and several integration tests still fail to compile; unit-test result recorded in section 1.
-- Three targeted code audits (trading loop, broker/config, DB/persistence) plus spot-checks of every high-severity claim.
+| Check | Result |
+|---|---|
+| `cargo check` on `staging`, no `DATABASE_URL` | Fails: 45 sqlx macro errors |
+| `cargo check --all-targets` on `staging`, hand-provisioned `DATABASE_URL` | Library and all test targets compile; 691 library warnings; 3 bench targets fail to compile |
+| `cargo test --lib` on `staging` | 323 passed, 0 failed |
+| `cargo test --tests` on `staging` | All 17 test binaries pass; 27 tests `#[ignore]`d |
+| `cargo clippy -- -D warnings` on `staging` (what CI runs) | 1,792 errors |
+| `scripts/verify_agent_work.sh` on `staging` | Fails compilation in any environment without the `sqlite3` CLI (it silently skips DB provisioning) |
+| Three code audits (trading loop, brokers/config/Tauri, DB/persistence) against `staging` and CTL | Every high-severity claim below was spot-checked by hand |
 
----
-
-## 1. The repo does not build from a clean clone
-
-| # | Problem | Evidence |
-|---|---------|----------|
-| 1.1 | `.gitignore` line 27 is `data/`, which also matches `src/data/`. `src/lib.rs:16` declares `pub mod data;` but the directory was never committed. Every clean checkout fails with E0583. | `git check-ignore -v src/data/mod.rs` → `.gitignore:27: data/` |
-| 1.2 | 46 `sqlx::query!` / `query_as!` macro sites need either `DATABASE_URL` pointing at a database that already has the full schema **plus** the `schema_migrations` table, or a `.sqlx/` offline cache. `.sqlx/` is gitignored (`.gitignore:13`), no `.env.example` exists, and neither CI (`.github/workflows/ci.yml`), the Dockerfile, nor `scripts/verify_agent_work.sh` sets `DATABASE_URL` or `SQLX_OFFLINE`. | `cargo check` output; scratch build needed a hand-built DB |
-| 1.3 | Benches do not compile (`benches/risk_benchmarks.rs:390,506` reference `Price`/`Fill` without imports; `pattern_signal_benchmarks` has 6 errors). `tests/risk_engine_integration.rs:33` references a field that no longer exists. `tests/pattern_streaming_pipeline_integration.rs` uses `sqlx::PgPool` with no `postgres` feature. `tests/risk_database_integration.rs` needs `--features mock`. | Scratch `cargo check --all-targets` |
-| 1.4 | The Tauri crate cannot compile: `Arc::clone(&event_bus)` on a non-Arc (`src-tauri/src/main.rs:126`), imports of undeclared modules `risk::position_tracker` and `utils::holidays` (`state.rs:12-13`), `tokio::spawn` from a non-async `main` (`main.rs:149`), `db::repositories::PdtRepository` does not exist (`state.rs:5,203`). No Tauri artifacts in `target/`, so it has apparently never been built. | Read + grep |
-| 1.5 | Three directories are orphaned (not in any `mod` tree, never compiled): `src/domain/`, `src/infrastructure/`, `src/risk/position_tracker.rs`, `src/utils/holidays.rs`. The infrastructure code references types and functions that do not exist. The "B-042 PDT holidays" work landed in a file that is not compiled. | `grep "^pub mod" src/risk/mod.rs src/utils/mod.rs src/lib.rs` |
-| 1.6 | `Cargo.lock` is gitignored for an application crate. Builds are not reproducible. | `.gitignore:3` |
-| 1.7 | Governance docs describe `main ← staging ← feat/*`; no `staging` branch exists on the remote, and CI triggers on `main`/`develop` (no `develop` either). The verify script passes unit tests when failures are ≤ the count of lines in `known_test_issues.txt` (21 entries) and uses clippy `-W` while CI uses `-D warnings`. The claims of "235/235 passing" in `BACKLOG.md` cannot currently be reproduced from git. | `git branch -a`, `scripts/verify_agent_work.sh:94-115` |
-
-Unit test result from the scratch build: see addendum at the bottom.
+File references are `path:line` on `staging` unless marked CTL.
 
 ---
 
-## 2. Nothing runs end to end
+## 1. Summary verdict
 
-`src/main.rs` initialises logging and metrics, logs "Phase 0", then exits (`// TODO: Initialize application in Phase 1`). No production code constructs `ExecutionEngine`, `OrderEngine`, `positions::PositionTracker`, `Database`, `MigrationManager`, or `AlpacaProvider`. The Tauri app builds a `RiskEngine` and a `MockBroker` and nothing else.
+The repository contains a large number of individually unit-tested components and a growing amount of real engineering (DST-correct market hours, a `Clock` trait, a token-bucket rate limiter, real day-trade detection, a first backtest replay engine on CTL). It does not yet contain a trading system. On `staging`:
 
-Stage-by-stage status of the trading loop:
+- No binary runs the trading loop. `src/main.rs` is a stub; the Tauri app runs risk + mock data only. CTL is the first branch to construct `OrderEngine`, `ExecutionEngine` and `PositionTracker` together, and only against the mock broker.
+- The risk engine deadlocks on the first detected pattern, and its pre-trade gate is advisory.
+- Every generated signal carries the symbol `"DEFAULT"`; detectors read the oldest cached candle as "current" (fixed in CTL only).
+- Nothing persists fills, nothing rehydrates on restart, PDT and daily-loss state live in memory.
+- There is no backtest capability on `staging`; CTL adds a v1 that is a good skeleton but is not yet deterministic, has no data loader, and runs with the risk engine not started.
+- CI cannot go green: it provisions no database for the sqlx macros, and clippy under `-D warnings` has 1,792 errors.
+- The same concepts are defined 4 to 8 times each (Position, Order, Candle, Quote, Fill, PatternStats), with hand-written lossy converters between them. This is the biggest single drag on every other fix.
 
-| Stage | Status |
-|-------|--------|
-| WebSocket bars → `MarketEvent::NewCandle` | **Not wired.** `alpaca/websocket.rs:280` stores bars in a `HashMap`; nothing publishes to the `EventBus`. The only `NewCandle` publishers are tests. |
-| Candle → pattern → signal | Logic exists (`patterns/streaming.rs`); built only in an integration test. |
-| Signal → `ExecutionEngine` | Never constructed anywhere, including tests. |
-| Pre-trade risk check | **Advisory only.** `orders/engine.rs:186` checks a halt flag. The real rule evaluation runs asynchronously on the `OrderPlaced` event, which is published before submission, and errors are only logged (`risk/engine.rs:181-183`). This directly contradicts `.claude/rules/security.md` rule 4. |
-| Broker fill → order tracker → position | **No fill path exists.** `OrderExecutionProvider` has no stream/callback; there is no Alpaca `trade_updates` subscription; `sync_order_status` is never called; `PositionTracker::update_from_fill` is never called. |
-| Position close → daily P&L → halt | Unreachable; `close_position` returns a fake id without sending anything (`positions/tracker.rs:510-526`). |
-
-### Runtime bugs that would bite the moment it is wired
-
-- **Deadlock.** `risk/engine.rs:408-409` takes write locks on both `pattern_risk_evaluator` and `pattern_stats_tracker`, then calls `evaluate_pattern_trade`, which takes `stats_tracker.read()` on the same `Arc` (`pattern_limits.rs:459`; linked at `engine.rs:112`). Any pattern that passes the confidence threshold hangs the risk task forever.
-- **Guaranteed panic.** `Price::new(Decimal::ZERO).unwrap()` at `risk/engine.rs:389`; `Price::new` rejects non-positive values (`brokers/types.rs:99`). Runs on every detected pattern when a database is attached. Release profile is `panic = "abort"`.
-- **Lagged subscribers die silently.** All production consumers use `while let Ok(ev) = rx.recv().await` (`execution/engine.rs:272`, `risk/engine.rs:180`, Tauri `main.rs:156`, `events.rs:39`). The first `RecvError::Lagged` exits the loop; the risk engine stops evaluating while trading remains "allowed". The project's own concurrency rule forbids this.
-- **Market orders bypass every notional check.** `estimated_value()` is `None` for market orders, so buying power is checked against $0 (`orders/engine.rs:333-341`) and `TradeContext` gets price 0 (`risk/engine.rs:252`). The default `ConservativeStrategy` places market orders.
-- **PDT is never enforced pre-trade.** `is_day_trade` is hardcoded `false` (`risk/engine.rs:254`); every fill is recorded as a day trade (`engine.rs:311-313`); the window covers 6 business days (`pdt.rs:126,140`); holidays are ignored because `holidays.rs` is orphaned. The count resets to zero on restart.
-- **Daily loss limit never halts.** `DailyLossTracker` returns a `RiskEvaluation` that is discarded at `risk/engine.rs:317,344,361`. Commission is added to P&L as profit (`:316-319`). Two unlinked halt flags exist (`RiskState.is_trading_halted` and `DailyPnlState.is_halted`).
-- **Market hours use the UTC hour.** `MarketHoursRule` compares `current_time.hour()` to 9–16 with `Utc` (`execution/rules.rs:190-196`). That permits trading from 4–5 AM ET and blocks the afternoon session. ET is hardcoded as UTC−5 with no DST elsewhere (`risk/limits.rs:390-393`). No `chrono-tz` dependency.
-- **Emergency liquidation misfires.** `check_emergency_liquidation(daily_pl)` compares daily P&L to a $500 *balance* threshold (`risk/engine.rs:367,578`), so any close while daily P&L ≤ +$500 trips it. No liquidation is implemented.
-- **Inverted risk multiplier.** Worse-performing patterns get a *larger* multiplier (`pattern_stats.rs:337-339`), which feeds position size (`pattern_limits.rs:465`).
-- **Risk rule engine evaluates empty state.** `RiskRuleEngine::new` builds its own `DailyLossTracker`, `PositionSizer` (equity 0) and `PdtEnforcer` (equity 0), separate from the ones the `RiskEngine` updates (`risk/rules.rs:476-499`, `risk/engine.rs:95-101,158`).
-- Un-awaited async call: `evaluator.update_pattern_status(...)` at `risk/engine.rs:451` never runs, so auto-disable never happens.
-- `DashMap` `RefMut` held across `.await` in `positions/tracker.rs:266→290`, `343→409`, `431→440`.
-- `Decimal::from_f64_retain(0.7) < 0.70`, so confidence threshold comparisons fail at the boundary (`execution/engine.rs:316`, `execution/rules.rs:102`).
-- `ExecutionEngine` re-publishes `PatternDetected` (`engine.rs:650,673`), so the `RiskEngine` double-counts signals. `SignalStreamingPipeline` never clears its buffers after `process_batch` (`streaming.rs:563-583`).
+The build and test infrastructure is in better shape than `main` suggested, and the unit tests are healthy. The gap is assembly, correctness of the risk core, and duplication, not test discipline.
 
 ---
 
-## 3. Duplication
+## 2. Build, CI and repo hygiene
 
-The codebase is about 31.7k lines; a large fraction is the same concept defined several times with hand-written, lossy converters between them.
-
-- **Position:** `brokers::traits::Position`, `events::types::Position`, `positions::tracker::Position`, `risk::position_sizing::PositionInfo`, `db::PositionRow`, `AlpacaPosition`, plus the orphaned `risk::position_tracker::TrackedPosition`. Four independent position stores exist, none synchronised.
-- **Order / status / side:** `brokers::traits` (5 types, 7 statuses) vs `events::types` (2 types, 6 statuses) vs `orders::types::ManagedOrder` vs `OrderRow`. Mapping `ManagedOrder → events::Order` turns Stop/StopLimit/Trailing into Market and Expired into Cancelled (`orders/tracker.rs:86-124`).
-- **Candle / Quote / Fill:** each defined twice (`brokers/traits.rs` and `events/types.rs`).
-- **Pattern stats:** seven types across `risk::pattern_stats` (two), `execution`, `execution::rules`, `patterns::types`, `db::models`, `domain::models`, using three different win-rate scales (0–1, 0–100, Decimal). None is ever fed a real trade.
-- **Risk configuration thresholds** live in `execution::PerformanceThresholds`, `risk::types::PatternPerformanceThresholds`, and `RiskConfig`.
-- **P&L calculation** appears in `positions/pnl.rs`, `position_sizing.rs:98-118`, `events/types.rs:443-451`, `execution/rules.rs:335,370`. FIFO tax lots are the default but never used; realised P&L is always average cost.
-- **Repositories:** two parallel abstractions plus two mock sets: concrete sqlx structs in `db/repositories.rs`, `db/traits.rs::PdtRepositoryTrait`, `domain/ports/repositories.rs` (f64 models, not compiled), `infrastructure/repositories.rs` (not compiled, calls non-existent methods). `OrderEngine` writes raw SQL (`orders/engine.rs:401-473`) while `db::OrderRepository` sits unused.
-- **Schema:** four sources (`src/db/schema.sql`, `migrations/001+002`, DDL inside `migrations.rs` macros, `scripts/setup_db.sh`). Already drifted: `day_trades` and `pdt_audit_events` exist only in `migrations/001`, not in `schema.sql`, which is the one that actually runs.
-- **Tauri** re-implements PDT (hardcoded 3 trades/$25k, `commands/risk.rs:217,236,369`), weekday helpers, market-data and pattern caches, and a hand-copied fallback `RiskConfig`.
-- Enum→string mappers copy-pasted in `orders/engine.rs:496-516` and `db/repositories.rs:1030,1605`.
-
----
-
-## 4. Database and caches
-
-- **Nothing opens a database in production.** `Database::new` is only called by tests. It also cannot create a new file: sqlx's default `create_if_missing` is false (`db/connection.rs:80-86`), so a fresh path fails with SQLite error 14 unless `setup_db.sh` ran first.
-- **Pragmas only reach one pooled connection.** `PRAGMA synchronous/cache_size/temp_store/mmap_size` are executed via `&self.pool` (`connection.rs:105-130`); the other connections keep defaults. `cache_size = 1000000` is pages, not KiB (≈4 GB per connection); almost certainly meant `-1000000`. `busy_timeout` and `acquire_timeout` are not configured.
-- **Money is stored as `REAL`.** Every price/P&L column is f64; writes go `Decimal → f64` with `.unwrap_or(0.0)` (silently writing $0 on failure, `db/models.rs:259,276,278,299,415`); reads use `from_f64_retain`, which carries binary noise (150.1 → 150.0999999…). This violates the project's own "Decimal for money" invariant at the storage layer.
-- **Quantities are `u32`**, so fractional shares (which Alpaca supports) cannot be represented or parsed (`alpaca/types.rs:117-125`).
-- **No state is reloaded on startup.** `get_active_positions`, `get_open_orders`, `get_all_pattern_stats`, `sync_from_broker` have no production callers. After a restart: PDT count = 0, daily P&L = 0, halt flag cleared, disabled patterns re-enabled, open orders and positions unknown.
-- **Fills are never persisted.** Nothing inserts into `trades`. Order rows stay `'pending'` forever. Cancels never reach the DB because `update_order_status_in_db` filters on the internal id after the column was overwritten with the broker id (`orders/engine.rs:446-473`).
-- **No idempotency key.** `client_order_id` appears nowhere. A crash between submit and the broker-id swap orphans a live broker order; a retry duplicates it.
-- **Stop-limit and trailing-stop orders cannot be saved:** `format!("{:?}").to_lowercase()` produces `"stoplimit"`, which fails the `CHECK(order_type IN ('stop_limit', …))` constraint (`orders/engine.rs:385`, `schema.sql:101`).
-- **FK failures on every position write:** `account_id = 1` is hardcoded (`positions/tracker.rs:602,617`) and nothing inserts into `accounts` outside tests; with `foreign_keys=ON` the write is rejected after the in-memory cache was already updated.
-- **Caches drift from DB.** `positions::tracker` mutates the DashMap first and writes second with no rollback; on close it removes from cache before archiving. `OrderTracker.archived_orders` grows unbounded. Candle cache is bounded per symbol but unbounded in symbols; candles are never persisted.
-- `rusqlite` and `sqlx` are both dependencies; `rusqlite` is used only for one dead error variant and one test file that creates its own throwaway tables (`tests/database_integration.rs`).
-- Migrations: `MigrationManager` hardcodes versions 1 and 2, no checksums, no transaction around `migrate_to_v2`, and is never called. Tests use `sqlx::migrate!` against a different schema. Production runs neither.
-- `[database] path`, `max_connections`, `enable_wal` in `config/default.toml` are never converted into `db::DatabaseConfig`. Four different default DB paths exist.
+| # | Finding | Status on staging | Evidence |
+|---|---|---|---|
+| 2.1 | `.gitignore` `data/` swallowed `src/data/` | **Fixed** (anchored to `/data/`) | `.gitignore:25` |
+| 2.2 | sqlx macros need `DATABASE_URL`; no `.sqlx/` offline cache; `.sqlx/` gitignored; no `SQLX_OFFLINE` | **Still present** | `.gitignore:12`, `.env.example:6`; BACKLOG B-075 admits it |
+| 2.3 | CI never provisions a DB, so `clippy`, `test` and `doc` jobs cannot compile the macros | **Still present** | `.github/workflows/ci.yml` has no `DATABASE_URL`; `docs.yml` same |
+| 2.4 | CI triggers only on `main`/`develop`; staging PRs get no CI at all; `ci.yml:72` runs `cargo test --test integration` which does not exist; Tauri crate is never built in CI | **Still present** | `ci.yml:3-7,72` |
+| 2.5 | `cargo clippy -- -D warnings` (the CI step) fails | **Still present**: 1,792 errors | measured this session; B-074 says "~130" |
+| 2.6 | `Cargo.lock` gitignored for an application | **Still present** | `.gitignore:3` |
+| 2.7 | Dockerfile copies untracked `Cargo.lock`, omits the `src-tauri` workspace member, provisions no DB | **Still present** | `Dockerfile:14` |
+| 2.8 | verify script depends on the `sqlite3` CLI and silently skips provisioning without it; reuses a stale DB if one exists; external `DATABASE_URL` bypasses it | **New** | `scripts/verify_agent_work.sh:33-43` |
+| 2.9 | Benches do not compile (`position_benchmarks`, `phase_3d_benchmarks`, `pattern_signal_benchmarks`) | **Still present** | newtype API drift |
+| 2.10 | Orphaned `domain/`, `infrastructure/` | **Fixed** (deleted, B-064) | |
+| 2.11 | Orphaned `risk/position_tracker.rs`, `utils/holidays.rs` | **Fixed** (now compiled and used) | `risk/mod.rs:7`, `utils/mod.rs:6` |
+| 2.12 | 28 tests permanently excused via `known_test_issues.txt` or `#[ignore]`, including the only candle-to-signal end-to-end test | **Still present** | `.governance/known_test_issues.txt` |
+| 2.13 | ~50 stale remote branches (`convoy/*`, `gt/*`, worktree branches); 24 closed-not-merged PRs whose work was merged by direct pushes; `main` six months behind `staging` | **Process debt** | `git branch -r` |
+| 2.14 | `.gitlab-ci.yml` pins Rust 1.75; README says Rust 1.75 / edition 2021; `Cargo.toml` is edition 2024, `rust-version = 1.92` | Doc drift | |
 
 ---
 
-## 5. Real vs mock trading and connections
+## 3. The trading loop
 
-- **No broker factory, no selection logic.** `AppConfig.broker.provider` and `is_paper` are never read by code that builds a broker. Nothing in `src/` constructs `AlpacaProvider`; only the two examples do. Tauri hardcodes `MockBroker`.
-- **Nothing guards against live trading.** `AlpacaConfig::paper()` and `live()` differ only in `base_url` and an `is_paper` flag that is never read outside tests (`alpaca/config.rs:22-41`). All fields are `pub`. There is no URL/flag consistency check, no explicit opt-in, no startup banner. Today you are protected only because nothing wires Alpaca up.
-- **`config/default.toml` cannot deserialize into `AppConfig`.** `BrokerConfig` requires `api_key`/`api_secret` with no default (`config/mod.rs:35-36`); the toml correctly omits them. `test_load_default_config` swallows the error (`tests/config_validation.rs:474-476`). `[pattern_profiles.*]`, `[[confidence_multipliers]]` are top-level in the toml but expected under `risk.*` in the struct, so they would be silently dropped. `base_url`/`ws_url` in the toml have no struct fields.
-- **Credentials:** no hardcoded keys found (good). But nothing in the library loads them; `keyring` is a dependency with zero uses despite the security rule; `AlpacaConfig` and `RestClient` derive `Debug` with a plain `api_secret: String`, so any `{:?}` log leaks the secret.
-- **WebSocket does not reconnect after a disconnect.** `connect_and_run` returns `Ok(())` on server Close, read error, or failed ping (`websocket.rs:177-188,211-213,225`) and `ws_handler` treats `Ok` as "closed normally" and exits (`:122-125`). Reconnect happens only on an `Err` from the initial connect/auth/subscribe sends. Fixed 5 s retry, no backoff, no resubscribe (`subscribed_symbols` is tracked but never replayed), no pong timeout. `connect()` returns `Ok` before any TCP/auth exchange, and auth failure is just `log::error!`. `get_quote` returns the last quote forever with no staleness check. The `alpaca/README.md` advertises backoff, resubscribe, and rate-limit retry that do not exist.
-- **Message parsing drops whole batches** on any unknown `T` value (`websocket.rs:20-46,231-239`). Prices go `f64 → Decimal::from_f64_retain`. Feed is hardcoded to IEX for both paper and live; no SIP option. `Quote.last` is the last bar close (up to a minute stale) or falls back to ask.
-- **No rate limiter.** Alpaca allows 200 req/min; `tower` is a dependency with the `limit` feature and zero uses. `utils/retry.rs` (`RetryExecutor`, `CircuitBreaker`) is dead code, and its backoff `from_millis(100).factor(2)` yields 200 ms → 20 s → cap, not doubling.
-- **Alpaca type mapping will break on real responses:** `parse_order_status` rejects valid statuses (`pending_cancel`, `replaced`, `done_for_day`, `held`, …) and `get_open_orders` fails the whole call on one such order (`alpaca/types.rs:323-336`, `rest.rs:166-169`). 403 is mapped to `AuthenticationFailed`, but Alpaca returns 403 for insufficient buying power and PDT denials (`rest.rs:118-120`). `trail_price` is sent as `trail_percent` (`types.rs:155-161` vs `:400`). `Retry-After` is ignored.
-- **MockBroker cannot simulate execution.** `place_order` sets `Accepted` and stores the order; it never fills, never moves cash/positions, ignores limit/stop logic, market hours, and time-in-force (`mock.rs:315-320`). Error injection uses unseeded `rand::random`, so runs are not reproducible. `start_stream` flips a bool and emits nothing (`:279`). It is a stub for unit tests, not a paper-trading or backtesting simulator.
-- **No `Clock` abstraction.** About 120 non-test `Utc::now()` call sites (`risk/pdt.rs` 19, `risk/engine.rs` 11, `orders/tracker.rs` 8, …). PDT windows, daily resets, and timestamps all read wall-clock time.
-- Dependencies declared but unused in `src/`: `crossbeam`, `tower`, `keyring`, `once_cell`, `ta`, `sha2`, `url`, `tracing-appender`, `metrics-exporter-prometheus`; `tokio-retry` is used only by dead code; `rusqlite` is effectively dead; `log` and `tracing` are mixed; `parking_lot` and `std::sync::RwLock` appear despite the "tokio::sync only" rule.
+### 3.1 What is wired
+
+| Stage | staging | CTL |
+|---|---|---|
+| Market data → `NewCandle` | Only the Tauri `MockDataDriver` and the unused `data::ingestion` pipeline publish it. The Alpaca WebSocket stores bars in a HashMap with **no public accessor** and never publishes. | Unchanged |
+| Candle → pattern → signal | `PatternStreamingPipeline` runs in Tauri, **feeding candles oldest-first to detectors that treat index 0 as newest** (`candlestick.rs:60`, `engulfing.rs:61`, `streaming.rs:377`) | Fixed (window reversed) |
+| Signal symbol | `signals.rs:919` hardcodes `"DEFAULT"`; the signal cache therefore dedupes across symbols | Backtester patches the symbol after the fact; live path unchanged |
+| Signal → `ExecutionEngine` | Never constructed | Constructed in Tauri, automation off by default |
+| Pre-trade risk gate | `orders/engine.rs:212` checks only the halt flag. Full rule evaluation runs asynchronously on `OrderPlaced`, which is published **before** `submit_order`, and a Critical result is only logged (`risk/engine.rs:199-203`). Violates `.claude/rules/security.md` rule 4. | Unchanged |
+| Fill → order tracker → position | `update_from_fill` and `sync_order_status` have no callers | 1 s `sync_order_statuses` poller + fill listener, mock only; no Alpaca `trade_updates` stream |
+| Exits | `RuleEngine::evaluate_exit` has no callers; `PositionTracker::close_position` returns a fake id and places nothing; `NoDuplicatePositionRule` rejects the Sell that would close a held symbol | Unchanged. **The loop can open positions but never close them.** |
+| `src/main.rs` | Stub | Stub |
+
+### 3.2 Correctness bugs in the risk core (all still present on staging and CTL)
+
+- **Self-deadlock on every `PatternDetected`.** `risk/engine.rs:556-557` takes write locks on `pattern_risk_evaluator` and `pattern_stats_tracker`; `evaluate_pattern_trade` then takes `stats_tracker.read()` on the same `Arc` (`pattern_limits.rs:458-459`), and even the early-return path calls `update_performance_based_multipliers`, which reads it again (`pattern_limits.rs:620-622`). No test publishes `PatternDetected` into a started `RiskEngine`, so it has never been observed.
+- **Consumers die on `RecvError::Lagged`.** `risk/engine.rs:199` and `execution/engine.rs:272` use `while let Ok(..)`. The risk engine then stops evaluating while `is_trading_allowed` keeps returning true. (`events/filters.rs:97-109` and CTL's fill listener handle it correctly.)
+- **Market orders skip notional checks.** Buying power is checked against `Decimal::ZERO` when `estimated_value()` is `None` (`orders/engine.rs:359-366`); `TradeContext` price is `unwrap_or(ZERO)` (`risk/engine.rs:343`). CTL avoids it only by forcing limit orders.
+- **PDT.** Day-trade detection is now real (`predicts_day_trade`, FIFO tracker) and holidays are honoured. Still wrong: `count > max` allows the 4th trade (`pdt.rs:411`); `>= cutoff` gives a 6-business-day window (`pdt.rs:135`); the trading date is the UTC calendar day (`pdt.rs:350,397`, `risk/types.rs:650`); `PdtEnforcer` is always built with `repository: None` (`risk/engine.rs:110`) and there is no SQLite `PdtRepositoryTrait` implementation (B-066), so the count resets on restart. The desktop app never builds a `PdtEnforcer` at all and reports `eligible: true` with $50k equity (`commands/risk.rs:276-292,436-446`).
+- **Daily loss limit never halts.** `DailyLossTracker` results are discarded (`risk/engine.rs:463,507`); commission is added to P&L as profit (`:462`); unrealized P&L is accumulated as an absolute value per `PositionUpdated`; two unlinked halt flags; `check_emergency_liquidation(daily_pl)` compares daily P&L to the $500 *balance* threshold (`:513`), so a small profit halts trading; no liquidation is implemented (B-061).
+- **Daily state never resets.** `reset_daily_limits`, `should_reset_daily`, `reset_daily_counts` have no production callers; `RiskState.trading_date` never rolls.
+- **Inverted multiplier.** Worse-performing patterns get a *larger* risk multiplier (`pattern_stats.rs:327-342`), applied to signal confidence (`signals.rs:1089-1095`).
+- **Rule engine evaluates empty state.** `RiskRuleEngine::new` builds its own `DailyLossTracker`, `PositionSizer`, `PdtEnforcer` with equity 0 (`risk/rules.rs:479,493`), separate from the ones `RiskEngine` feeds.
+- **Un-awaited future.** `evaluator.update_pattern_status(...)` at `risk/engine.rs:599` is async and never awaited, so auto-disable never happens.
+- **Guards held across `.await`.** `DashMap` `RefMut` in `positions/tracker.rs:266-294, 345-409, 431-440` and `execution/engine.rs:~538-548`.
+- **Eager index panic.** `.unwrap_or(&self.config.confidence_multipliers[0])` (`pattern_limits.rs:448`) panics on an empty vector; the Tauri fallback config and both CTL test configs use `vec![]`.
+- **Feedback loop.** `ExecutionEngine` re-publishes `PatternDetected` (`execution/engine.rs:650,673`), which the risk engine counts again. `SignalStreamingPipeline` (unused by the apps) never clears its buffers and its stop branch exits on the first poll.
+- **Ghost orders.** `place_order` persists and publishes before `submit_order`; a submit error leaves the order Pending in tracker and DB with no `OrderRejected` and leaks `pending_orders` in the risk engine. A partial fill followed by cancel loses the filled shares (no event on `PartiallyFilled`, no `fill_info` on `Cancelled`).
+- **Time zones.** Market hours are now DST-correct via `chrono-tz` (`utils/market_hours.rs`) and used by `OrderEngine`, `MarketHoursRule::standard_hours`, `DailyLossTracker`. Still UTC: `MarketHoursRule::new(h1,h2)`, all PDT dates.
+- **Clock.** `utils/clock.rs` exists (`SystemClock`, `FixedClock`, CTL adds `SteppedClock`) but is consumed by exactly one component (`OrderEngine`). 82 non-test `Utc::now()` calls remain in `risk` (61), `orders` (9), `positions` (8), `execution` (4); the mock broker stamps fills with wall-clock time.
+
+### 3.3 What is better than main
+
+Real day-trade detection, holiday calendar, DST market hours, rate limiter, `Retry-After` parsing, WebSocket exponential backoff on initial connect, the zero-price `unwrap` removed, `position_tracker`/`holidays` compiled, dead hexagonal layer deleted, `default.toml` loadable (CTL), historical bars fetch (CTL), Tauri runtime panic fixed (CTL).
 
 ---
 
-## 6. Backtesting with canned data
+## 4. Duplication (not consolidated on staging; CTL adds more)
 
-**There is no backtesting capability today**, and the current design makes adding one harder than it should be.
+| Concept | Definitions |
+|---|---|
+| Position | `brokers::traits::Position`, `events::types::Position`, `positions::tracker::Position`, `risk::types::TrackedPosition`, `risk::position_sizing::PositionInfo`, `db::PositionRow`, `PositionHistoryRow`, `AlpacaPosition` |
+| Position **stores** | `positions::PositionTracker`, `risk::position_tracker` (FIFO), `PositionSizer.portfolio`, `OrderTracker` fill fields; CTL's backtester adds a fifth accounting path |
+| Order | `brokers::traits::Order`, `events::types::Order`, `OrderRequest`, `ManagedOrder`, `OrderRow`; two `OrderType`/`OrderStatus` enums with lossy mapping (Stop/StopLimit/Trailing → Market, Expired → Cancelled, `orders/tracker.rs`) |
+| Candle, Quote, Fill | each twice (`brokers/traits.rs` vs `events/types.rs`; `FillInfo` vs `Fill`). B-067 tracks Quote only. |
+| PatternStats | `patterns/types.rs:371`, `risk/pattern_stats.rs:48,63`, `db/models.rs:30`, `execution/rules.rs:83`, Tauri `commands/patterns.rs:33`, `PatternRiskState`; three win-rate scales |
+| Candle caches | `patterns::streaming::CandleCache`, `data::cache::MarketDataCache`, Tauri `state.rs::MarketDataCache` |
+| Schema | `schema.sql` (what runs), `migrations/001+002` (unused), DDL inside `migrations.rs` macros (never called), `schema_migrations` DDL hand-copied into two shell scripts with differing column types |
+| Repositories | concrete `db/repositories.rs` structs; `PdtRepositoryTrait` with only a mock impl; `OrderRepository` has zero callers while `OrderEngine` runs its own raw SQL (`orders/engine.rs:408-500`) |
+| P&L | `positions/pnl.rs`, `positions/tracker.rs` sell path, risk FIFO lots, broker/event `unrealized_pl`, backtester lots |
+| Config thresholds | `execution::PerformanceThresholds`, `risk::types::PatternPerformanceThresholds`, `RiskConfig`, Tauri hand-copied fallback |
+| `src/data/` | restored but **unused**: nothing references `crate::data`; overlaps streaming cache and db candles |
 
-- No historical data loader, no CSV/Parquet reader, no replay engine, no `bin/backtest`, no fixture data files anywhere in `tests/`, `benches/`, or `examples/`. `plans/backtesting-requirements.md` is a requirements doc with every checkbox unticked and references Python scripts and a DuckDB store that do not exist.
-- `AlpacaProvider::get_candles` returns `Err("Historical candles not yet implemented")` (`alpaca/mod.rs:177-190`), so you cannot even backfill from Alpaca.
-- The `ta` crate (indicators) is a dependency with zero uses; indicators are hand-rolled in `patterns/indicators.rs` with `f64` fields.
-- Candles are never written to the `candles` table, so there is no accumulated local history.
-
-Why the current code cannot be driven by canned data without surgery:
-
-1. **No injectable clock.** Every risk/PDT/daily-reset path calls `Utc::now()`. A replay of 2022 data would be evaluated against today's date.
-2. **No execution simulator.** `MockBroker` never fills. A backtest needs a fill model (next-bar-open for market orders, touch logic for limits, slippage, partial fills).
-3. **No fill path into positions.** Even with a simulator, there is no channel from "order filled" to `PositionTracker`, so no P&L, no equity curve.
-4. **Market data enters via a side-channel `HashMap`,** not the event bus, so there is no single `MarketEvent::NewCandle` ingress to replay into.
-5. **The event bus is a lossy `broadcast`.** Backtests need deterministic, lossless, ordered delivery (a bounded `mpsc` per stage or a synchronous pipeline), otherwise results vary run to run.
-6. **Pattern stats, risk state and results are never persisted or reloaded,** so there is nothing to produce a report from.
-
-Minimum design that would work with this codebase: a `Clock` trait (`SystemClock` / `SimClock`); a `MarketDataSource` trait with `AlpacaStream` and `CsvReplay` implementations that both publish `NewCandle`; a `SimBroker` implementing `OrderExecutionProvider` with a configurable fill model and seeded RNG that publishes `OrderFilled`; a synchronous `BacktestRunner` that steps the clock per bar and drives the same `ExecutionEngine`/`RiskEngine` used live; and a `BacktestResults` aggregator (equity curve, drawdown, per-pattern stats). A handful of committed CSV fixtures (e.g. SPY/AAPL 1-min for a few known days) under `tests/data/` would then give deterministic regression tests for the whole loop.
+The architecture checker was tightened in July and found 52 hidden boundary violations across 7 forbidden edges, including a circular `patterns ↔ risk` dependency (B-070). Shell-script layering has not held.
 
 ---
 
-## 7. Comparison with established trading systems
+## 5. Database, caches, persistence
 
-What NautilusTrader, QuantConnect Lean, Freqtrade, Hummingbot, Backtrader and barter-rs all have, and this app lacks:
+- **Nothing opens a database in production on staging.** `Database::new` has no non-test callers; Tauri uses `new_with_caches`. CTL opens it in the Tauri app and falls back silently to display-only if it fails.
+- **`Database::new` cannot create a file**: `create_if_missing` is never set (`connection.rs:80-86`). On a clean checkout the CTL app therefore silently drops to display-only.
+- **Pragmas reach one pooled connection** (`connection.rs:105-132`); `cache_size = 1000000` is pages (~4 GB); `acquire_timeout` unset; `config::DatabaseConfig` never converted to `db::DatabaseConfig`; five different default DB paths across code and docs.
+- **Money as `REAL`** (70 columns); `Decimal → f64` with `unwrap_or(0.0)` silently writing $0 (`repositories.rs:127,129,408,1152-1156,…`); `from_f64_retain` on read. `Quantity(u32)`: fractional shares truncated (`positions/tracker.rs:545`).
+- **Hardcoded `account_id = 1`** (`positions/tracker.rs:601-617`, Tauri `state.rs:152,183`, CTL `main.rs:237`) and **nothing inserts an `accounts` row** outside tests; CTL's comment saying `setup_db.sh` creates it is wrong. With `foreign_keys=ON` (sqlx default) the first position save fails, after the in-memory cache was already mutated.
+- **Fills never persisted** (no `INTO trades` anywhere); `filled_quantity/avg_price/filled_at` never written on fill; cancels never reach the DB because `cancel_order` filters on the overwritten internal id (`orders/engine.rs:316,485-500`); `StopLimit`/`TrailingStop` cannot be saved (`format!("{:?}").to_lowercase()` → `stoplimit`, fails `CHECK`, `engine.rs:~414`).
+- **No `client_order_id`.** A crash between submit and the broker-id swap orphans a live broker order; a retry duplicates it.
+- **No rehydration.** `get_active_positions`, `get_open_orders`, `get_all_pattern_stats`, `sync_from_broker` have no production callers (CTL too). Restart loses PDT count, daily P&L, halt state, pattern kill-switch state, open orders and positions.
+- **Cache/DB drift.** Positions mutated before write with no rollback; removed from cache before archive; `archived_orders` unbounded; candles written only by the unused ingestion pipeline.
+- **Migrations.** `MigrationManager` hardcodes v1/v2, no checksums, no transaction, never called; `sqlx::migrate!` used nowhere; `day_trades`/`pdt_audit_events` exist only in `migrations/001`, not in `schema.sql`.
+- `rusqlite` still a dependency for one dead error variant and one test that builds its own throwaway tables.
+
+---
+
+## 6. Brokers, config, connections, paper vs live
+
+- **No broker factory.** `AppConfig.broker.provider`/`is_paper` are never read. Nothing in `src/` constructs `AlpacaProvider`. Tauri hardcodes `MockBroker` (staging `main.rs:71`, CTL `main.rs:177`).
+- **No live-trading guard.** `paper()` and `live()` differ only in `base_url` and an `is_paper` flag nobody reads (`alpaca/config.rs:7-41`). No flag/URL consistency check, no explicit opt-in, no banner.
+- **Credentials.** No key loader in the library; `keyring` unused; `AlpacaConfig` and `RestClient` derive `Debug` with a plain `api_secret: String`. No hardcoded secrets found.
+- **Config.** `default.toml` fails to deserialize on staging (`missing field api_key`); the test swallows the error (`tests/config_validation.rs:478-496`). CTL adds serde defaults so it loads, but the `pattern_profiles` and `confidence_multipliers` blocks are at the wrong nesting level and are **silently dropped** (measured: 0 profiles, 0 multipliers). `[database] enable_wal`, `broker.base_url`, `ws_url`, `[performance]` reconnect settings have no struct fields.
+- **WebSocket.** Backoff exists now (`alpaca/backoff.rs`) but only covers the initial connect/auth-send path. `connect_and_run` returns `Ok` on server Close, read error, stream end, or failed ping, and `ws_handler` treats `Ok` as "closed normally" and exits for good (`websocket.rs:130-133,196-244`). No resubscribe, no pong timeout, `connect()` returns before any TCP/auth exchange, auth errors only logged, subscribe races auth. A dead stream is indistinguishable from a quiet one because `get_quote` serves the last value forever.
+- **Parsing.** Any unknown message type fails the whole batch; prices via `from_f64_retain`; feed hardcoded to IEX; `Quote.last` is a stale bar close.
+- **REST.** Rate limiter: **fixed** (`alpaca/ratelimit.rs`, 200/60 s token bucket). `Retry-After`: parsed. Still: `parse_order_status` rejects valid statuses (`pending_cancel`, `replaced`, `done_for_day`, `held`, …) and `get_open_orders` fails the whole call on one such order; fractional qty fails `u32` parse; `trail_price` sent as `trail_percent`; 403 mapped to `AuthenticationFailed` (Alpaca uses 403 for buying power and PDT denials); no `client_order_id`.
+- **Historical bars.** Staging: "not yet implemented". CTL: `get_bars` with pagination, unit-tested; not connected to the backtester.
+- **MockBroker.** Staging: never fills, never moves cash or positions, ignores order type/TIF/hours, unseeded RNG. CTL: opt-in `auto_fill_orders` fills in full at limit or last quote on the next `get_order` poll, regardless of whether the bar touched the limit; still no cash/position effect; `filled_at` is wall-clock.
+- **Tauri.** Staging: `tokio::spawn` from a non-async `main` (guaranteed panic; CTL fixes with `#[tokio::main]`), `EventBridge` exits on `Lagged`, `std::sync::Mutex` caches, PDT re-implemented with hardcoded 3/$25k and permissive fallbacks. Tauri crate is not in CI.
+- **Unused deps.** `crossbeam`, `tower`, `keyring`, `once_cell`, `sha2`, `url`, `tracing-appender`, `metrics-exporter-prometheus`, `ta`; `tokio-retry` only in dead `utils/retry.rs` (whose backoff computes 100^n ms); `rusqlite` effectively dead; `parking_lot` in one file; `log` and `tracing` mixed.
+
+---
+
+## 7. Backtesting with canned data
+
+**Staging:** none. No loader, no replay, no fixtures, no binary; `get_candles` unimplemented; `ta` crate unused; candles never persisted.
+
+**CTL (`src/execution/backtest.rs`, 841 lines):** a genuine v1 and the right shape. It steps a `SteppedClock` per candle, runs the production `PatternRegistry → SignalEngine → ExecutionEngine → OrderEngine → PositionTracker` synchronously, fills via `MockBroker` auto-fill, applies slippage (bps per side) and a flat commission in its own FIFO lot accounting, and produces a `BacktestReport` with counts, win rate, gross/net/open P&L, per-pattern attribution and an equity curve. One end-to-end test exists.
+
+What stops it being usable as a validation gate today:
+
+1. **No data source.** `run(Vec<Candle>)` is called by nothing; no CLI, no Tauri command, no CSV/Parquet loader, no fixtures under `tests/data/`. The new `get_bars` is not connected to it.
+2. **Risk engine not started.** `RiskEngine` is constructed but `start()` is never called (documented as a v1 limitation), so no PDT, daily-loss, position-size or pattern-performance checks run. A backtest that bypasses the risk engine cannot validate the risk engine.
+3. **Not deterministic.** `MockBroker` stamps fills with `Utc::now()` (so `holding_secs` is ~0), 81 wall-clock calls remain in the components it drives, order ids contain v4 UUIDs, per-pattern output order depends on `HashMap` iteration. The test asserts only `>=` bounds and never compares two runs.
+4. **Fill model is optimistic.** Every limit order fills in the same step as the signal at the limit price, without checking the bar's high/low; buying power is a static $100k.
+5. **Slippage/commission live only in the report's accounting,** not in the broker fill or the position tracker, so the strategy's view of its positions differs from reported P&L.
+6. **Long-only; no exits.** Open positions are marked to last close. Since the live loop also cannot exit positions (section 3.1), the backtester inherits that.
+7. **Masks a live bug.** It stamps `signal.symbol = candle.symbol` to work around the `"DEFAULT"` symbol, so the live path stays broken.
+
+---
+
+## 8. Comparison with established systems
+
+What NautilusTrader, QuantConnect Lean, Freqtrade, Hummingbot, Backtrader and barter-rs share, and where this repo stands on `staging` (+CTL):
 
 | Capability | Mature frameworks | DayTrader |
-|-----------|-------------------|-----------|
-| Single event loop with one canonical event stream and deterministic ordering | Yes (Nautilus message bus, Lean algorithm loop) | Lossy `tokio::broadcast`, side-channel HashMaps, consumers that die on lag |
-| Same strategy/risk code runs live and in backtest, differing only by injected `Clock` + data source + execution venue | Core design principle in all of them | No clock abstraction; no replay source; mock cannot fill |
-| Backtest engine with fill models, slippage, commissions, latency | Yes | None |
-| Canonical domain model (one `Order`, one `Position`, one `Fill`, one `Bar`) | Yes | 6+ Position types, 4 Order types, 2 of each Candle/Quote/Fill |
-| Order state machine with validated transitions and idempotent `client_order_id` | Yes | Any transition accepted; no client order id |
-| Fill/trade-update stream from the broker driving positions | Yes | Missing entirely |
-| Pre-trade risk gate that is synchronous and blocking | Yes (Nautilus `RiskEngine` sits between strategy and exec client) | Asynchronous, advisory, log-only |
-| Durable state (positions, open orders, risk counters) persisted and rehydrated on start; reconciliation against the broker on connect | Yes | Nothing reloaded; `sync_from_broker` never called |
-| Explicit, hard-to-miss live/paper/sim mode with guard rails | Yes | A `bool` nobody reads |
-| Timezone-aware trading calendar (exchange calendar, DST, holidays, half-days) | Yes | UTC hours, UTC−5 constant, holiday code not compiled |
-| Reconnecting data clients with backoff, resubscribe, heartbeat timeouts | Yes | None of the three |
-| Money as fixed-point end to end including storage | Yes | `Decimal` in memory, `f64` in the DB and config |
-
-Structural observations:
-
-- **Layer count is far too high for the amount of behaviour.** There are 13 top-level modules, a domain/ports/infrastructure hexagonal layer (uncompiled), per-module `CLAUDE.md` boundary docs, an exceptions file, and verification scripts, wrapped around a system that has never executed a single trade. The governance apparatus is more complete than the product. Mature Rust trading code (barter-rs, Nautilus core) keeps a small number of crates with one canonical type per concept.
-- **The "strict downward dependency graph" is already violated** in several places (`risk → patterns`, `events → patterns`, `db → risk/positions`, `positions → db`, raw SQL in `orders`), and the exceptions file legitimises more. The layering documentation describes an aspiration, not the code.
-- **The plan/report documents describe phases 1–4 as "complete"** while the corresponding runtime paths are stubs or unreachable. This gap between documentation and reality is the single biggest process risk: future work (human or agent) trusts the docs.
-- **Test suite shape**: 66 `sleep(Duration)` calls in `tests/` show that integration tests coordinate via timing rather than deterministic signals; they will be flaky and they mask the lossy-bus problem. 21 unit tests are permanently excused via `known_test_issues.txt`.
+|---|---|---|
+| One canonical domain model | Yes | 4–8 definitions per concept |
+| One event loop, deterministic ordering, lossless order/fill path | Yes | Lossy `broadcast` everywhere; consumers die on lag |
+| Injectable clock used by every time-dependent component | Yes | Trait exists; 1 consumer (+1 in CTL) |
+| Same strategy/risk code in live, paper and backtest | Core principle | CTL backtester reuses engines but skips the risk engine |
+| Fill model (touch logic, partials, slippage, latency) | Yes | Optimistic auto-fill on poll |
+| Blocking pre-trade risk gate | Yes (Nautilus `RiskEngine` sits in the order path) | Async, advisory, log-only |
+| Order state machine, idempotent `client_order_id` | Yes | Any transition accepted; no client id |
+| Broker fill/trade-update stream driving positions | Yes | 1 s poll against mock only |
+| Persist + rehydrate + reconcile against broker on start | Yes | None |
+| Explicit sim/paper/live mode with guard rails | Yes | A `bool` nobody reads |
+| Exchange calendar with DST, holidays, early closes | Yes | DST + holidays now; no early closes; PDT still UTC-dated |
+| Fixed-point money end to end including storage | Yes | `Decimal` in memory, `f64` in DB and config |
+| Compile-enforced module boundaries | Crates | Shell scripts; 52 hidden violations found when tightened |
 
 ---
 
-## 8. What to do, in order
+## 9. Recovery strategy
 
-1. **Make it build from a clean clone.** Change `.gitignore` to `/data/`; commit or delete `pub mod data;`; un-ignore `.sqlx/`, run `cargo sqlx prepare`, commit the cache, set `SQLX_OFFLINE=true` in CI/Dockerfile/verify script; commit `Cargo.lock`; delete or compile the orphaned directories; fix the benches and the integration tests. Make CI actually red when it should be.
-2. **Collapse the domain model.** One `Bar`, `Quote`, `Order`, `OrderStatus`, `Fill`, `Position`, `PatternStats` in a single `domain` module that everything imports. Delete the converters. This alone removes several thousand lines and most of the lossy mappings.
-3. **Introduce `Clock`, `MarketDataSource`, and a real `SimBroker`.** Thread the clock through risk, PDT, orders. Make the WebSocket and a CSV replayer both publish `NewCandle`. Make `SimBroker` fill with a configurable model and publish `OrderFilled`.
-4. **Build the real loop once, with a synchronous risk gate.** `signal → RiskEngine::check(order) -> Result → broker.submit(client_order_id) → fill stream → positions → P&L → risk state`, persisted in one transaction per fill, rehydrated on start, reconciled against the broker on connect. Replace `broadcast` with bounded `mpsc` for the order/fill path; keep `broadcast` only for UI fan-out.
-5. **Fix the risk engine's actual logic:** deadlock, zero-price panic, market-order notional, PDT day-trade detection and 5-day window, daily-loss halt wiring, commission sign, emergency threshold, inverted multiplier, UTC market hours (add `chrono-tz` and an exchange calendar).
-6. **Harden the broker layer:** broker factory with `Mock | Paper | Live` and a consistency check between flag and URL; reconnect-on-any-exit with backoff and resubscribe; auth await; pong timeout; rate limiter; full status enum; correct 403/422 mapping; `client_order_id`; redacted `Debug` for secrets; `trade_updates` stream.
-7. **Store money as TEXT `Decimal` or integer minor units**, quantities as `Decimal`, one schema source (sqlx migrations) run at startup.
-8. **Then** write the backtest runner and commit fixture CSVs, and make the "Phase complete" claims in `plans/` and `reports/` match what runs.
+### 9.1 On splitting into two repositories
+
+**Recommendation: do not split the repository. Split the crate.**
+
+The repo is not large (≈35k lines of Rust, ≈1.8k of TypeScript). The problems are 50 stale branches, a six-month gap between `main` and `staging`, four schema sources, duplicated types, and documentation that reports phases as complete when the runtime paths are stubs. None of those is fixed by a second repository, and all of them get harder to manage across two. The existing ADR (`plans/architecture-decision-frontend-separation.md`) already makes the right call against separating the Tauri frontend, because Tauri's IPC and build are designed around co-location. A "core vs app" split would add cross-repo versioning and release coordination for a one-person project whose core API is about to change substantially during consolidation.
+
+What *would* give you the boundary discipline you are after is converting the single `daytrader` crate into a **Cargo workspace of small crates**. Cargo then enforces the dependency graph at compile time, which the `verify_architecture.sh` approach has demonstrably not done, and each crate gets its own `cargo test`, its own clippy budget, and a README that describes something small enough to be true. Suggested shape:
+
+```
+crates/
+  dt-core        domain types (Bar, Quote, Order, Fill, Position, Money=Decimal, Symbol),
+                 Clock trait, exchange calendar, typed errors. No I/O, no tokio.
+  dt-strategy    indicators, candlestick patterns, signal generation   -> core
+  dt-risk        risk engine, PDT, limits, sizing                     -> core
+  dt-engine      order lifecycle, positions, execution loop, pipeline -> core, risk, strategy
+  dt-broker      broker traits + SimBroker (deterministic fill model)  -> core
+  dt-alpaca      Alpaca REST + WS implementing dt-broker traits        -> core, broker
+  dt-store       sqlx persistence, migrations, repositories            -> core
+  dt-backtest    replay runner, data loaders, report                   -> engine, broker, store
+bins/
+  dtctl          headless CLI: `run --paper`, `backtest --data ...`, `reconcile`
+apps/
+  desktop        Tauri + React, depends on dt-engine through a thin facade
+```
+
+The frontend stays where it is. If a second repo ever makes sense, it is for a published **historical data set** (Parquet fixtures, hundreds of MB), not for code.
+
+### 9.2 Process changes that make the rest possible
+
+- **Stop feature work until the build is honest.** Nothing new lands until CI is green from a clean clone on the trunk.
+- **One trunk.** Make `staging` the default branch (or fast-forward `main` to it and delete `staging`), delete the ~50 dead branches, and open PRs only against the trunk. The `main ← staging ← feat/*` ladder is more process than a solo project needs and is currently not followed anyway (`main` is six months behind).
+- **CI is the verifier.** Make `scripts/verify_agent_work.sh` and `ci.yml` run the identical steps, with `SQLX_OFFLINE=true` and a committed `.sqlx/` cache, `Cargo.lock` committed, and the Tauri crate built (headless, no bundle). Delete the "known failures ≤ N" escape hatch; a test is either green, fixed, or deleted with a note.
+- **Retire the governance that is not working.** Keep `CLAUDE.md`, `BACKLOG.md` and the hooks that block dangerous commands. Replace the per-module `CLAUDE.md` boundary docs and `verify_architecture.sh` with crate boundaries. Replace the `plans/` and `reports/` "phase complete" narratives with a single `STATUS.md` that lists what runs end to end, verified by a named test.
+- **"Done" means a test proves it.** Every BACKLOG item names the test that demonstrates it. Agents (and humans) are not allowed to mark Done on a reading of the code.
+
+### 9.3 Sequenced plan with exit criteria
+
+**Phase 0: Truth and build (≈1 week)**
+- Decide the fate of the three open PRs: merge [#29](https://github.com/mhobbs07/daytrader/pull/29) and [#30](https://github.com/mhobbs07/daytrader/pull/30) after fixing the `"DEFAULT"` symbol in the live path (not just the backtester), and close [#6](https://github.com/mhobbs07/daytrader/pull/6) (superseded).
+- Commit `Cargo.lock` and `.sqlx/`; `SQLX_OFFLINE=true` in CI, Dockerfile, verify script; CI triggers on the trunk and all PRs; Tauri crate in CI.
+- Burn down clippy to zero under `-D warnings`, or land an explicit `#![allow]` list in `lib.rs` that is ratcheted down per PR. 1,792 is not "~130" and the policy should say which it is.
+- Delete dead code and deps: `utils/retry.rs`, `SignalStreamingPipeline`, `db/migrations.rs` + `migrations/`, `OrderRepository`, `src/data/` (or wire it, see Phase 3), the unused dependencies in section 6.
+- Fix the benches or delete them.
+- **Exit:** clean clone → `cargo clippy -D warnings`, `cargo test`, `cargo doc` all green in CI on the trunk.
+
+**Phase 1: Canonical model and workspace (≈2–3 weeks)**
+- Create `dt-core` with exactly one `Bar`, `Quote`, `Order`, `OrderStatus` (one state machine with validated transitions), `Fill`, `Position`, `Money` (Decimal), `Quantity` (Decimal), `Symbol`, `ClientOrderId`, `Clock`, `TradingCalendar`.
+- Move every module to use them and delete the converters. Collapse the four position stores into one `Portfolio` in `dt-engine`; the risk engine reads from it instead of keeping its own.
+- Thread `Clock` through risk, PDT, orders, positions, the sim broker. Target: zero `Utc::now()` outside `SystemClock`.
+- Store money as `TEXT` Decimal (or integer minor units), quantities as Decimal; one schema source via `sqlx::migrate!` run at startup; `create_if_missing`; pragmas via `SqliteConnectOptions`.
+- **Exit:** `grep -r "Utc::now()" crates/ --include=*.rs | grep -v clock.rs | grep -v cfg(test)` is empty; one type per concept; workspace builds with crate-enforced boundaries.
+
+**Phase 2: Make the risk engine correct (≈1–2 weeks)**
+Fix, each with a deterministic test that publishes the triggering event into a *started* engine with a `FixedClock`:
+deadlock lock order; `Lagged` handling; market-order notional; PDT `>=`/`>` and 5-day window and ET dating; daily-loss evaluation wiring, commission sign, unrealized accumulation, single halt flag, emergency threshold semantics; daily reset on ET date roll; inverted multiplier; `RiskRuleEngine` sharing the real trackers; un-awaited `update_pattern_status`; eager `[0]` index; guards across `.await`; config nesting so `pattern_profiles`/`confidence_multipliers` actually load.
+- **Exit:** a property/scenario test suite in `dt-risk` that replays a scripted day (fills, P&L swings, 4th day trade, midnight ET roll) and asserts halts and rejections at the right moments.
+
+**Phase 3: One real loop (≈3–4 weeks)**
+- `dt-engine` owns a single ordered pipeline: `Bar → Strategy → Signal → RiskGate::check(&OrderIntent) -> Result → Broker::submit(client_order_id) → FillStream → Portfolio → Persist(txn) → RiskState`. The risk gate is a synchronous call in the order path; the event bus is for fan-out to UI and metrics only. Use bounded `mpsc` for the order/fill path.
+- Fill path: Alpaca `trade_updates` WebSocket (plus a reconciliation poll), partial fills, cancels with filled shares, `OrderRejected` on submit failure.
+- Exits: evaluate exit rules per bar; stop-loss / take-profit / end-of-day flatten; `close_position` places a real order.
+- Persistence: fills into `trades`, order status by broker id, one transaction per fill (order + trade + position + risk counters); rehydrate open orders/positions/PDT/daily P&L on start and reconcile against the broker.
+- Broker layer: `BrokerKind::{Sim, Paper, Live}` factory; `Live` requires an explicit flag **and** URL check **and** a typed confirmation; redacted `Debug` for secrets; env/keyring loader; WebSocket reconnect on any exit with resubscribe and pong timeout; complete status enum; 403/422 mapping; fractional quantities.
+- Market data: one `MarketDataSource` trait; Alpaca stream publishes `Bar`s into the pipeline; the `data::ingestion` validation and candle persistence sit behind it or are deleted.
+- **Exit:** `dtctl run --paper` runs for a full session against Alpaca paper, places and closes trades, survives a WebSocket drop and a process restart without losing state, and `dtctl reconcile` shows zero drift.
+
+**Phase 4: Backtesting as the gate (≈2 weeks, can overlap Phase 3)**
+- `SimBroker` in `dt-broker`: bar-touch fill logic for limits/stops, next-bar-open for market, configurable slippage/commission/latency applied at the fill (so the portfolio and the report agree), seeded RNG, fills stamped with the stepped clock.
+- Data: `dtctl fetch` pulls Alpaca bars into Parquet or CSV under `data/`; commit a small fixture set (e.g. SPY, AAPL, TSLA 1-min for ~10 trading days spanning a DST change and a holiday) under `tests/data/`.
+- Runner drives the same `dt-engine` pipeline with the risk engine **started**, deterministic ids, stable output ordering; a test runs the same fixture twice and asserts byte-identical reports.
+- Metrics: drawdown, Sharpe/Sortino, profit factor, per-pattern, per-regime; JSON + Markdown report.
+- **Exit:** the fixture backtest is a CI test; a change to risk or strategy code that moves the result fails CI until the expected report is updated deliberately.
+
+**Phase 5: Paper, then live (≥30 trading days)**
+- 30 days on Alpaca paper with the same binary; compare to the backtest over the same window; the live/paper gap and the risk-event log are the go/no-go inputs the existing `plans/backtesting-requirements.md` already describes.
+- Only then implement the live opt-in path.
+
+### 9.4 Executing the plan with a smaller model
+
+The plan above assumes most of the hands-on work will be done by a cheaper model. That is workable for most of it, with these adjustments. The history of this repo is itself the evidence: the phases that went wrong are the ones where an agent was given a broad goal ("implement Phase 4") and allowed to declare it done.
+
+**Split the work by who should do it.**
+
+| Work | Who | Why |
+|---|---|---|
+| Phase 0 (build, CI, deletions, clippy burn-down) | small model | mechanical, CI is the judge |
+| Designing `dt-core` types, the `OrderStatus` state machine, the `RiskGate` and `Broker` traits, the pipeline shape | **strong model or you**, once, up front | this is the one architectural decision everything else depends on; a weak model will reintroduce the duplication it is supposed to remove |
+| Migrating each module onto `dt-core`, crate by crate | small model | mechanical once the target types exist and compile |
+| Each risk-engine bug in Phase 2 | small model, one bug per task | each has a known location and a scripted test |
+| Phase 3 pipeline skeleton and transaction boundaries | strong model for the skeleton; small model for filling in broker/persistence details | ordering and atomicity decisions are easy to get subtly wrong |
+| `SimBroker` fill model, data loaders, report metrics | small model | well-specified, testable in isolation |
+| Reviewing PRs | strong model, or CI alone | a second reading by the same small model adds little |
+
+**Write tasks so the model cannot drift.** Each BACKLOG item should carry, in this order: the exact files it may touch, the test it must make pass (written or at least named before the task starts), the command that proves it (`cargo test -p dt-risk pdt_window`), and the sentence "do not change anything outside these files". Tasks of more than ~300 changed lines should be split before they are handed out. The `/backlog-task` skill already has roughly this shape; tighten it so that "Done" is set by CI, not by the agent.
+
+**Give it guard rails that do not depend on its judgment.**
+- Crate boundaries in Cargo (Phase 1) rather than shell scripts, so a forbidden import is a compile error.
+- `-D warnings` and `clippy::pedantic` from the start of each new crate, so the budget never grows again.
+- Branch protection on the trunk requiring green CI; no direct pushes, by agents or anyone.
+- Keep the hook that blocks `git push --force`, `rm -rf` and friends.
+- A `preflight` job that greps for `Utc::now()`, `unwrap()` outside tests, `f64` in money fields and `std::sync::Mutex`, as ratchets that can only decrease.
+
+**Order Phase 1 for a small model.** Do not ask it to "consolidate the domain types". Instead: (1) a strong model writes `dt-core` with doc comments and unit tests and merges it unused; (2) the small model migrates one leaf module at a time (`brokers`, then `events`, then `positions`, then `orders`, then `risk`, then `execution`), each as its own PR that deletes the old type and its converter and leaves the suite green; (3) the final PR deletes anything in the old locations that is now unreferenced. Each step is small, reversible and verifiable.
+
+**Phase 2 as a checklist.** Hand each bug over as "file, line, what is wrong, the test that must pass". Section 3.2 of this document is already close to that form. Insist that the test publishes the real event into a started engine with a `FixedClock`; a test that calls the inner function directly would have passed on today's code too.
+
+### 9.5 What to do with the existing documents
+
+`plans/` and `reports/` currently describe Phases 1–4 as complete. Archive them under `docs/history/` and replace with `STATUS.md` (what runs, proven by which test), `ARCHITECTURE.md` (the crate graph, one page), and the backlog. Future agents and future you will trust the docs; make them true.
 
 ---
 
-## Addendum: scratch unit-test run
+## Appendix: verification notes
 
-On a scratch copy with a placeholder `src/data/mod.rs`, `schema.sql` applied to a SQLite file, the `schema_migrations` table added by hand, and `DATABASE_URL` set:
-
-- `cargo test --lib`: **213 passed, 0 failed** (BACKLOG claims 235/235; the count differs but the suite is green).
-- `cargo check --all-targets`: benches and three integration test files still fail to compile (section 1.3).
-
-So the unit tests themselves are healthy once the build is unblocked. The gap is not test quality in isolation; it is that the tested units are never assembled into a running system, and the build/CI setup cannot prove even this much from git.
+- `main` (`5b09248`): fails `cargo check` with E0583 (`src/data` swallowed by `.gitignore`); with a placeholder module and provisioned DB, 213 unit tests pass; benches and three integration test files do not compile. All seven CI Pipeline runs on `main` fail at `cargo fmt` for the E0583 reason.
+- `staging` (`e61e85a`): numbers in the table at the top. The library compiles with 691 warnings; three benches fail; 27 tests ignored.
+- CTL (`6cd5450`): library compiles with `DATABASE_URL`; Tauri crate could not be built in this environment (no GTK system libraries), so Tauri conclusions are from reading.
+- The `validate-branch-name` workflow on `main` rejects every branch name the repo's own branching rules prescribe; `staging` has already deleted that workflow.
