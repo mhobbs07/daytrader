@@ -22,14 +22,14 @@ Last Updated: 2026-10-30 (Recovery Program adopted — see `plans/recovery/READM
 
 ## Recovery Program (supersedes the priority tiers below until Phase 2 exits)
 
-Specs: `plans/recovery/`. State as of 2026-10-30: #29 (close the trading loop), #32 (B-085, symbol fix), #30 (risk bug fixes) and #34 (B-087, one-trunk governance) are merged into `staging`. Still open: this plan (#31). Then B-086 (human), then Phase 0 continues with B-088. Close #6 as superseded.
+Specs: `plans/recovery/`. State as of 2026-10-30: B-086 is done. `main` is the only long-lived branch and is protected (PR required, administrators included, force-push and deletion blocked, no required status checks until B-089 makes CI green). `staging` and the stale branches are deleted; the unmerged ones are archived in a local bundle held by the owner. #29, #30, #31, #32, #34 and #35 are merged; #6 is closed as superseded. Open: #36 (UI quote midpoint fix). Next: B-088 (hermetic sqlx build), then B-089 and B-090 to B-094.
 
 ### Phase 0: Truth and Build (`plans/recovery/phase-0-truth-and-build.md`)
 
 | ID | Task | Who | Size | Status |
 |----|------|-----|------|--------|
 | B-085 | Fix hardcoded `"DEFAULT"` signal symbol in the live signal path (derive from candle window, reject mixed-symbol windows, drop backtester stamp) — PR into `feat/close-trading-loop` | agent | S | Done 2026-10-30 — PR #32 merged into `staging` |
-| B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Pending |
+| B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Done 2026-10-30 (`main` at `936798b`; 3 branches kept on purpose: `fix/review-mcp-security-hardening` pending the MCP decision, and `fix/ui-quote-last-midpoint` plus `feat/b036-b039-frontend-consolidation` until #36 merges) |
 | B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Done 2026-10-30 — PR #34 merged into `staging` |
 | B-088 | Hermetic sqlx build: commit `.sqlx/` + `Cargo.lock`, `SQLX_OFFLINE=true` everywhere, `setup_db.sh` without `sqlite3` CLI, `create_if_missing`, pragmas via `SqliteConnectOptions` | agent | M | Pending |
 | B-089 | CI mirrors verify script, runs on every PR and trunk push, includes Tauri + frontend, no excused failures; delete `known_test_issues.txt` escape hatch | agent | M | Pending |
