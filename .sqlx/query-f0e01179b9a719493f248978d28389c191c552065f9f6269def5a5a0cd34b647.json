@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE orders SET broker_order_id = ?, submitted_at = ?, status = 'pending' WHERE broker_order_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f0e01179b9a719493f248978d28389c191c552065f9f6269def5a5a0cd34b647"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO accounts (broker, account_number, account_type) VALUES ('alpaca', 'test-account', 'paper')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "298074af115f2a45e247137c3aa9161d72c9c8e5f8bb1ea5aaa609a46da9cba5"
+}

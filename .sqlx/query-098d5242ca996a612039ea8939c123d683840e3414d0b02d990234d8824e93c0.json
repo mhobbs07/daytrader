@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO risk_adjustment_audit (\n                pattern_name, adjustment_type, old_risk_multiplier, new_risk_multiplier,\n                performance_score, trigger_reason, window_days, trade_count, win_rate, timestamp\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "098d5242ca996a612039ea8939c123d683840e3414d0b02d990234d8824e93c0"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE orders SET\n                broker_order_id = ?,\n                filled_quantity = ?,\n                status = ?,\n                submitted_at = ?,\n                filled_at = ?,\n                filled_avg_price = ?,\n                commission = ?,\n                error_message = ?\n            WHERE broker_order_id = ? OR id = (\n                SELECT id FROM orders WHERE broker_order_id IS NULL\n                ORDER BY id DESC LIMIT 1\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "e8bcadee8c52350a542f6aee306ca29fbda8bdbf5be803806f9839b8a627d6fb"
+}

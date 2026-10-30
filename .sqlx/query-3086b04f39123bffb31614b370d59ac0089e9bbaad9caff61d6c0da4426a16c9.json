@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            CREATE TABLE IF NOT EXISTS trading_signals (\n                id TEXT PRIMARY KEY,\n                symbol TEXT NOT NULL,\n                signal_type TEXT NOT NULL CHECK(signal_type IN ('buy', 'sell')),\n                confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),\n                price_level REAL NOT NULL,\n                generated_at TIMESTAMP NOT NULL,\n                \n                -- Market context fields\n                trend_type TEXT,\n                trend_strength REAL,\n                volatility REAL,\n                market_strength REAL,\n                \n                -- Components and metadata as JSON\n                components TEXT NOT NULL,\n                metadata TEXT,\n                \n                -- Outcome tracking\n                acted_upon BOOLEAN DEFAULT FALSE,\n                outcome TEXT CHECK(outcome IN ('win', 'loss', 'pending', 'ignored')),\n                order_id INTEGER,\n                FOREIGN KEY (order_id) REFERENCES orders(id)\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "3086b04f39123bffb31614b370d59ac0089e9bbaad9caff61d6c0da4426a16c9"
+}

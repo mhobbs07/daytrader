@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO pattern_signals (\n                symbol, pattern_name, signal_type, confidence, detected_at,\n                candle_timestamp, price_at_detection, acted_upon\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "0089232c9e7630862c5977aaaf0bc2b1c482b8900c5541b4e74e025e861d360a"
+}

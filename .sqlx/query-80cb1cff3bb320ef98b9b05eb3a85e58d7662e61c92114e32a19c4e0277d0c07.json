@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE INDEX IF NOT EXISTS idx_trading_signals_symbol_time ON trading_signals(symbol, generated_at DESC)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "80cb1cff3bb320ef98b9b05eb3a85e58d7662e61c92114e32a19c4e0277d0c07"
+}

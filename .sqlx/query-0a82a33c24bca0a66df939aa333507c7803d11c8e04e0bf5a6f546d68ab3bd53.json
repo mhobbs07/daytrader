@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pattern_stats SET is_enabled = ?, last_updated = ? WHERE pattern_name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "0a82a33c24bca0a66df939aa333507c7803d11c8e04e0bf5a6f546d68ab3bd53"
+}

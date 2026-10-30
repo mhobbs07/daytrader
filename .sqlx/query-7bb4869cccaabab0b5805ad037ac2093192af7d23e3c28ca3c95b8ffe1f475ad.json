@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as count FROM orders WHERE account_id = ? AND pattern_name = ? AND submitted_at >= ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "count",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7bb4869cccaabab0b5805ad037ac2093192af7d23e3c28ca3c95b8ffe1f475ad"
+}

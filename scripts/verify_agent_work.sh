@@ -21,24 +21,22 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
-TOTAL_STEPS=12
+TOTAL_STEPS=13
 PASSED=0
 FAILED=0
 SKIPPED=0
 START_TIME=$(date +%s)
 
-# sqlx compile-time macros validate queries against DATABASE_URL. Fresh
-# worktrees have neither the env var nor the database — provision both so the
-# pipeline works anywhere without manual setup (see scripts/setup_db.sh).
+# sqlx compile-time macros build from the committed offline cache in .sqlx/,
+# so no database is needed to compile. A dev database is still provisioned so
+# the last step can check that the cache matches the current queries.
+export SQLX_OFFLINE="${SQLX_OFFLINE:-true}"
 if [ -z "${DATABASE_URL:-}" ]; then
-    if [ ! -f "data/db/daytrader.db" ] && command -v sqlite3 >/dev/null 2>&1; then
-        mkdir -p data/db
-        sqlite3 data/db/daytrader.db < src/db/schema.sql 2>/dev/null || true
-        sqlite3 data/db/daytrader.db "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));" 2>/dev/null || true
-    fi
-    if [ -f "data/db/daytrader.db" ]; then
+    if ./scripts/setup_db.sh --if-missing >/dev/null; then
         export DATABASE_URL="sqlite://$PWD/data/db/daytrader.db"
-        echo -e "${YELLOW}DATABASE_URL was unset — using ${DATABASE_URL}${NC}"
+    else
+        echo -e "${RED}ERROR: scripts/setup_db.sh failed; cannot check the sqlx offline cache${NC}"
+        exit 1
     fi
 fi
 
@@ -266,6 +264,19 @@ else
     echo -e "  ${YELLOW}Agent-generated code MUST update the backlog.${NC}"
     RESULTS+=("${YELLOW}WARN${NC} Backlog not updated (source files changed)")
     SKIPPED=$((SKIPPED + 1))
+fi
+
+# ===== Step 13: sqlx offline cache is current =====
+# A query changed without re-running `cargo sqlx prepare` would build from a
+# stale cache. --check regenerates into a temp dir and compares.
+echo -e "${BLUE}[13/${TOTAL_STEPS}] Checking sqlx offline cache is current (cargo sqlx prepare --check)...${NC}"
+if ! cargo sqlx --version >/dev/null 2>&1; then
+    step_skip "sqlx offline cache" "sqlx-cli not installed: cargo install sqlx-cli --no-default-features --features sqlite"
+elif SQLX_OFFLINE=false cargo sqlx prepare --check -- --lib --tests 2>&1; then
+    step_pass "sqlx offline cache"
+else
+    echo -e "  ${YELLOW}Run: cargo sqlx prepare -- --lib --tests, then commit .sqlx/${NC}"
+    step_fail "sqlx offline cache"
 fi
 
 # ===== Summary =====

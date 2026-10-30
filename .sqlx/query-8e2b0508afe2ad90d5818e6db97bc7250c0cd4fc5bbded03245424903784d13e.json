@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO pattern_rolling_stats (\n                pattern_name, window_days, total_trades, winning_trades, losing_trades,\n                total_profit, win_rate, avg_profit_per_trade, consecutive_losses,\n                performance_score, risk_multiplier, window_start, window_end, last_updated\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ON CONFLICT(pattern_name, window_days, window_end) DO UPDATE SET\n                total_trades = excluded.total_trades,\n                winning_trades = excluded.winning_trades,\n                losing_trades = excluded.losing_trades,\n                total_profit = excluded.total_profit,\n                win_rate = excluded.win_rate,\n                avg_profit_per_trade = excluded.avg_profit_per_trade,\n                consecutive_losses = excluded.consecutive_losses,\n                performance_score = excluded.performance_score,\n                risk_multiplier = excluded.risk_multiplier,\n                last_updated = excluded.last_updated\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "8e2b0508afe2ad90d5818e6db97bc7250c0cd4fc5bbded03245424903784d13e"
+}

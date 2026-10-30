@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO orders (\n                account_id, broker_order_id, symbol, side, order_type, quantity,\n                filled_quantity, limit_price, stop_price, trailing_percent, status,\n                time_in_force, submitted_at, filled_at, filled_avg_price, commission,\n                error_message, is_pattern_trade, pattern_name\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 19
+    },
+    "nullable": []
+  },
+  "hash": "ff50044e2e7ec2d3e2c945362cb7005c7d93667bf45f1f5c7992111c8d81233a"
+}

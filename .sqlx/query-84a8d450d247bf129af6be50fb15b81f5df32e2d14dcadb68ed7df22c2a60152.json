@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO indicator_values (symbol, indicator_name, value, timestamp, metadata)\n            VALUES (?, ?, ?, ?, ?)\n            ON CONFLICT(symbol, indicator_name, timestamp) DO UPDATE SET\n                value = excluded.value,\n                metadata = excluded.metadata\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "84a8d450d247bf129af6be50fb15b81f5df32e2d14dcadb68ed7df22c2a60152"
+}

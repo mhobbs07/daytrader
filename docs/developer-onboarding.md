@@ -92,19 +92,23 @@ ALPACA_API_SECRET=your_paper_api_secret
 # Logging level
 RUST_LOG=daytrader=debug
 
-# Database URL for sqlx (scripts/setup_db.sh prints the exact value to use)
-DATABASE_URL=sqlite:./daytrader.db
+# sqlx builds from the committed offline cache in .sqlx/; no database needed to compile
+SQLX_OFFLINE=true
 ```
 
-### 3. Initialize the Database
+### 3. Development Database (only when you change a SQL query)
+
+The build does not need a database. sqlx's compile-time query macros read the
+committed offline cache in `.sqlx/`. If you add or change a `sqlx::query!`,
+regenerate the cache and commit it, otherwise `verify_agent_work.sh` fails its
+last step:
 
 ```bash
-# Run database setup script
-./scripts/setup_db.sh
-
-# Verify database creation
-ls -la data/
-sqlite3 data/daytrader.db ".tables"
+cargo install sqlx-cli --no-default-features --features sqlite
+./scripts/setup_db.sh --if-missing        # creates data/db/daytrader.db (needs sqlite3 or python3)
+export DATABASE_URL="sqlite://$PWD/data/db/daytrader.db"
+SQLX_OFFLINE=false cargo sqlx prepare -- --lib --tests
+git add .sqlx
 ```
 
 ### 4. Run the Desktop App (Tauri)

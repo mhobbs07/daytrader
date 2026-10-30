@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                CREATE TABLE IF NOT EXISTS schema_migrations (\n                    version INTEGER PRIMARY KEY,\n                    description TEXT NOT NULL,\n                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n                )\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "1d0a2d2976d6f0ec64b3ff0725fda8c9114af59004b36f4be74ef1c5445efc52"
+}

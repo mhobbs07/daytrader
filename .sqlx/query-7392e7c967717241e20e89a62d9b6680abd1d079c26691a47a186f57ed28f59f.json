@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                (SELECT COUNT(*) FROM pattern_signals) as pattern_signals_count,\n                (SELECT COUNT(*) FROM pattern_stats) as pattern_stats_count,\n                (SELECT COUNT(*) FROM pattern_trade_history) as trade_history_count,\n                (SELECT COUNT(*) FROM risk_events) as risk_events_count,\n                (SELECT COUNT(*) FROM daily_risk_metrics) as daily_metrics_count\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "pattern_signals_count",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "pattern_stats_count",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "trade_history_count",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "risk_events_count",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "daily_metrics_count",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7392e7c967717241e20e89a62d9b6680abd1d079c26691a47a186f57ed28f59f"
+}

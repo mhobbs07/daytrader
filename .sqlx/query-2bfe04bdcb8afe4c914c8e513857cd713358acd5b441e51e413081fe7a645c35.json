@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pattern_signals SET order_id = ?, acted_upon = TRUE WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2bfe04bdcb8afe4c914c8e513857cd713358acd5b441e51e413081fe7a645c35"
+}

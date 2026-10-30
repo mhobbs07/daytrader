@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE trading_signals SET outcome = ?, acted_upon = TRUE, order_id = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8c81beb5013812a1191338f7c0723e9f3c4bf67a05b9abdd4e8ac6580c5fdaa4"
+}

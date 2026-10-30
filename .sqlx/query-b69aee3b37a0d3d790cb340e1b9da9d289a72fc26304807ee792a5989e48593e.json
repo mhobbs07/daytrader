@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM risk_events WHERE created_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b69aee3b37a0d3d790cb340e1b9da9d289a72fc26304807ee792a5989e48593e"
+}

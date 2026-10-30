@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pattern_rolling_stats WHERE window_end < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "256a622c650f698138ea19232fdac8d558fe14b40378bb94ad1f1759dc97fed5"
+}

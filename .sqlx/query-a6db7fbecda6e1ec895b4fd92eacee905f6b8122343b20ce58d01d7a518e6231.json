@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pattern_trade_history WHERE created_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a6db7fbecda6e1ec895b4fd92eacee905f6b8122343b20ce58d01d7a518e6231"
+}
