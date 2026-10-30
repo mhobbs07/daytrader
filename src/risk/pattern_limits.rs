@@ -442,17 +442,22 @@ impl PatternRiskEvaluator {
             }
         }
 
-        // Apply confidence-based adjustments
-        let confidence_multiplier =
-            ConfidenceMultiplier::for_confidence(confidence, &self.config.confidence_multipliers)
-                .unwrap_or(&self.config.confidence_multipliers[0]);
-
-        let mut position_multiplier =
-            Decimal::from_f64_retain(confidence_multiplier.position_size_multiplier)
-                .unwrap_or(Decimal::ONE);
-        let mut risk_multiplier =
-            Decimal::from_f64_retain(confidence_multiplier.risk_limit_multiplier)
-                .unwrap_or(Decimal::ONE);
+        // Apply confidence-based adjustments. With no matching (or no
+        // configured) multipliers the adjustment is neutral — indexing [0]
+        // here panicked on an empty list.
+        let (mut position_multiplier, mut risk_multiplier) =
+            match ConfidenceMultiplier::for_confidence(
+                confidence,
+                &self.config.confidence_multipliers,
+            ) {
+                Some(multiplier) => (
+                    Decimal::from_f64_retain(multiplier.position_size_multiplier)
+                        .unwrap_or(Decimal::ONE),
+                    Decimal::from_f64_retain(multiplier.risk_limit_multiplier)
+                        .unwrap_or(Decimal::ONE),
+                ),
+                None => (Decimal::ONE, Decimal::ONE),
+            };
 
         // Apply performance-based adjustments if stats tracker is available
         if let Some(stats_tracker) = &self.stats_tracker {

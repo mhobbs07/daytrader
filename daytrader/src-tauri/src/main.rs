@@ -307,11 +307,12 @@ async fn main() {
         // Route fills into the P&L tracker and keep its marks fresh from
         // quotes. Lagged receivers skip ahead instead of exiting.
         {
-            let event_bus = event_bus.clone();
             let orders = Arc::clone(&orders);
             let pnl_tracker = Arc::clone(&pnl_tracker);
+            // Subscribe before spawning so fills published right after
+            // startup cannot be missed
+            let mut rx = event_bus.subscribe();
             tokio::spawn(async move {
-                let mut rx = event_bus.subscribe();
                 loop {
                     match rx.recv().await {
                         Ok(daytrader::events::types::MarketEvent::OrderFilled {
@@ -382,11 +383,20 @@ async fn main() {
         let pattern_registry = Arc::clone(&pattern_registry);
         let market_cache = Arc::clone(&market_cache);
 
+        // Subscribe before spawning so early candles cannot be missed
+        let mut rx = event_bus.subscribe();
         tokio::spawn(async move {
-            let mut rx = event_bus.subscribe();
             info!("Pattern detection service started (display-only mode)");
 
-            while let Ok(event) = rx.recv().await {
+            loop {
+                let event = match rx.recv().await {
+                    Ok(event) => event,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        warn!("Display-only detection lagged, skipped {missed} events");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
                 if let daytrader::events::types::MarketEvent::NewCandle { symbol, candle: _ } =
                     event
                 {

@@ -21,7 +21,6 @@ use tokio::time::{Duration, sleep};
 
 /// Test risk evaluation with mock broker data
 // TODO(B-056): engine.start() subscribes inside spawned task — misses events published before task runs
-#[ignore]
 #[tokio::test]
 async fn test_risk_evaluation_with_mock_broker() {
     let config = create_test_risk_config();
@@ -47,7 +46,10 @@ async fn test_risk_evaluation_with_mock_broker() {
 
     // Should detect risk violation
     let mut violations = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { .. } = event else {
+            continue;
+        };
         violations += 1;
     }
 
@@ -140,7 +142,10 @@ async fn test_rate_limiting_scenarios() {
 
     // Should handle rapid orders without panicking
     let mut violations = 0;
-    while let Ok(MarketEvent::RiskViolation { .. }) = violation_receiver.try_recv() {
+    while let Ok(event) = violation_receiver.try_recv() {
+        let MarketEvent::RiskViolation { .. } = event else {
+            continue;
+        };
         violations += 1;
     }
 
