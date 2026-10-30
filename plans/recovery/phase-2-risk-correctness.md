@@ -6,6 +6,18 @@ Pre-conditions: Phase 1 B-107 (risk on `dt-core`) and B-109 (clock) landed, so t
 
 Line numbers below are from `staging` at `e61e85a` and will have moved; the function names will not.
 
+**Status after #30 (merged into `staging` as `bc5fd44`, verified in code 2026-10-30).** #30 fixed some of these defects without the scenario tests this phase requires. For each affected task, the work left is the test, plus anything marked "still open".
+
+| Task | Fixed by #30 | Still open on `staging` |
+|---|---|---|
+| B-123 `Lagged` | Yes. No `while let Ok(..) = recv()` remains in `risk/engine.rs`, `execution/engine.rs` or the Tauri event bridge and app tasks; `Lagged` is handled in each. | Only the overflow scenario test. |
+| B-128 daily loss | Partly. Breaches now set `is_trading_halted` and publish `TradingHalted` (`risk/engine.rs` ~517, ~556). | Commission is still added to daily P&L as profit (`update_daily_pl(fill.commission)`, ~481). Unrealized accumulation and the second halt flag were not re-checked and must be verified by the test. |
+| B-129 emergency liquidation | Partly. The false trigger and the state-lock self-deadlock are fixed; it now compares `initial_equity + daily_pl`. | The equity should come from the broker's account equity, refreshed on fill, not a derived figure. |
+| B-133 | Partly. The empty-`confidence_multipliers` index panic is gone. | `evaluator.update_pattern_status(..)` (~659) is still called without `.await`, so a Critical violation never disables the pattern. |
+| B-122 deadlock | **No.** | `evaluate_pattern_risk_on_detection` (~616) still takes write locks on both the evaluator and the stats tracker, and `evaluate_pattern_trade` still calls `stats_tracker.read()` (`pattern_limits.rs` ~464). First detected pattern hangs the risk task. |
+
+Everything else in the table below is untouched by #30 and is as described.
+
 **Shared test harness (B-121, do first):** `crates/dt-risk/tests/harness.rs` providing `RiskHarness::new(config, clock) -> (RiskEngine started, EventBus, Receiver)`, helpers `publish_pattern(symbol, pattern, confidence)`, `publish_fill(..)`, `publish_position_closed(pnl)`, `advance_to(ts)`, and `expect_violation(kind, within: Duration)` / `expect_no_violation(within)` that use `tokio::time::timeout` rather than `sleep`. Every task below uses it.
 
 | ID | Defect | Where | Fix | Proving test |
