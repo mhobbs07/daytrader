@@ -66,7 +66,7 @@ Specs: `plans/recovery/` (`README.md` decides order and IDs; the research roadma
 Outlined only. A **[design]** task writes the Phase 3 and 4 specs when Phase 2 exits.
 
 - **Phase 3, one correct pipeline in simulation:** synchronous risk gate, fills into one portfolio, exits, persistence and rehydration against `SimBroker`. IDs assigned when specified.
-- **Phase 4, research platform:** B-209 (data quality, first), B-210, B-211, B-212, B-213, then **B-222 Go/No-Go** (human).
+- **Phase 4, research platform:** B-209 (data quality, first), B-223 (adjustment correctness), B-210, B-211, B-212, B-213, then **B-222 Go/No-Go** (human). B-224 (bench engine shutdown) lands with B-213.
 - **Phase 5, after the verdict, order set by B-222:** B-215, B-216, B-217, B-218, B-219, B-220.
 - **Phase L, only on a decision to trade real money:** live connectivity plus roadmap Phase L hardening, then 30 trading days of paper.
 
@@ -112,6 +112,8 @@ Designs: `plans/2026-07-28-research-platform-roadmap.md`. **Order is set by the 
 | B-219 | Research UI: equity/underwater curves, trade blotter, attribution heatmap, sweep surface, validity banner | Medium | R4 → P5 | `daytrader/src/` |
 | B-220 | ML signal layer: ONNX via `ort` behind `--features ml`, model registry, shadow-only evaluation, drift/decay/crowding metrics | Low | R5 → P5 | `src/signals/ml/` |
 | B-222 | ⭑ Go/No-Go checkpoint: run the detectors through the Phase 4 harness and decide (stop, scanner-first, or signals-first); record in `docs/sessions/` | Critical | → end of P4 (human) | `docs/sessions/` |
+| B-223 | Corporate-action adjustment correctness, before anything consumes it (from the #39 review): sort dividend reference prices by full timestamp, not date; keep distinct dividends on the same ex-date and apply amount corrections (action identity, not `(symbol, ex_date)`); compute each dividend's reference close and factor once per action instead of per candle (quadratic today); split-adjust volume by the inverse factor; bound actions by an explicit as-of date so future actions never alter a historical backtest (the roadmap's `AdjustedBars::as_of`). `adjust_candles` has no runtime caller yet, so none of this is live. | Critical | R0.1 → P4, before B-210 | `src/data/corporate_actions.rs` |
+| B-224 | Benches: risk benchmarks call `RiskEngine::start()` per iteration and never stop it, so detached receiver tasks accumulate and distort timings (from the #39 review). Give the engine a shutdown handle and use it in the benches before `verify_perf.sh` gates on them. | Medium | R0.5 → P4 (with B-213's throughput gate) | `benches/risk_benchmarks.rs`, `src/risk/engine.rs` |
 
 #### Research track: completed on the sweep branch (landed on `main` by the r0 integration PR)
 

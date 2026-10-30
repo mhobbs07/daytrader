@@ -38,6 +38,7 @@ The core deliverable. Implements roadmap R0.7 and R1 on top of the Phase 3 pipel
 | ID | Item | Roadmap |
 |---|---|---|
 | B-209 | Data-quality gates (gap, OHLC coherence, volume, outlier, stale quote, monotonic time) with a `data_quality_events` quarantine table, and the one-off free-tier divergence audit committed as `docs/data-validity.md`. **First task of the phase**: its number is the caveat on every later report. | R0.7 |
+| B-223 | Corporate-action adjustment correctness before the harness relies on it: timestamp-ordered dividend references, distinct same-day dividends and corrections, per-action (not per-candle) factor computation, split-adjusted volume, and an explicit as-of bound so future actions never alter a historical backtest. Found in the #39 review; `adjust_candles` has no runtime caller yet. | R0.1 |
 | B-210 | Backtest realism: `FillModel` trait (spread crossing, square-root impact, participation; limits fill only when price trades **through**), short side with borrow model, PDT accrual during replay, `HoldingPolicy` with end-of-day liquidation. Slippage and commission are applied at the fill so the portfolio and the report agree. | R1 |
 | B-211 | Walk-forward folds, purged K-fold with embargo, deflated Sharpe fed by the sweep's trial count, OOS/IS ratio rejection below 0.5, plateau-robustness score. | R1 |
 | B-212 | Metric suite (gross and after-cost), Monte Carlo trade-order bootstrap, per-pattern × regime × hour attribution, benchmark vs SPY. | R1 |
