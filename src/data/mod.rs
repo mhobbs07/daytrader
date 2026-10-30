@@ -49,12 +49,14 @@
 //! ```
 
 pub mod cache;
+pub mod corporate_actions;
 pub mod ingestion;
 pub mod storage;
 pub mod validation;
 
 // Re-export main types for convenience
 pub use cache::MarketDataCache;
+pub use corporate_actions::{AdjustmentFactors, CorporateAction, CorporateActionRepository};
 pub use ingestion::DataIngestionPipeline;
 pub use storage::CandleStorage;
 pub use validation::{

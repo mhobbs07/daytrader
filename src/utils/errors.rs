@@ -26,6 +26,10 @@ pub enum AppError {
     #[error("Pattern detection error: {0}")]
     Pattern(#[from] PatternError),
 
+    /// Corporate-action modeling error
+    #[error("Corporate action error: {0}")]
+    CorporateAction(#[from] CorporateActionError),
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(#[from] config::ConfigError),
@@ -184,4 +188,29 @@ pub enum PatternError {
     /// Calculation error
     #[error("Calculation error: {0}")]
     CalculationError(String),
+}
+
+/// Corporate-action modeling errors
+///
+/// Raised while validating or applying stock splits and cash dividends —
+/// the factor table backing query-time bar adjustment (B-086 step 2). See
+/// `crate::data::corporate_actions`.
+#[derive(Debug, Error)]
+pub enum CorporateActionError {
+    /// A split ratio with a zero share count on either side. `0:N` and
+    /// `N:0` are both economically meaningless.
+    #[error("split ratio must use positive share counts, got {from}:{to}")]
+    InvalidSplitRatio {
+        /// Old shares in the ratio
+        from: u32,
+        /// New shares in the ratio
+        to: u32,
+    },
+
+    /// A cash dividend with a non-positive per-share amount.
+    #[error("dividend amount must be positive, got {amount}")]
+    InvalidDividendAmount {
+        /// The rejected amount
+        amount: Decimal,
+    },
 }

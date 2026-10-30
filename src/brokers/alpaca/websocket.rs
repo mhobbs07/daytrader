@@ -13,7 +13,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use super::backoff::ReconnectBackoff;
 use super::config::AlpacaConfig;
 use super::types::{AlpacaBar, AlpacaQuote};
-use crate::brokers::traits::{Candle, MarketDataProvider, Quote, Timeframe};
+use crate::brokers::traits::{BarAdjustment, Candle, MarketDataProvider, Quote, Timeframe};
 use crate::brokers::types::{Price, Symbol};
 use crate::utils::errors::BrokerError;
 
@@ -408,6 +408,7 @@ impl MarketDataProvider for WebSocketClient {
         _start: DateTime<Utc>,
         _end: DateTime<Utc>,
         _timeframe: Timeframe,
+        _adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError> {
         // Historical candles would be fetched via REST API, not WebSocket
         // This would typically be implemented in the main AlpacaProvider

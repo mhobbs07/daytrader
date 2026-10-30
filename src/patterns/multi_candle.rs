@@ -15,7 +15,9 @@ use crate::patterns::traits::PatternDetector;
 use crate::patterns::types::{
     PatternContext, PatternError, PatternParams, PatternResult, TrendContext, VolumeConfirmation,
 };
+use crate::patterns::utils::decimal_to_ratio;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::fmt::Debug;
 
 /// Morning Star pattern detector - 3-candle bullish reversal pattern
@@ -158,7 +160,7 @@ impl MorningStarDetector {
             return 0.0;
         }
         let body_size = candle.body_size();
-        (body_size / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(body_size, range)
     }
 }
 
@@ -371,7 +373,7 @@ impl EveningStarDetector {
             return 0.0;
         }
         let body_size = candle.body_size();
-        (body_size / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(body_size, range)
     }
 }
 
@@ -561,9 +563,9 @@ impl ThreeWhiteSoldiersDetector {
         let third_advance = (third.close.value() - third.open.value()) / third.open.value();
 
         let advances = [
-            first_advance.to_string().parse::<f64>().unwrap_or(0.0),
-            second_advance.to_string().parse::<f64>().unwrap_or(0.0),
-            third_advance.to_string().parse::<f64>().unwrap_or(0.0),
+            first_advance.to_f64().unwrap_or(0.0),
+            second_advance.to_f64().unwrap_or(0.0),
+            third_advance.to_f64().unwrap_or(0.0),
         ];
 
         let avg_advance = advances.iter().sum::<f64>() / 3.0;
@@ -602,7 +604,7 @@ impl ThreeWhiteSoldiersDetector {
             return 0.0;
         }
         let body_size = candle.body_size();
-        (body_size / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(body_size, range)
     }
 
     /// Helper function to calculate upper shadow ratio
@@ -612,7 +614,7 @@ impl ThreeWhiteSoldiersDetector {
             return 0.0;
         }
         let upper_shadow = candle.high.value() - candle.open.value().max(candle.close.value());
-        (upper_shadow / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(upper_shadow, range)
     }
 }
 
@@ -798,9 +800,9 @@ impl ThreeBlackCrowsDetector {
         let third_decline = (third.open.value() - third.close.value()) / third.open.value();
 
         let declines = [
-            first_decline.to_string().parse::<f64>().unwrap_or(0.0),
-            second_decline.to_string().parse::<f64>().unwrap_or(0.0),
-            third_decline.to_string().parse::<f64>().unwrap_or(0.0),
+            first_decline.to_f64().unwrap_or(0.0),
+            second_decline.to_f64().unwrap_or(0.0),
+            third_decline.to_f64().unwrap_or(0.0),
         ];
 
         let avg_decline = declines.iter().sum::<f64>() / 3.0;
@@ -839,7 +841,7 @@ impl ThreeBlackCrowsDetector {
             return 0.0;
         }
         let body_size = candle.body_size();
-        (body_size / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(body_size, range)
     }
 
     /// Helper function to calculate lower shadow ratio
@@ -849,7 +851,7 @@ impl ThreeBlackCrowsDetector {
             return 0.0;
         }
         let lower_shadow = candle.open.value().min(candle.close.value()) - candle.low.value();
-        (lower_shadow / range).to_string().parse().unwrap_or(0.0)
+        decimal_to_ratio(lower_shadow, range)
     }
 }
 

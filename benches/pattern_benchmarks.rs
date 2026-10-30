@@ -8,14 +8,14 @@
 //! - Different data sizes and complexities
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use daytrader::brokers::types::{Confidence, PatternName, Price};
-use daytrader::events::types::{Candle, SignalType};
+use daytrader::brokers::types::{Price, Symbol};
+use daytrader::events::types::Candle;
 use daytrader::patterns::{
     candlestick::{DojiDetector, HammerDetector, ShootingStarDetector},
     engulfing::{BearishEngulfingDetector, BullishEngulfingDetector},
     registry::PatternRegistry,
     traits::PatternDetector,
-    types::{PatternContext, PatternParams, PatternResult},
+    types::PatternParams,
 };
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -34,11 +34,7 @@ pub fn bench_hammer_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(
-                        detector
-                            .detect(black_box(candles), black_box(&params))
-                            .await,
-                    );
+                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)));
                 }
             });
         });
@@ -57,11 +53,7 @@ pub fn bench_shooting_star_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(
-                        detector
-                            .detect(black_box(candles), black_box(&params))
-                            .await,
-                    );
+                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)));
                 }
             });
         });
@@ -80,11 +72,7 @@ pub fn bench_doji_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(
-                        detector
-                            .detect(black_box(candles), black_box(&params))
-                            .await,
-                    );
+                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)));
                 }
             });
         });
@@ -103,11 +91,7 @@ pub fn bench_bullish_engulfing_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(
-                        detector
-                            .detect(black_box(candles), black_box(&params))
-                            .await,
-                    );
+                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)));
                 }
             });
         });
@@ -126,11 +110,7 @@ pub fn bench_bearish_engulfing_detection(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for candles in &test_candles {
-                    let _ = black_box(
-                        detector
-                            .detect(black_box(candles), black_box(&params))
-                            .await,
-                    );
+                    let _ = black_box(detector.detect(black_box(candles), black_box(&params)));
                 }
             });
         });
@@ -174,6 +154,7 @@ pub fn bench_concurrent_detection(c: &mut Criterion) {
                 for chunk in test_candles.chunks(10) {
                     let registry_clone = Arc::clone(&registry);
                     let chunk_data: Vec<_> = chunk.to_vec();
+                    let params = params.clone();
 
                     let handle = tokio::spawn(async move {
                         for candles in chunk_data {
@@ -221,7 +202,6 @@ pub fn bench_data_size_scaling(c: &mut Criterion) {
 /// Benchmark memory usage patterns
 pub fn bench_memory_usage(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    let registry = Arc::new(PatternRegistry::new());
     let params = PatternParams::new().with_min_confidence(0.0);
 
     c.bench_function("memory_usage_patterns", |b| {
@@ -375,6 +355,7 @@ fn create_large_test_data(size: usize) -> Vec<Candle> {
 /// Helper function to create a candle
 fn create_candle(open: f64, high: f64, low: f64, close: f64, volume: u64) -> Candle {
     Candle {
+        symbol: Symbol::new("BENCH").unwrap(),
         timestamp: chrono::Utc::now(),
         open: Price::new(Decimal::from_f64_retain(open).unwrap()).unwrap(),
         high: Price::new(Decimal::from_f64_retain(high).unwrap()).unwrap(),

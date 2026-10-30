@@ -4,6 +4,7 @@
 //! to prevent errors like passing a price where a quantity is expected.
 
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -109,9 +110,13 @@ impl Price {
     }
 
     /// Returns the price as f64 (use sparingly, prefer Decimal)
+    ///
+    /// Converts via `ToPrimitive` rather than a decimal-string round-trip:
+    /// this sits on the pattern-detection hot path, where the former cost a
+    /// heap allocation and a float parse per call.
     #[inline]
     pub fn as_f64(&self) -> f64 {
-        self.0.to_string().parse().unwrap_or(0.0)
+        self.0.to_f64().unwrap_or(0.0)
     }
 }
 

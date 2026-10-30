@@ -14,7 +14,8 @@ Pre-conditions: Phase 0 exited; #29 merged.
 
 ```rust
 // money & quantities
-pub struct Money(Decimal);          // signed; Display with 2dp; Add/Sub/Mul<Decimal>; serde as string
+pub struct Money(i64);              // signed fixed-point micros (6 dp), decided 2026-10-30 (B-204); exact, and sortable/summable in SQLite;
+                                    // checked Add/Sub, Mul by Quantity via Decimal at the boundary; Display with 2dp; serde as string
 pub struct Price(Decimal);          // > 0
 pub struct Quantity(Decimal);       // >= 0, fractional allowed; Display without trailing zeros
 pub struct Percentage(Decimal);     // 0..=100
@@ -78,7 +79,7 @@ Each PR: replace the module's local type(s) with the `dt-core` type, delete the 
 | B-105 | `positions` | `tracker::Position`, `pnl.rs` lot logic → `dt_core::Position::apply_fill` | `positions::PositionTracker` becomes the single `Portfolio` (map Symbol→Position + persistence hook). |
 | B-106 | `orders` | `ManagedOrder`, `OrderRequest`, `FillInfo`, `OrderConfig` price fields | `Order` + `OrderIntent`; `OrderTracker` validates transitions with `can_transition_to`; `ClientOrderId` sent to broker. |
 | B-107 | `risk` | `types::TrackedPosition`, `position_sizing::PositionInfo`, `pattern_stats::{PatternStats,PatternPerformanceStats}` (keep one, in `dt-core` or `dt-risk`), `DailyRiskMetrics` dup | `risk::position_tracker` deleted; risk reads the `Portfolio`. `RiskConfig` money fields become `Money`/`Percentage` (config parsing converts once, at the boundary). |
-| B-108 | `execution`, `db`, Tauri | `execution::PatternPerformance`, `rules::PatternStats`, `PerformanceThresholds` dup; `db::models` f64 fields → core types; Tauri DTOs are thin `From<dt_core::_>` | DB columns for money become `TEXT` holding `Decimal` strings; migration script converts existing rows. |
+| B-108 | `execution`, `db`, Tauri | `execution::PatternPerformance`, `rules::PatternStats`, `PerformanceThresholds` dup; `db::models` f64 fields → core types; Tauri DTOs are thin `From<dt_core::_>` | DB columns for money become `INTEGER` micros (B-204, decided 2026-10-30); the dev DB is disposable, so no row-conversion script is needed. |
 
 **Proof for each:** `cargo test --workspace` pass count ≥ before; `grep -rn "<deleted type name>" src/ daytrader/` prints nothing; `cargo clippy --workspace --all-targets -- -D warnings` clean.
 **Size:** M each; `risk` (B-107) will need splitting by file.
@@ -103,6 +104,7 @@ Each PR: `git mv` the module into `crates/<name>/src`, add `Cargo.toml` with onl
 
 - [ ] One definition of Bar, Quote, Order, OrderStatus, Fill, Position, Signal, PatternStats; `grep -rn "struct Position\b\|struct Order\b\|struct Candle\b\|struct Fill\b" crates/ src/` returns only `dt-core`
 - [ ] `Utc::now()` grep (B-109) empty and enforced in CI
-- [ ] Money stored as `TEXT` Decimal; `Quantity` is Decimal end to end
+- [ ] Money stored as `INTEGER` micros (B-204); `Quantity` is Decimal end to end
+- [ ] Money tests from roadmap R0.2: `Money` ↔ `Decimal` round-trip property test; a 1,000-trade P&L fixture equals the hand-computed exact value; money columns follow the `*_micros` naming convention and ratio columns are explicitly allow-listed as `REAL`; `grep -rn 'from_f64_retain\|to_f64()' crates/ src/` outside tests returns nothing
 - [ ] Workspace of 8 crates + `dtctl` + Tauri; root `src/` deleted
 - [ ] `verify_architecture.sh` and per-module `CLAUDE.md` deleted

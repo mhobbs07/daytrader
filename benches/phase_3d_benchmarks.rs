@@ -11,8 +11,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use daytrader::brokers::types::{Confidence, PatternName, Price, Symbol};
 use daytrader::events::types::{Candle, SignalType};
 use daytrader::patterns::{
-    candlestick::{DojiDetector, HammerDetector, ShootingStarDetector},
-    engulfing::{BearishEngulfingDetector, BullishEngulfingDetector},
+    candlestick::{HammerDetector, ShootingStarDetector},
+    engulfing::BullishEngulfingDetector,
     indicators,
     registry::PatternRegistry,
     signals::{SignalConfig, SignalEngine},
@@ -63,7 +63,7 @@ fn create_multi_symbol_data(
 ) -> Vec<(Symbol, Vec<Candle>)> {
     (0..num_symbols)
         .map(|symbol_idx| {
-            let symbol = Symbol::new(&format!("SYM{:03}", symbol_idx)).unwrap();
+            let symbol = Symbol::new(format!("SYM{:03}", symbol_idx)).unwrap();
             let candles = (0..candles_per_symbol)
                 .map(|i| {
                     let base = 100.0 + (i as f64 * 0.1 + symbol_idx as f64).sin() * 5.0;
@@ -157,9 +157,7 @@ pub fn bench_individual_patterns(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let _ = black_box(
-                    hammer_detector
-                        .detect(black_box(&hammer_candles), black_box(&params))
-                        .await,
+                    hammer_detector.detect(black_box(&hammer_candles), black_box(&params)),
                 );
             });
         });
@@ -174,8 +172,7 @@ pub fn bench_individual_patterns(c: &mut Criterion) {
             rt.block_on(async {
                 let _ = black_box(
                     shooting_star_detector
-                        .detect(black_box(&shooting_star_candles), black_box(&params))
-                        .await,
+                        .detect(black_box(&shooting_star_candles), black_box(&params)),
                 );
             });
         });
@@ -193,8 +190,7 @@ pub fn bench_individual_patterns(c: &mut Criterion) {
             rt.block_on(async {
                 let _ = black_box(
                     bullish_engulfing_detector
-                        .detect(black_box(&engulfing_candles), black_box(&params))
-                        .await,
+                        .detect(black_box(&engulfing_candles), black_box(&params)),
                 );
             });
         });
@@ -253,6 +249,7 @@ pub fn bench_indicator_calculations(c: &mut Criterion) {
             let _ = black_box(indicators::bollinger_bands(
                 black_box(&closes),
                 black_box(20),
+                black_box(2.0),
             ));
         });
     });

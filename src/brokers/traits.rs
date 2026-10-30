@@ -298,6 +298,123 @@ pub enum Timeframe {
     OneDay,
 }
 
+/// Corporate-action adjustment applied to historical bars.
+///
+/// This is a correctness-critical parameter, not a preference. Unadjusted
+/// (`Raw`) bars spanning a split contain a discontinuity that is indistinguishable
+/// from a real price gap: a 4:1 split manufactures an apparent 75% drop, which
+/// pattern detectors will read as a signal and act on. Any series used for
+/// pattern detection, backtesting, or indicator calculation must be adjusted.
+///
+/// `Raw` remains available because it is the correct choice when reconciling
+/// against broker fills or tax lots, which are denominated in as-traded prices.
+///
+/// # Reproducibility caveat
+///
+/// Adjusted bars are adjusted *as of the time of the request*. Re-fetching the
+/// same historical window after a subsequent split yields different values, so a
+/// backtest is only reproducible against a pinned local copy. Storing raw bars
+/// alongside a corporate-action factor table, and adjusting at query time,
+/// removes this caveat — tracked as B-086 step 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BarAdjustment {
+    /// As-traded prices, no adjustment. Correct only for reconciling against
+    /// broker fills and tax lots — never for pattern detection or backtesting.
+    Raw,
+    /// Adjusted for stock splits only.
+    Split,
+    /// Adjusted for cash dividends only.
+    Dividend,
+    /// Adjusted for both splits and dividends. The correct default for analysis.
+    All,
+}
+
+impl BarAdjustment {
+    /// Returns the value for the Alpaca data API `adjustment` query parameter.
+    #[inline]
+    pub fn as_param(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::Split => "split",
+            Self::Dividend => "dividend",
+            Self::All => "all",
+        }
+    }
+
+    /// Returns the discriminator persisted alongside stored candles.
+    ///
+    /// Bars under different adjustments are different series and must never
+    /// collide in storage; this value is part of the candles uniqueness key.
+    #[inline]
+    pub fn as_str(self) -> &'static str {
+        self.as_param()
+    }
+
+    /// Whether bars under this adjustment are safe for pattern detection,
+    /// indicator calculation, and backtesting.
+    ///
+    /// Only adjustments that include splits are: `Raw` and `Dividend` both leave
+    /// split discontinuities in place, which are indistinguishable from gaps.
+    #[inline]
+    pub fn is_analysis_safe(self) -> bool {
+        matches!(self, Self::Split | Self::All)
+    }
+}
+
+impl Default for BarAdjustment {
+    /// Splits and dividends both adjusted — the only default that cannot
+    /// silently manufacture a fake gap.
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+/// A stock split reported by a broker's corporate-actions feed.
+///
+/// `from` old shares become `to` new shares: a forward 4:1 split is
+/// `{ from: 1, to: 4 }`; a 1:10 reverse split is `{ from: 10, to: 1 }`.
+/// Modeled as a ratio (not a single multiplier) so reverse splits are
+/// representable without a separate "direction" flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SplitAnnouncement {
+    /// Date the split takes effect. Bars dated before this need adjusting;
+    /// bars on or after it already reflect the new share count.
+    pub ex_date: chrono::NaiveDate,
+    /// Old shares in the ratio (must be positive)
+    pub from: u32,
+    /// New shares in the ratio (must be positive)
+    pub to: u32,
+}
+
+/// A cash dividend reported by a broker's corporate-actions feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CashDividendAnnouncement {
+    /// Date the dividend takes effect (the day the stock trades "ex" the
+    /// dividend, so its price is expected to drop by roughly `amount`).
+    pub ex_date: chrono::NaiveDate,
+    /// Cash amount paid per share
+    pub amount_per_share: Decimal,
+}
+
+/// A corporate action reported by a broker's corporate-actions feed for a
+/// single symbol.
+///
+/// This is the foundation-layer wire representation — broker-agnostic, no
+/// dependency on the storage/factor types in `data::corporate_actions`
+/// (which live in a higher layer and convert from this). Mirrors how
+/// [`Candle`] is the foundation-layer OHLCV representation that
+/// `data::storage` persists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorporateActionAnnouncement {
+    /// A stock split
+    Split(SplitAnnouncement),
+    /// A cash dividend
+    CashDividend(CashDividendAnnouncement),
+}
+
 // ============================================================================
 // Trait Definitions
 // ============================================================================
@@ -342,6 +459,11 @@ pub trait MarketDataProvider: Send + Sync {
 
     /// Get historical candles for a symbol
     ///
+    /// `adjustment` selects the corporate-action treatment and is
+    /// correctness-critical — see [`BarAdjustment`]. Callers feeding pattern
+    /// detection, indicators, or backtests must not pass
+    /// [`BarAdjustment::Raw`], which leaves split discontinuities in the series.
+    ///
     /// # Errors
     ///
     /// Returns an error if data retrieval fails or parameters are invalid
@@ -351,6 +473,7 @@ pub trait MarketDataProvider: Send + Sync {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError>;
 
     /// Start real-time data stream
@@ -501,5 +624,92 @@ mod tests {
         assert!(!candle.is_bearish());
         assert_eq!(candle.body_size(), Decimal::new(100, 2));
         assert_eq!(candle.range(), Decimal::new(300, 2));
+    }
+
+    #[test]
+    fn test_bar_adjustment_default_is_fully_adjusted() {
+        // A defaulted adjustment must never be Raw: an unadjusted series lets a
+        // split masquerade as a gap, which detectors will trade.
+        assert_eq!(BarAdjustment::default(), BarAdjustment::All);
+        assert!(BarAdjustment::default().is_analysis_safe());
+    }
+
+    #[test]
+    fn test_bar_adjustment_raw_is_not_analysis_safe() {
+        assert!(!BarAdjustment::Raw.is_analysis_safe());
+        assert!(BarAdjustment::Split.is_analysis_safe());
+        assert!(
+            !BarAdjustment::Dividend.is_analysis_safe(),
+            "dividend-only bars keep split discontinuities"
+        );
+        assert!(BarAdjustment::All.is_analysis_safe());
+    }
+
+    #[test]
+    fn test_bar_adjustment_api_params_match_alpaca_vocabulary() {
+        assert_eq!(BarAdjustment::Raw.as_param(), "raw");
+        assert_eq!(BarAdjustment::Split.as_param(), "split");
+        assert_eq!(BarAdjustment::Dividend.as_param(), "dividend");
+        assert_eq!(BarAdjustment::All.as_param(), "all");
+    }
+
+    #[test]
+    fn test_split_announcement_models_forward_and_reverse_ratios() {
+        // A forward split and a reverse split are both representable as a
+        // from:to ratio, just inverted — no separate "direction" enum needed.
+        let forward = SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 1,
+            to: 4,
+        };
+        let reverse = SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 10,
+            to: 1,
+        };
+        assert_ne!(forward, reverse);
+        assert!(forward.to > forward.from, "forward split increases shares");
+        assert!(reverse.from > reverse.to, "reverse split decreases shares");
+    }
+
+    #[test]
+    fn test_corporate_action_announcement_wraps_split_and_dividend() {
+        let split = CorporateActionAnnouncement::Split(SplitAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            from: 1,
+            to: 4,
+        });
+        let dividend = CorporateActionAnnouncement::CashDividend(CashDividendAnnouncement {
+            ex_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 10).unwrap(),
+            amount_per_share: Decimal::new(25, 2),
+        });
+        assert_ne!(split, dividend);
+        assert!(matches!(split, CorporateActionAnnouncement::Split(_)));
+        assert!(matches!(
+            dividend,
+            CorporateActionAnnouncement::CashDividend(_)
+        ));
+    }
+
+    #[test]
+    fn test_bar_adjustment_storage_discriminators_are_distinct() {
+        // Bars under different adjustments are different series. If two
+        // variants shared a discriminator they would collide in the candles
+        // uniqueness key and silently overwrite one another.
+        let all = [
+            BarAdjustment::Raw,
+            BarAdjustment::Split,
+            BarAdjustment::Dividend,
+            BarAdjustment::All,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for adjustment in all {
+            assert!(
+                seen.insert(adjustment.as_str()),
+                "duplicate storage discriminator for {:?}",
+                adjustment
+            );
+        }
+        assert_eq!(seen.len(), 4);
     }
 }

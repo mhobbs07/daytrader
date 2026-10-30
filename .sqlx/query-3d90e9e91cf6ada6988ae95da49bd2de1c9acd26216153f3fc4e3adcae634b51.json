@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO schema_migrations (version, description) VALUES (4, 'Add corporate_actions factor table for query-time bar adjustment')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "3d90e9e91cf6ada6988ae95da49bd2de1c9acd26216153f3fc4e3adcae634b51"
+}

@@ -54,7 +54,7 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 ## B-089 CI mirrors the verify script and runs on every PR — agent (CI change; owner has approved this program)
 
 **Goal:** One workflow, triggered on PRs to the trunk and pushes to it, that runs exactly the steps the local verify script runs, on the whole workspace including the Tauri crate, with no excused failures.
-**Files:** `.github/workflows/ci.yml`, `.github/workflows/docs.yml` (delete; fold into ci), `.gitlab-ci.yml` (delete), `scripts/verify_agent_work.sh`, `.governance/known_test_issues.txt` (delete), `.governance/production_safety_baseline.txt` (delete after B-090–B-094 land; until then keep the ratchet).
+**Files:** `.github/workflows/ci.yml`, `.github/workflows/docs.yml` (delete; fold into ci), `.gitlab-ci.yml` (delete), `scripts/verify_agent_work.sh`, `.governance/known_test_issues.txt` (delete), `deny.toml` (new). `.governance/production_safety_baseline.txt` stays as the ratchet until B-094 deletes it.
 **Steps:**
 1. `ci.yml` `on:` = `pull_request:` (all branches) + `push: branches: [main]`. Remove `develop`.
 2. Jobs: `fmt` (`cargo fmt --all -- --check`), `clippy` (`cargo clippy --workspace --all-targets -- -D warnings`), `test` (`cargo test --workspace`, then `cargo test --workspace --features mock`), `doc` (`RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps`), `tauri-check` (`apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev ...` then `cargo check -p daytrader-app`), `frontend` (`npm ci && npm run build` in `daytrader/`), `governance` (`verify_architecture.sh`, `verify_test_quality.sh` until Phase 1 deletes them). `SQLX_OFFLINE=true` in `env:` at the top.
@@ -64,6 +64,12 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Proof:** a PR touching only a comment gets a full green run; a PR introducing one `unused variable` goes red in `clippy`.
 **Exit:** as Proof.
 **Size:** M.
+
+**Added by the plan merge (roadmap R0.5, B-206):** CI also runs `cargo sqlx prepare --check` (the local script already does, since B-088) and `cargo deny check` (advisories and licences, configured by `deny.toml`). An advisory that only a version upgrade fixes is listed in `deny.toml` with the B-208 upgrade that removes it, so this PR can go green before the upgrades run. Since #39 the verify script matches known failures by test name instead of count; this task still deletes the escape hatch entirely.
+
+Two R0.5 items are scheduled elsewhere so that no PR goes red on work another task owns:
+- **`cargo machete` (unused dependencies)** becomes a CI gate in **B-095**, the PR that removes the dependencies it would flag.
+- **The `std::sync` hard zero** (`tokio::sync::RwLock` where a critical section awaits, `std::sync::OnceLock`/`LazyLock` for initialise-once data such as `utils/holidays.rs`) is done in **B-094**, which already deletes the production-safety ratchet.
 
 ## B-090 … B-094 Clippy to zero under `-D warnings` — agent, one PR per module group, parallelisable
 
@@ -76,7 +82,7 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 | B-091 | `src/events/**`, `src/db/**` | same pattern |
 | B-092 | `src/patterns/**` | same |
 | B-093 | `src/risk/**` | same |
-| B-094 | `src/orders/**`, `src/positions/**`, `src/execution/**`, `src/lib.rs`, `src/main.rs`, `daytrader/src-tauri/src/**`, `tests/**`, `benches/**`, `examples/**`; then flip CI + verify script to `-D warnings` | same, then full |
+| B-094 | `src/orders/**`, `src/positions/**`, `src/execution/**`, `src/lib.rs`, `src/main.rs`, `daytrader/src-tauri/src/**`, `tests/**`, `benches/**`, `examples/**`; then flip CI + verify script to `-D warnings`. Also the `std::sync` hard zero: `src/utils/holidays.rs`, `daytrader/src-tauri/src/{state,events,main}.rs`, `clippy.toml` (new), `scripts/verify_agent_work.sh`, and delete `.governance/production_safety_baseline.txt` | same, then full. The `std::sync` zero is enforced by clippy, not grep: `clippy.toml` sets `disallowed-types = ["std::sync::Mutex", "std::sync::RwLock"]`, which resolves grouped (`use std::sync::{Arc, RwLock}`) and aliased imports. Prove it by adding one `std::sync::Mutex` locally and seeing `clippy::disallowed_types` fail |
 
 **Rules:** behaviour-preserving only; if a lint reveals a real bug (e.g. an unused `Result`), do not fix the bug here: add a BACKLOG row referencing Phase 2 and apply the minimal `let _ =` with a `// B-1xx` comment. No new `allow` attributes on items without a PR-description justification.
 **Proof:** the group's grep count is 0; `cargo test --workspace` unchanged (same pass count as before the PR).
@@ -85,13 +91,14 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 ## B-095 Delete dead code and unused dependencies — agent
 
 **Goal:** Nothing in the tree is unreachable from a binary, a test, or a public API that something uses.
-**Files:** `Cargo.toml`, `src/utils/retry.rs` (delete), `src/utils/mod.rs`, `src/patterns/streaming.rs` (`SignalStreamingPipeline` and its tests), `src/db/migrations.rs` (delete), `migrations/` (delete), `src/db/repositories.rs` (`OrderRepository`, `update_order`), `src/db/mod.rs`, `src/orders/types.rs` (`OrderEvent`, `OrderMetrics`), `src/utils/errors.rs` (`rusqlite` variant), `tests/database_integration.rs` (delete; it tests nothing real), `src/brokers/mock.rs` (`parking_lot` → `tokio::sync`).
+**Files:** `Cargo.toml`, `src/utils/retry.rs` (delete), `src/utils/mod.rs`, `src/patterns/streaming.rs` (`SignalStreamingPipeline` and its tests; also its `num_cpus` use), `src/db/migrations.rs` (delete), `migrations/` (delete), `src/db/repositories.rs` (`OrderRepository`, `update_order`), `src/db/mod.rs`, `src/orders/types.rs` (`OrderEvent`, `OrderMetrics`), `src/utils/errors.rs` (`rusqlite` variant), `tests/database_integration.rs` (delete; it tests nothing real), `src/brokers/mock.rs` (`parking_lot` → `tokio::sync`), `src/utils/logging.rs`, `src/utils/metrics.rs`, `src/utils/error_context.rs` (`lazy_static` → `LazyLock`), `src/brokers/alpaca/websocket.rs` (`log` → `tracing`, `futures-util` → `futures`), `src/risk/rules.rs` (`futures-util` → `futures`), `src/utils/performance_monitor.rs` and `src/utils/stats.rs` (new; the `statistical` replacement), `.github/workflows/ci.yml` and `scripts/verify_agent_work.sh` (the `cargo machete` gate, added to both so local verification and CI run the same steps).
 **Dependencies to remove** (verified zero uses 2026-10-30): `crossbeam`, `tower`, `keyring`, `once_cell`, `sha2`, `url`, `tracing-appender`, `metrics-exporter-prometheus`, `ta`, `tokio-retry`, `rusqlite`, `parking_lot`, `lazy_static` (replace 3 uses with `std::sync::LazyLock`), `log` (switch `websocket.rs` to `tracing`), `futures-util` (use `futures`).
+**Also from roadmap R0.6 (B-208):** replace `lazy_static` with `LazyLock`, `num_cpus` with `std::thread::available_parallelism`, and move the two `statistical` uses into `src/utils/stats.rs` (Phase 4 needs it for metrics). Version upgrades (reqwest, tokio-tungstenite, thiserror 2, sqlx 0.9, rand, metrics) are **not** part of B-095; they stay B-208 and run after Phase 0 exits, each as its own PR.
 **Decision needed in the PR:** `src/data/` is unused. Keep it only if Phase 3 will adopt `DataIngestionPipeline` as the market-data ingress; otherwise delete. Recommendation: keep `validation.rs`, delete `cache.rs` and `storage.rs` (duplicates), decide `ingestion.rs` in Phase 3.
-**Proof:** `cargo udeps` (or `cargo machete`) reports nothing; `cargo test --workspace` passes; `cargo build --release` passes.
+**Proof:** `cargo machete` reports nothing, and both CI and `verify_agent_work.sh` now run it as a gate; `cargo test --workspace` passes; `cargo build --release` passes.
 **Size:** M (deletions).
 
-## B-096 Fix or delete the benches — agent
+## B-096 Fix or delete the benches — agent — **Done** (B-221, landed by #39)
 
 **Goal:** `cargo bench --no-run` compiles.
 **Files:** `benches/*.rs`, `Cargo.toml` `[[bench]]` entries.
@@ -99,7 +106,7 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Proof:** `cargo bench --no-run` exits 0; `cargo clippy --benches -- -D warnings` clean.
 **Size:** S–M.
 
-## B-097 Fix `config/default.toml` so it loads completely — agent
+## B-097 Fix `config/default.toml` so it loads completely — agent — **partly done** by B-205 (#39): `RawRiskConfig` → `TryFrom` → `RiskConfig` rejects invalid and all-zero limits. Still open: the `risk.*` nesting of `pattern_profiles` / `confidence_multipliers` / `pattern_performance_thresholds`, `deny_unknown_fields` on the top-level config, and count assertions in `config_validation`
 
 **Goal:** `AppConfig::load_default()` succeeds and `risk.pattern_profiles`, `risk.confidence_multipliers`, `risk.pattern_performance_thresholds` are populated from the file.
 **Files:** `config/default.toml`, `src/config/mod.rs`, `tests/config_validation.rs`.
@@ -119,13 +126,13 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 
 ## Phase 0 exit checklist
 
-- [ ] B-086 trunk consolidated, `staging` deleted
-- [ ] B-087 no references to `staging` outside history
-- [ ] B-088 clean clone builds with `SQLX_OFFLINE=true`, `.sqlx/` and `Cargo.lock` committed
-- [ ] B-089 CI runs on every PR; local script == CI; no excused failures
+- [x] B-086 trunk consolidated, `staging` deleted
+- [x] B-087 no references to `staging` outside history
+- [x] B-088 clean clone builds with `SQLX_OFFLINE=true`, `.sqlx/` and `Cargo.lock` committed
+- [ ] B-089 CI runs on every PR; local script == CI; no excused failures; `cargo deny` and `cargo machete` in CI; `std::sync` count zero
 - [ ] B-090–B-094 `cargo clippy --workspace --all-targets -- -D warnings` clean; `unwrap_used`/`expect_used` denied in non-test code
 - [ ] B-095 dead code and 15 unused dependencies gone
-- [ ] B-096 benches compile
+- [x] B-096 benches compile (B-221)
 - [ ] B-097 config loads completely
 - [ ] B-098 `STATUS.md` exists; old plans archived
 - [ ] B-081 (existing) 27 ignored tests pass or are deleted with reasons

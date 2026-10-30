@@ -3,15 +3,15 @@
 //! This module provides comprehensive benchmarks to measure and optimize
 //! the performance of pattern detection, signal generation, and risk integration.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use daytrader::brokers::types::{Confidence, PatternName, Price, Symbol};
 use daytrader::events::types::{Candle, SignalType};
 use daytrader::patterns::indicators;
-use daytrader::patterns::signals::{SignalConfig, SignalEngine};
-use daytrader::patterns::types::PatternResult;
+use daytrader::patterns::signals::{MarketContextAnalyzer, SignalConfig, SignalEngine};
+use daytrader::patterns::types::{PatternContext, PatternResult};
 use rust_decimal::Decimal;
-use std::sync::Arc;
+use tokio::runtime::Runtime;
 
 /// Generate sample candle data for benchmarking
 fn generate_sample_candles(count: usize) -> Vec<Candle> {
@@ -46,15 +46,16 @@ fn generate_sample_patterns(count: usize) -> Vec<PatternResult> {
         let confidence = 0.5 + (i as f64 * 0.01).sin() * 0.4; // Vary confidence
 
         patterns.push(PatternResult {
-            pattern_name: PatternName::new(pattern_name).unwrap(),
+            pattern_name: PatternName::new(pattern_name),
             confidence: Confidence::new(confidence.clamp(0.0, 1.0)).unwrap(),
             signal_type: if confidence > 0.5 {
                 SignalType::Buy
             } else {
                 SignalType::Sell
             },
-            timestamp: Utc::now(),
-            metadata: std::collections::HashMap::new(),
+            detected_at: Utc::now(),
+            price_level: Price::new(Decimal::from(100)).unwrap(),
+            context: PatternContext::default(),
         });
     }
 
@@ -64,14 +65,16 @@ fn generate_sample_patterns(count: usize) -> Vec<PatternResult> {
 fn bench_signal_generation(c: &mut Criterion) {
     let config = SignalConfig::default();
     let mut engine = SignalEngine::new(config);
+    let rt = Runtime::new().unwrap();
 
     let candles = generate_sample_candles(1000);
     let patterns = generate_sample_patterns(50);
 
     c.bench_function("signal_generation_50_patterns", |b| {
         b.iter(|| {
-            let result =
-                black_box(engine.generate_signals(black_box(&patterns), black_box(&candles)));
+            let result = black_box(
+                rt.block_on(engine.generate_signals(black_box(&patterns), black_box(&candles))),
+            );
             result.unwrap()
         })
     });
@@ -80,29 +83,27 @@ fn bench_signal_generation(c: &mut Criterion) {
 fn bench_parallel_signal_generation(c: &mut Criterion) {
     let config = SignalConfig::default();
     let mut engine = SignalEngine::new(config);
+    let rt = Runtime::new().unwrap();
 
     let candles = generate_sample_candles(1000);
     let patterns = generate_sample_patterns(200); // More patterns for parallel processing
 
     c.bench_function("parallel_signal_generation_200_patterns", |b| {
         b.iter(|| {
-            let result =
-                black_box(engine.generate_signals(black_box(&patterns), black_box(&candles)));
+            let result = black_box(
+                rt.block_on(engine.generate_signals(black_box(&patterns), black_box(&candles))),
+            );
             result.unwrap()
         })
     });
 }
 
 fn bench_market_context_analysis(c: &mut Criterion) {
-    let config = SignalConfig::default();
-    let engine = SignalEngine::new(config);
+    let context_analyzer = MarketContextAnalyzer::with_config(SignalConfig::default());
     let candles = generate_sample_candles(500);
 
     c.bench_function("market_context_analysis", |b| {
-        b.iter(|| {
-            let context_analyzer = engine.context_analyzer.clone();
-            black_box(context_analyzer.analyze_context(black_box(&candles)))
-        })
+        b.iter(|| black_box(context_analyzer.analyze_context(black_box(&candles))))
     });
 }
 

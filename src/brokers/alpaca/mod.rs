@@ -16,7 +16,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::brokers::traits::{
-    Account, Candle, MarketDataProvider, Order, OrderExecutionProvider, Position, Quote, Timeframe,
+    Account, BarAdjustment, Candle, MarketDataProvider, Order, OrderExecutionProvider, Position,
+    Quote, Timeframe,
 };
 use crate::brokers::types::{OrderId, Symbol};
 use crate::utils::errors::BrokerError;
@@ -182,11 +183,12 @@ impl MarketDataProvider for AlpacaProvider {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         timeframe: Timeframe,
+        adjustment: BarAdjustment,
     ) -> Result<Vec<Candle>, BrokerError> {
         // Historical candles come from the Market Data REST API (works
         // without a WebSocket connection)
         self.rest_client
-            .get_bars(symbol, start, end, timeframe)
+            .get_bars(symbol, start, end, timeframe, adjustment)
             .await
     }
 
