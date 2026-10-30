@@ -188,6 +188,8 @@ What NautilusTrader, QuantConnect Lean, Freqtrade, Hummingbot, Backtrader and ba
 
 ## 9. Recovery strategy
 
+> **Adopted 2026-10-30.** The executable task specs derived from this section live in `plans/recovery/` (README + one file per phase) and are indexed in `BACKLOG.md`. Decisions: one trunk (`main`), one repository with a Cargo workspace of crates, Opus 5.5 executes, `feat/close-trading-loop` merges right after B-085 fixes the `"DEFAULT"` symbol in the live path.
+
 ### 9.1 On splitting into two repositories
 
 **Recommendation: do not split the repository. Split the crate.**
