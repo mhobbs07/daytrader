@@ -1,0 +1,50 @@
+# Phase 2: Risk Engine Correctness
+
+Goal: every known defect in the risk core is fixed, each with a scenario test that publishes the real triggering event into a **started** engine with a `FixedClock`/`SteppedClock`, and a scripted-day suite that would have caught all of them.
+
+Pre-conditions: Phase 1 B-107 (risk on `dt-core`) and B-109 (clock) landed, so tests can control time. If Phase 2 is started before that, each task must inject a clock locally and the test must not depend on wall time.
+
+Line numbers below are from `staging` at `e61e85a` and will have moved; the function names will not.
+
+**Status after #30 (merged into `staging` as `bc5fd44`, verified in code 2026-10-30).** #30 fixed some of these defects without the scenario tests this phase requires. For each affected task, the work left is the test, plus anything marked "still open".
+
+| Task | Fixed by #30 | Still open on `staging` |
+|---|---|---|
+| B-123 `Lagged` | Yes. No `while let Ok(..) = recv()` remains in `risk/engine.rs`, `execution/engine.rs` or the Tauri event bridge and app tasks; `Lagged` is handled in each. | Only the overflow scenario test. |
+| B-128 daily loss | Partly. Breaches now set `is_trading_halted` and publish `TradingHalted` (`risk/engine.rs` ~517, ~556). | Commission is still added to daily P&L as profit (`update_daily_pl(fill.commission)`, ~481). Unrealized accumulation and the second halt flag were not re-checked and must be verified by the test. |
+| B-129 emergency liquidation | Partly. The false trigger and the state-lock self-deadlock are fixed; it now compares `initial_equity + daily_pl`. | The equity should come from the broker's account equity, refreshed on fill, not a derived figure. |
+| B-133 | Partly. The empty-`confidence_multipliers` index panic is gone. | `evaluator.update_pattern_status(..)` (~659) is still called without `.await`, so a Critical violation never disables the pattern. |
+| B-122 deadlock | **No.** | `evaluate_pattern_risk_on_detection` (~616) still takes write locks on both the evaluator and the stats tracker, and `evaluate_pattern_trade` still calls `stats_tracker.read()` (`pattern_limits.rs` ~464). First detected pattern hangs the risk task. |
+
+Everything else in the table below is untouched by #30 and is as described.
+
+**Shared test harness (B-121, do first):** `crates/dt-risk/tests/harness.rs` providing `RiskHarness::new(config, clock) -> (RiskEngine started, EventBus, Receiver)`, helpers `publish_pattern(symbol, pattern, confidence)`, `publish_fill(..)`, `publish_position_closed(pnl)`, `advance_to(ts)`, and `expect_violation(kind, within: Duration)` / `expect_no_violation(within)` that use `tokio::time::timeout` rather than `sleep`. Every task below uses it.
+
+| ID | Defect | Where | Fix | Proving test |
+|---|---|---|---|---|
+| B-122 | Self-deadlock: write locks on evaluator + stats tracker held while `evaluate_pattern_trade` takes `stats_tracker.read()` on the same `Arc` | `risk/engine.rs` `evaluate_pattern_risk_on_detection` (~556); `pattern_limits.rs` ~459, ~620 | Hold one lock at a time; move the stats read out of the evaluator (pass a snapshot in) or merge evaluator+stats under one `RwLock` | `publish_pattern(..)` on a started engine completes within 1 s and produces an evaluation; test fails by timeout on current code |
+| B-123 | Consumers exit on `RecvError::Lagged` | `risk/engine.rs:199`, `execution/engine.rs:272`, Tauri `events.rs:39` | `loop { match rx.recv().await { Ok(e)=>…, Err(Lagged(n))=>{warn; continue}, Err(Closed)=>break } }` | Overflow the bus (capacity 2, publish 10) then publish one more pattern; engine still evaluates it |
+| B-124 | Market orders checked against $0 notional | `orders/engine.rs` `validate_buying_power` (~359); `risk/engine.rs` TradeContext (~343) | Market order notional = qty × last quote (ask for buy, bid for sell) × (1 + buffer bps from config); reject if no quote | Market buy with no quote → rejected; with quote and insufficient buying power → rejected; sufficient → accepted |
+| B-125 | PDT off-by-one and 6-day window | `pdt.rs:~411` (`>` → `>=`), `pdt.rs:~135` (`>=` cutoff → `>` or compute window as 5 sessions via `TradingCalendar`) | As stated | Under $25k: 3 day trades allowed, 4th rejected; a day trade 5 sessions ago is outside the window, 4 sessions ago inside; across a holiday weekend |
+| B-126 | PDT and daily state keyed on UTC date | `pdt.rs:~350,397`, `risk/types.rs:~650`, `risk/engine.rs` `predicts_day_trade` | Use `TradingCalendar::session_date(clock.now())` everywhere | A buy at 19:30 ET and sell at 20:30 ET (next UTC day) counts as one day trade; a buy Mon 15:59 ET and sell Tue 09:31 ET does not |
+| B-127 | PDT state not persisted; `repository: None` always | `risk/engine.rs:~110`, `pdt.rs` constructor, `db/traits.rs` | Implement `SqlitePdtRepository` (B-066) in `dt-store`; `RiskEngine::with_database` uses it; load window on start | Restart harness with same DB: count survives; day_trades table has the row with real symbol/qty/prices |
+| B-128 | Daily loss limit never halts | `risk/engine.rs` `update_on_fill` (~462 commission sign, ~463/507 discarded evaluation), `limits.rs` unrealized accumulation, two halt flags | Commission subtracts; one `TradingHalted` state owned by `RiskState`, set from `DailyLossTracker` evaluation; unrealized is replaced not accumulated | Fills totalling −$501 with $500 limit → `RiskViolation::DailyLossLimit` and `is_trading_allowed() == false`; commission of $1 on a flat trade reduces P&L |
+| B-129 | Emergency liquidation compares daily P&L to a balance threshold; no liquidation | `risk/engine.rs:~513,578` | Compare `account_equity` (from broker, refreshed on fill) to `emergency_liquidate_threshold`; emit `EmergencyLiquidation` event; the engine (Phase 3) acts on it | Equity $499 → event; daily P&L +$10 with equity $50k → no event |
+| B-130 | Daily state never resets | `reset_daily_limits`, `should_reset_daily`, `reset_daily_counts` have no callers; `RiskState.trading_date` never rolls | On every event, if `session_date(now) != state.trading_date` → reset P&L, counts, halt (unless sticky), and persist | `advance_to` next session: halted engine trades again; pattern daily counts zero |
+| B-131 | Inverted performance multiplier | `pattern_stats.rs:~327-342` | Score ≥ 0.8 → 1.0–1.2; score < 0.3 → 0.5; monotonic increasing in score; property test | `proptest`: multiplier is non-decreasing in score and within `[min_risk_multiplier, max_risk_multiplier]` |
+| B-132 | `RiskRuleEngine` owns zero-equity copies of trackers | `risk/rules.rs:~479-499`, `risk/engine.rs:~102,158` | Rule engine borrows `Arc`s of the engine's real trackers; equity comes from the engine | Daily-loss rule rejects an order after fills pushed P&L past the limit (today it passes because its tracker is empty) |
+| B-133 | Un-awaited `update_pattern_status`; eager `confidence_multipliers[0]` index | `risk/engine.rs:~599`, `pattern_limits.rs:~448` | `.await` it; `.unwrap_or_else(|| default_multiplier())` or `first().copied()` with a typed error | Pattern with 3 consecutive losses becomes disabled and its next signal is rejected; empty multipliers config does not panic |
+| B-134 | `DashMap` `RefMut` held across `.await` | `positions/tracker.rs` three sites; `execution/engine.rs:~538` | Clone out, drop guard, await, write back under a short-lived guard, or switch the map to `tokio::sync::RwLock<HashMap>` | `loom`-style test not required; a test that runs 100 concurrent fills on 2 symbols with a slow DB stub completes within 5 s |
+| B-135 | `ExecutionEngine` re-publishes `PatternDetected` (double counting) | `execution/engine.rs:~650,673` | Publish `SignalReviewed`/`SignalAutoExecuted` variants instead | Risk engine counts one pattern per detection |
+| B-136 | Ghost orders on submit failure; lost shares on partial-then-cancel | `orders/engine.rs` `place_order` (persist/publish before submit), `orders/tracker.rs` (no event on `PartiallyFilled`, no fill on `Cancelled`) | Persist as `PendingSubmit`; on submit `Err` → `Rejected` + event + DB; emit `OrderPartiallyFilled` with the delta; on `Cancelled` carry `filled_qty` | Broker stub rejects → order `Rejected` in tracker and DB, no `pending_orders` leak; partial 40/100 then cancel → portfolio holds 40 |
+
+## B-137 Scripted-day scenario suite — agent (last)
+
+**Goal:** One integration test per scenario in `crates/dt-risk/tests/scripted_day.rs`, driven by a `SteppedClock` and a JSON/YAML script of events, asserting the exact sequence of violations and halts. Scenarios: (a) normal profitable day, (b) hits daily loss at 11:02 ET and stays halted until next session, (c) 4th day trade under $25k rejected, (d) pattern auto-disabled after 3 losses then re-enabled after cooldown, (e) DST spring-forward Sunday → Monday open, (f) holiday Friday, (g) equity drop below emergency threshold.
+**Proof:** all scenarios pass; mutating any one of the B-122…B-136 fixes back to the old behaviour makes at least one scenario fail (do this manually once and record which scenario caught which bug in the PR body).
+
+## Phase 2 exit checklist
+
+- [ ] B-121 harness; B-122…B-136 each merged with its proving test
+- [ ] B-137 scripted-day suite green and demonstrably sensitive to each bug
+- [ ] No `TODO`/"placeholder"/"for now" comments remain in `dt-risk` (`grep -rn "placeholder\|for now\|TODO" crates/dt-risk/src` empty)

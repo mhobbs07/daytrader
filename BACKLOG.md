@@ -1,6 +1,6 @@
 # DayTrader Agent Backlog
 
-Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-07-06-gap-analysis-and-backlog-completion-strategy.md`; all Critical/High and implementable Medium tasks Done; remaining: 6 Medium follow-ups, 8 Low enhancements, B-061 blocked on human decision, MCP track deferred)
+Last Updated: 2026-10-30 (Recovery Program adopted — see `plans/recovery/README.md` and `reports/honest-assessment-2026-10-30.md`. Feature freeze until Phase 0 exits. Task specs live in `plans/recovery/phase-*.md`; the rows below are the index.)
 
 ## Rules
 1. Every agent session MUST claim a task before starting work (or create a new one)
@@ -20,7 +20,54 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 ---
 
-## Pending Tasks
+## Recovery Program (supersedes the priority tiers below until Phase 2 exits)
+
+Specs: `plans/recovery/`. State as of 2026-10-30: #29 (close the trading loop), #32 (B-085, symbol fix), #30 (risk bug fixes) and #34 (B-087, one-trunk governance) are merged into `staging`. Still open: this plan (#31). Then B-086 (human), then Phase 0 continues with B-088. Close #6 as superseded.
+
+### Phase 0: Truth and Build (`plans/recovery/phase-0-truth-and-build.md`)
+
+| ID | Task | Who | Size | Status |
+|----|------|-----|------|--------|
+| B-085 | Fix hardcoded `"DEFAULT"` signal symbol in the live signal path (derive from candle window, reject mixed-symbol windows, drop backtester stamp) — PR into `feat/close-trading-loop` | agent | S | Done 2026-10-30 — PR #32 merged into `staging` |
+| B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Pending |
+| B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Done 2026-10-30 — PR #34 merged into `staging` |
+| B-088 | Hermetic sqlx build: commit `.sqlx/` + `Cargo.lock`, `SQLX_OFFLINE=true` everywhere, `setup_db.sh` without `sqlite3` CLI, `create_if_missing`, pragmas via `SqliteConnectOptions` | agent | M | Pending |
+| B-089 | CI mirrors verify script, runs on every PR and trunk push, includes Tauri + frontend, no excused failures; delete `known_test_issues.txt` escape hatch | agent | M | Pending |
+| B-090 | Clippy `-D warnings` clean: `utils`, `brokers`, `config`, `data` | agent | M | Pending |
+| B-091 | Clippy `-D warnings` clean: `events`, `db` | agent | M | Pending |
+| B-092 | Clippy `-D warnings` clean: `patterns` | agent | M | Pending |
+| B-093 | Clippy `-D warnings` clean: `risk` (split by file) | agent | M | Pending |
+| B-094 | Clippy `-D warnings` clean: `orders`, `positions`, `execution`, Tauri, tests, benches; deny `unwrap_used`/`expect_used` in non-test code; flip CI + local to `-D warnings` | agent | M | Pending |
+| B-095 | Delete dead code (`retry.rs`, `SignalStreamingPipeline`, `MigrationManager` + `migrations/`, `OrderRepository`, …) and 15 unused dependencies | agent | M | Pending |
+| B-096 | Fix or delete benches so `cargo bench --no-run` compiles | agent | S | Pending |
+| B-097 | `config/default.toml` loads completely (`risk.*` nesting, `deny_unknown_fields`, real assertions in `config_validation`) | agent | S | Pending |
+| B-098 | Documents tell the truth: `STATUS.md`, archive `plans/` + phase reports to `docs/history/`, fix README/onboarding, delete `IMPORTANT-CARGO-FIX.md`/`cargo.sh` | agent | M | Pending |
+| B-081 | (existing) 27 `#[ignore]`d tests pass or are deleted with reasons | agent | M | Pending |
+
+### Phase 1: Canonical model and workspace (`plans/recovery/phase-1-core-and-workspace.md`)
+
+| ID | Task | Who | Size | Status |
+|----|------|-----|------|--------|
+| B-101 | Design and land `crates/dt-core` (one definition per domain type, `Clock`, `TradingCalendar`, typed errors), merged unused | **[design]** | L | Pending (blocked on Phase 0 exit) |
+| B-102–B-108 | Migrate `brokers`, `events`, `patterns`, `positions`, `orders`, `risk`, `execution`+`db`+Tauri onto `dt-core`, one PR each, deleting local types and converters | agent | M each | Pending |
+| B-109 | Thread `Clock` everywhere; CI grep forbids `Utc::now()` outside `SystemClock` | agent | M–L | Pending |
+| B-110–B-117 | Split into workspace crates bottom-up (`dt-broker`, `dt-alpaca`, `dt-strategy`, `dt-risk`, `dt-store`, `dt-engine`, `dt-backtest`, `dtctl`); delete `verify_architecture.sh` and per-module `CLAUDE.md` | agent | M each | Pending |
+
+### Phase 2: Risk correctness (`plans/recovery/phase-2-risk-correctness.md`)
+
+| ID | Task | Who | Size | Status |
+|----|------|-----|------|--------|
+| B-121 | Risk test harness (started engine + injected clock + timeout-based expectations) | agent | S | Pending |
+| B-122–B-136 | One defect each: deadlock, `Lagged`, market-order notional, PDT off-by-one/window/UTC date/persistence, daily-loss wiring + commission sign + single halt, emergency threshold semantics, daily reset, inverted multiplier, rule engine sharing real trackers, un-awaited call + eager index, guards across `.await`, `PatternDetected` re-publish, ghost orders + partial-then-cancel | agent | S–M each | Pending |
+| B-137 | Scripted-day scenario suite demonstrably sensitive to each fix | agent | M | Pending |
+
+### Phases 3–5 (`plans/recovery/phase-3-to-5-outline.md`)
+
+Outlined only. A **[design]** task writes their specs when Phase 2 exits. B-066 (SQLite PDT repository) is absorbed into B-127; B-067 (Quote unification) into B-102/B-103; B-070 (architecture reconciliation) into B-110–B-117; B-074 into B-090–B-094; B-075 into B-088/B-089; B-061 (emergency liquidation) into B-129 + Phase 3.
+
+---
+
+## Pending Tasks (pre-recovery tiers, kept for reference)
 
 ### Priority: Medium (Quality & Completeness)
 
