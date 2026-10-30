@@ -163,27 +163,29 @@ impl Database {
     /// rows are labelled `raw`. The rebuild runs in one transaction, so an
     /// interruption cannot leave the database without a `candles` table. The
     /// check is by column presence, not a version record, so databases that
-    /// already have the column are never rebuilt.
+    /// already have the column are never rebuilt. The check runs inside a
+    /// `BEGIN IMMEDIATE` transaction, which takes the write lock first, so two
+    /// processes opening the same legacy file cannot both rebuild it.
     async fn upgrade_legacy_candles(&self) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let has_candles: Option<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'candles'",
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if has_candles.is_none() {
-            return Ok(());
+            return tx.commit().await;
         }
         let adjustment_columns: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pragma_table_info('candles') WHERE name = 'adjustment'",
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
         if adjustment_columns > 0 {
-            return Ok(());
+            return tx.commit().await;
         }
 
         tracing::info!("Upgrading pre-adjustment candles table in place");
-        let mut tx = self.pool.begin().await?;
         sqlx::query(
             "CREATE TABLE candles_upgraded (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -359,17 +361,15 @@ mod tests {
         db.close().await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_new_legacy_candles_table_upgrades_in_place() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("legacy.db");
-
-        // A database created before corporate-action adjustment: `candles` has
-        // no `adjustment` column, so schema.sql's new index cannot be built.
+    /// Creates a database as it was before corporate-action adjustment:
+    /// `candles` has no `adjustment` column, so schema.sql's new index cannot
+    /// be built on it. Holds one raw AAPL bar.
+    async fn create_legacy_candles_db(db_path: &Path) -> SqlitePool {
         let legacy = SqlitePool::connect_with(
             SqliteConnectOptions::new()
-                .filename(&db_path)
-                .create_if_missing(true),
+                .filename(db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal),
         )
         .await
         .unwrap();
@@ -390,7 +390,14 @@ mod tests {
         .execute(&legacy)
         .await
         .unwrap();
-        legacy.close().await;
+        legacy
+    }
+
+    #[tokio::test]
+    async fn test_new_legacy_candles_table_upgrades_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("legacy.db");
+        create_legacy_candles_db(&db_path).await.close().await;
 
         let db = Database::new(&db_path).await.unwrap();
         let (symbol, adjustment): (String, String) =
@@ -409,6 +416,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 1);
+        db.close().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_new_legacy_upgrade_waits_for_concurrent_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("legacy.db");
+        let other = create_legacy_candles_db(&db_path).await;
+
+        // Another process is mid-upgrade: it holds the write lock, has added
+        // the column and written a split-adjusted bar, and has not committed.
+        let mut tx = other.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("ALTER TABLE candles ADD COLUMN adjustment TEXT NOT NULL DEFAULT 'raw'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO candles (symbol, timestamp, open, high, low, close, volume, broker, adjustment) \
+             VALUES ('AAPL', '2026-01-05 14:30:00', 25.0, 25.5, 24.5, 25.1, 4000, 'alpaca', 'split')",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        let path = db_path.clone();
+        let opening = tokio::spawn(async move { Database::new(&path).await });
+        // Let the open reach the upgrade check while the writer is uncommitted.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        tx.commit().await.unwrap();
+        other.close().await;
+
+        let db = opening.await.unwrap().unwrap();
+        let adjustment: String = sqlx::query_scalar(
+            "SELECT adjustment FROM candles WHERE timestamp = '2026-01-05 14:30:00'",
+        )
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            adjustment, "split",
+            "an upgrade that already happened must not be redone and relabel rows"
+        );
         db.close().await.unwrap();
     }
 }

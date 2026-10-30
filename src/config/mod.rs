@@ -133,7 +133,12 @@ pub enum RiskConfigError {
     /// A numeric field is finite but too large for `Decimal`, which every
     /// limit is converted to downstream.
     #[error("risk config field `{field}` is out of range, got {value}")]
-    NotRepresentable { field: &'static str, value: f64 },
+    NotRepresentable {
+        /// Name of the offending field.
+        field: &'static str,
+        /// The value that could not be converted.
+        value: f64,
+    },
 
     /// A dollar amount that must be strictly positive was zero or negative.
     #[error("risk config field `{field}` must be > 0, got {value}")]
