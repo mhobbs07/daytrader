@@ -65,6 +65,8 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Exit:** as Proof.
 **Size:** M.
 
+**Added by the plan merge (roadmap R0.5, B-206):** CI also runs `cargo sqlx prepare --check` (the local script already does, since B-088), `cargo deny check` (advisories and licences) and `cargo machete` (unused dependencies). The `std::sync` production-safety baseline becomes a hard zero: `tokio::sync::RwLock` where a critical section awaits, `std::sync::OnceLock`/`LazyLock` for initialise-once data such as `utils/holidays.rs`. Since #39 the verify script matches known failures by test name instead of count; this task still deletes the escape hatch entirely.
+
 ## B-090 … B-094 Clippy to zero under `-D warnings` — agent, one PR per module group, parallelisable
 
 **Goal:** `cargo clippy --workspace --all-targets -- -D warnings` is clean.
@@ -87,11 +89,12 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Goal:** Nothing in the tree is unreachable from a binary, a test, or a public API that something uses.
 **Files:** `Cargo.toml`, `src/utils/retry.rs` (delete), `src/utils/mod.rs`, `src/patterns/streaming.rs` (`SignalStreamingPipeline` and its tests), `src/db/migrations.rs` (delete), `migrations/` (delete), `src/db/repositories.rs` (`OrderRepository`, `update_order`), `src/db/mod.rs`, `src/orders/types.rs` (`OrderEvent`, `OrderMetrics`), `src/utils/errors.rs` (`rusqlite` variant), `tests/database_integration.rs` (delete; it tests nothing real), `src/brokers/mock.rs` (`parking_lot` → `tokio::sync`).
 **Dependencies to remove** (verified zero uses 2026-10-30): `crossbeam`, `tower`, `keyring`, `once_cell`, `sha2`, `url`, `tracing-appender`, `metrics-exporter-prometheus`, `ta`, `tokio-retry`, `rusqlite`, `parking_lot`, `lazy_static` (replace 3 uses with `std::sync::LazyLock`), `log` (switch `websocket.rs` to `tracing`), `futures-util` (use `futures`).
+**Also from roadmap R0.6 (B-208):** replace `lazy_static` with `LazyLock`, `num_cpus` with `std::thread::available_parallelism`, and move the two `statistical` uses into `src/utils/stats.rs` (Phase 4 needs it for metrics). Version upgrades (reqwest, tokio-tungstenite, thiserror 2, sqlx 0.9, rand, metrics) are **not** part of B-095; they stay B-208 and run after Phase 0 exits, each as its own PR.
 **Decision needed in the PR:** `src/data/` is unused. Keep it only if Phase 3 will adopt `DataIngestionPipeline` as the market-data ingress; otherwise delete. Recommendation: keep `validation.rs`, delete `cache.rs` and `storage.rs` (duplicates), decide `ingestion.rs` in Phase 3.
 **Proof:** `cargo udeps` (or `cargo machete`) reports nothing; `cargo test --workspace` passes; `cargo build --release` passes.
 **Size:** M (deletions).
 
-## B-096 Fix or delete the benches — agent
+## B-096 Fix or delete the benches — agent — **Done** (B-221, landed by #39)
 
 **Goal:** `cargo bench --no-run` compiles.
 **Files:** `benches/*.rs`, `Cargo.toml` `[[bench]]` entries.
@@ -99,7 +102,7 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Proof:** `cargo bench --no-run` exits 0; `cargo clippy --benches -- -D warnings` clean.
 **Size:** S–M.
 
-## B-097 Fix `config/default.toml` so it loads completely — agent
+## B-097 Fix `config/default.toml` so it loads completely — agent — **partly done** by B-205 (#39): `RawRiskConfig` → `TryFrom` → `RiskConfig` rejects invalid and all-zero limits. Still open: the `risk.*` nesting of `pattern_profiles` / `confidence_multipliers` / `pattern_performance_thresholds`, `deny_unknown_fields` on the top-level config, and count assertions in `config_validation`
 
 **Goal:** `AppConfig::load_default()` succeeds and `risk.pattern_profiles`, `risk.confidence_multipliers`, `risk.pattern_performance_thresholds` are populated from the file.
 **Files:** `config/default.toml`, `src/config/mod.rs`, `tests/config_validation.rs`.
@@ -119,13 +122,13 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 
 ## Phase 0 exit checklist
 
-- [ ] B-086 trunk consolidated, `staging` deleted
-- [ ] B-087 no references to `staging` outside history
-- [ ] B-088 clean clone builds with `SQLX_OFFLINE=true`, `.sqlx/` and `Cargo.lock` committed
-- [ ] B-089 CI runs on every PR; local script == CI; no excused failures
+- [x] B-086 trunk consolidated, `staging` deleted
+- [x] B-087 no references to `staging` outside history
+- [x] B-088 clean clone builds with `SQLX_OFFLINE=true`, `.sqlx/` and `Cargo.lock` committed
+- [ ] B-089 CI runs on every PR; local script == CI; no excused failures; `cargo deny` and `cargo machete` in CI; `std::sync` count zero
 - [ ] B-090–B-094 `cargo clippy --workspace --all-targets -- -D warnings` clean; `unwrap_used`/`expect_used` denied in non-test code
 - [ ] B-095 dead code and 15 unused dependencies gone
-- [ ] B-096 benches compile
+- [x] B-096 benches compile (B-221)
 - [ ] B-097 config loads completely
 - [ ] B-098 `STATUS.md` exists; old plans archived
 - [ ] B-081 (existing) 27 ignored tests pass or are deleted with reasons

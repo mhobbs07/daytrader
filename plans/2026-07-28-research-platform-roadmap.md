@@ -1,5 +1,8 @@
 # DayTrader → Research-Grade Platform
 
+> **Merged 2026-10-30 into `plans/recovery/README.md`.** That file now decides order, scope and task IDs; this document remains the design reference for the R0–R5 and L items. Its R0 items were either landed by #39 (R0.1, R0.3, R0.4) or folded into recovery Phases 0 and 1 (R0.2, R0.5, R0.6); R0.7 and R1 are Phase 4, ending at the Go/No-Go checkpoint; R2–R5 are Phase 5; Phase L is unchanged. Task IDs from the sweep branch were renumbered B-201 to B-221 (table in `BACKLOG.md`). Decision since: money is `INTEGER` micros, as R0.2 proposed.
+
+
 ## Context
 
 `daytrader` is a ~40k-LOC Rust workspace (root crate + Tauri 2 desktop app) that already has more working machinery than most projects of its age: 9 real candlestick detectors, Decimal-based indicators, a signal composer, a risk engine with PDT/pattern limits, an order engine, a position tracker with FIFO lots, a genuine Alpaca REST+WebSocket client, and — unusually — an event-driven backtester (`src/execution/backtest.rs`) that replays candles through the *real* production pipeline rather than a parallel simulator.
