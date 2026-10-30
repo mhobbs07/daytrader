@@ -22,7 +22,7 @@ Last Updated: 2026-10-30 (Recovery Program adopted — see `plans/recovery/READM
 
 ## Recovery Program (supersedes the priority tiers below until Phase 2 exits)
 
-Specs: `plans/recovery/`. State as of 2026-10-30: #29 (close the trading loop) and #32 (B-085, symbol fix) are merged into `staging`. Still open and needed on `staging` before B-086: #30 (risk bug fixes; its only conflict with `staging` was `BACKLOG.md`, resolved by merging `staging` into its branch), #34 (B-087), and this plan (#31). Then B-086, then Phase 0 continues. Close #6 as superseded.
+Specs: `plans/recovery/`. State as of 2026-10-30: #29 (close the trading loop), #32 (B-085, symbol fix), #30 (risk bug fixes) and #34 (B-087, one-trunk governance) are merged into `staging`. Still open: this plan (#31). Then B-086 (human), then Phase 0 continues with B-088. Close #6 as superseded.
 
 ### Phase 0: Truth and Build (`plans/recovery/phase-0-truth-and-build.md`)
 
@@ -30,7 +30,7 @@ Specs: `plans/recovery/`. State as of 2026-10-30: #29 (close the trading loop) a
 |----|------|-----|------|--------|
 | B-085 | Fix hardcoded `"DEFAULT"` signal symbol in the live signal path (derive from candle window, reject mixed-symbol windows, drop backtester stamp) — PR into `feat/close-trading-loop` | agent | S | Done 2026-10-30 — PR #32 merged into `staging` |
 | B-086 | Consolidate to one trunk: fast-forward `staging` into `main`, protect `main`, delete `staging` and stale branches, close #6 | human | S | Pending |
-| B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Done 2026-10-30 — PR #34 (`chore/b087-one-trunk-governance`), awaiting merge into `staging` before B-086 |
+| B-087 | Update governance (CLAUDE.md, rules, skills, workflows, docs) for one trunk; `/promote-to-staging` → `/promote` | agent | M | Done 2026-10-30 — PR #34 merged into `staging` |
 | B-088 | Hermetic sqlx build: commit `.sqlx/` + `Cargo.lock`, `SQLX_OFFLINE=true` everywhere, `setup_db.sh` without `sqlite3` CLI, `create_if_missing`, pragmas via `SqliteConnectOptions` | agent | M | Pending |
 | B-089 | CI mirrors verify script, runs on every PR and trunk push, includes Tauri + frontend, no excused failures; delete `known_test_issues.txt` escape hatch | agent | M | Pending |
 | B-090 | Clippy `-D warnings` clean: `utils`, `brokers`, `config`, `data` | agent | M | Pending |
