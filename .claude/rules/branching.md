@@ -5,23 +5,24 @@ paths:
 
 # Git Branching Model
 
+One trunk. `main` is the only long-lived branch; there is no integration branch.
+
 ## Branch Hierarchy
 
 ```
-main              Protected. Production-ready code. Requires PR + review.
-  └─ staging      Integration branch. PRs from feature branches land here.
-       └─ feat/*  Feature branches. Created per-task or per-swarm.
-       └─ fix/*   Bug fix branches.
-       └─ refactor/*  Refactoring branches.
+main                       Protected. The only long-lived branch. Requires PR + green CI.
+  └─ <type>/<id>-<slug>    One branch per backlog task, cut from main.
+       └─ worktree branches  Parallel agent work, merged into the task branch.
 ```
 
 ## Rules
 
-1. **Never commit directly to `main` or `staging`.** All changes go through PRs.
-2. **Feature branches target `staging`**, not `main`. Use `/promote-to-staging` to create the PR.
-3. **`staging` is merged to `main`** only after integration testing passes. This is a manual/human decision.
-4. **Feature branches are deleted after merge** to keep the repo clean.
-5. **Swarm worktree branches** merge to their parent feature branch, NOT to staging directly.
+1. **Never commit directly to `main`.** All changes go through PRs.
+2. **Every PR targets `main`.** Use `/promote` to create it.
+3. **Merging the PR is the release.** There is no staging step.
+4. **Task branches are deleted after merge** to keep the repo clean.
+5. **Swarm worktree branches** merge to their parent task branch, NOT to `main` directly.
+6. **One logical task per branch and per PR.** Do not mix unrelated changes.
 
 ## Branch Naming (advisory)
 
@@ -30,19 +31,24 @@ no CI or hook validation of branch names (a stale `branch-naming.yml` workflow
 that enforced a different scheme was removed 2026-07-07 by owner decision —
 do not reintroduce enforcement).
 
+Preferred form is `<type>/<id>-<slug>`, where `<id>` is the BACKLOG task id in
+lowercase without the hyphen (`B-085` becomes `b085`) and `<slug>` is a few
+lowercase words joined by hyphens.
+
 | Type | Pattern | Example |
 |------|---------|---------|
-| Feature | `feat/<name>` | `feat/order-history` |
-| Bug fix | `fix/<name>` | `fix/pdt-calculation` |
-| Refactor | `refactor/<name>` | `refactor/risk-engine` |
-| Test | `test/<name>` | `test/pattern-coverage` |
-| Docs | `docs/<name>` | `docs/api-reference` |
+| Feature | `feat/<id>-<slug>` | `feat/b130-order-history` |
+| Bug fix | `fix/<id>-<slug>` | `fix/b085-signal-symbol` |
+| Refactor | `refactor/<id>-<slug>` | `refactor/b107-risk-on-core` |
+| Chore (CI, docs, tooling) | `chore/<id>-<slug>` | `chore/b087-one-trunk-governance` |
+| Test | `test/<id>-<slug>` | `test/b137-scripted-day` |
+| Docs | `docs/<id>-<slug>` | `docs/b098-status` |
 | Worktree (auto) | `claude/<worktree-name>` | `claude/interesting-neumann` |
 
 ## Push Rules
 
-- **Never force-push** to `main`, `staging`, or shared feature branches
-- **Force-push is acceptable** only on your own unshared worktree branches
+- **Never force-push** to `main` or shared task branches
+- **Force-push is acceptable** only on your own unshared branches, and then only with `--force-with-lease`
 - **Always use `git push -u origin <branch>`** for first push to set tracking
 
 ## PR Requirements
@@ -50,4 +56,4 @@ do not reintroduce enforcement).
 - PR title follows conventional commit format
 - PR body includes: summary, verification status, modules changed
 - All CI checks must pass before merge
-- Feature PRs target `staging`, not `main`
+- PRs target `main`

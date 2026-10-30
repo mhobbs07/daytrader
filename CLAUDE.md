@@ -125,7 +125,7 @@ Max 72 chars in subject line, lowercase, no trailing period
 - `/architecture-audit` — Audit boundaries, report violations, optionally fix
 - `/backlog-task <id|next>` — Pick up and complete a backlog task end-to-end
 - `/swarm <feature> <description>` — Orchestrate parallel worktree agents across layers
-- `/promote-to-staging <branch> [--auto-merge]` — Verify, push, and PR a feature branch to staging
+- `/promote <branch> [--auto-merge]` — Verify, push, and PR a branch to `main`
 - `/code-review [branch|PR|--staged]` — Review changes for architecture, safety, and compliance
 - `/api-contract <feature> [--generate|--verify]` — Define/verify shared type contracts between layers
 
@@ -168,26 +168,25 @@ See `.claude/rules/agent-models.md` for full policy. Maximum 4 concurrent agents
 
 ---
 
-## Git Branching & Staging Workflow
+## Git Branching Workflow (one trunk)
 
 ```
-main              ← production (protected, PR + review required)
-  └─ staging      ← integration testing (PRs from feature branches)
-       └─ feat/*  ← feature work (from /swarm or direct development)
-            └─ worktree branches  ← parallel agent work (merged to feat/)
+main                       <- the only long-lived branch (protected: PR + green CI required)
+  `- <type>/<id>-<slug>    <- one branch per backlog task, e.g. fix/b085-signal-symbol
+       `- worktree branches <- parallel agent work (merged into the task branch)
 ```
 
 ### Flow
-1. Work happens on `feat/<name>` branches (created by `/backlog-task` or `/swarm`)
-2. When a feature is ready, use `/promote-to-staging <branch>` to:
+1. Work happens on `<type>/<id>-<slug>` branches cut from `main` (created by `/feature-branch`, `/backlog-task` or `/swarm`)
+2. When the work is ready, use `/promote <branch>` to:
    - Run full verification
-   - Rebase on staging
-   - Push and create a PR targeting `staging`
+   - Rebase on `main`
+   - Push and create a PR targeting `main`
    - Optionally auto-merge with `--auto-merge`
-3. `staging -> main` promotion is a human decision after integration testing
+3. Merging the PR to `main` is the release. There is no integration branch.
 
 ### Rules
-- Never commit directly to `main` or `staging`
-- Feature branches target `staging`, not `main`
-- Never force-push to `main` or `staging`
+- Never commit directly to `main`
+- Every PR targets `main`
+- Never force-push `main`
 - See `.claude/rules/branching.md` for full policy

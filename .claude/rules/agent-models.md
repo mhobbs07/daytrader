@@ -18,7 +18,7 @@ When spawning subagents with the Agent tool, you MUST assign models based on tas
 
 1. **Default to `sonnet`.** It is the cheapest model approved for subagent work in this project.
 2. **Never use `opus` for subagents** unless the task requires deep architectural reasoning across multiple modules.
-3. **`haiku` is prohibited.** Do not pass `model="haiku"` to the Agent tool. Past haiku agents bypassed `isolation: "worktree"` and committed directly to shared branches (e.g., `staging`), violating branching rules and requiring manual cleanup.
+3. **`haiku` is prohibited.** Do not pass `model="haiku"` to the Agent tool. Past haiku agents bypassed `isolation: "worktree"` and committed directly to the shared integration branch, violating branching rules and requiring manual cleanup.
 4. **Maximum 4 concurrent agents** to keep total token spend bounded.
 5. When using `/swarm`, follow the model assignments in the swarm skill definition.
 

@@ -57,6 +57,10 @@ type(scope): description
 ```
 Types: feat, fix, docs, refactor, test, chore, perf. Max 72 chars subject line.
 
+## Git Workflow
+
+One trunk: `main` is the only long-lived branch. Cut a `<type>/<id>-<slug>` branch from `main` for each BACKLOG task, open a PR that targets `main`, and merge it only when CI is green. Never commit to `main` directly and never force-push it. Full policy: `.claude/rules/branching.md`.
+
 ## For Claude Code Users
 
 See `CLAUDE.md` for full governance rules, hooks, skills, and swarm orchestration.

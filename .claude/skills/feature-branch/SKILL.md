@@ -13,19 +13,20 @@ Status: `!git status --short | head -5`
 
 ## Steps
 
-1. Determine branch type from the work description:
-   - `feat/<name>` — New features
-   - `fix/<name>` — Bug fixes
-   - `refactor/<name>` — Code restructuring
-   - `chore/<name>` — Maintenance, CI, docs, tooling
-   - `test/<name>` — Test additions/improvements
-   - `perf/<name>` — Performance improvements
+1. Determine branch type from the work description. Prefer `<type>/<id>-<slug>`
+   where `<id>` is the BACKLOG task id (`B-085` -> `b085`) when one exists:
+   - `feat/<id>-<slug>` — New features
+   - `fix/<id>-<slug>` — Bug fixes
+   - `refactor/<id>-<slug>` — Code restructuring
+   - `chore/<id>-<slug>` — Maintenance, CI, docs, tooling
+   - `test/<id>-<slug>` — Test additions/improvements
+   - `perf/<id>-<slug>` — Performance improvements
 
 2. Stash or commit any uncommitted work on the current branch
 
-3. Switch to `staging` and pull latest:
+3. Switch to `main` and pull latest:
    ```bash
-   git checkout staging && git pull origin staging
+   git checkout main && git pull origin main
    ```
 
 4. Create the feature branch:
@@ -40,6 +41,6 @@ Status: `!git status --short | head -5`
 
 ## Rules
 - Branch names: lowercase, hyphens only, max 50 chars
-- NEVER branch directly from `main` — always from `staging`
-- NEVER commit directly to `staging` or `main`
+- ALWAYS branch from an up-to-date `main`
+- NEVER commit directly to `main`
 - Reference: `.claude/rules/branching.md`

@@ -200,8 +200,9 @@ The Day Trading Platform is a high-performance system for automated pattern-base
 We follow a structured Git workflow with feature branches and pull requests:
 
 ```bash
-# Create feature branch
-git checkout -b feature/add-new-pattern
+# Create a task branch from main (<type>/<id>-<slug>)
+git checkout main && git pull origin main
+git checkout -b feat/b130-add-new-pattern
 
 # Make changes with descriptive commits
 git add src/patterns/
@@ -212,16 +213,21 @@ git commit -m "feat: add morning star pattern detection
 - Include comprehensive tests"
 
 # Push and create PR
-git push origin feature/add-new-pattern
+git push -u origin feat/b130-add-new-pattern
 ```
 
 ### Branch Naming Convention
 
-- `feature/description`: New features
-- `bugfix/description`: Bug fixes
-- `refactor/description`: Code refactoring
-- `docs/description`: Documentation updates
-- `test/description`: Test improvements
+Branches are cut from `main` and every PR targets `main` (see
+`.claude/rules/branching.md`). Preferred form is `<type>/<id>-<slug>`, where
+`<id>` is the BACKLOG task id in lowercase (`B-085` becomes `b085`):
+
+- `feat/<id>-<slug>`: New features
+- `fix/<id>-<slug>`: Bug fixes
+- `refactor/<id>-<slug>`: Code refactoring
+- `chore/<id>-<slug>`: CI, tooling, maintenance
+- `docs/<id>-<slug>`: Documentation updates
+- `test/<id>-<slug>`: Test improvements
 
 ### Pull Request Process
 

@@ -122,7 +122,7 @@ Authoritative task tracking lives in `BACKLOG.md`.
 - [Deployment](docs/deployment.md)
 
 ### Workflow
-- [Git Workflow Rules](plans/git-workflow-rules.md)
+- [Git Branching Rules](.claude/rules/branching.md)
 - [CI/CD Setup Guide](docs/ci-cd-setup-guide.md)
 
 ## License
