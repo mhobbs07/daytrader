@@ -57,11 +57,11 @@ Order: B-086 and B-087 first (they change where PRs go). B-088 and B-089 next (t
 **Files:** `.github/workflows/ci.yml`, `.github/workflows/docs.yml` (delete; fold into ci), `.gitlab-ci.yml` (delete), `scripts/verify_agent_work.sh`, `.governance/known_test_issues.txt` (delete), `deny.toml` (new). `.governance/production_safety_baseline.txt` stays as the ratchet until B-094 deletes it.
 **Steps:**
 1. `ci.yml` `on:` = `pull_request:` (all branches) + `push: branches: [main]`. Remove `develop`.
-2. Jobs: `fmt` (`cargo fmt --all -- --check`), `clippy` (`cargo clippy --workspace --all-targets -- -D warnings`), `test` (`cargo test --workspace`, then `cargo test --workspace --features mock`), `doc` (`RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps`), `tauri-check` (`apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev ...` then `cargo check -p daytrader-app`), `frontend` (`npm ci && npm run build` in `daytrader/`), `governance` (`verify_architecture.sh`, `verify_test_quality.sh` until Phase 1 deletes them). `SQLX_OFFLINE=true` in `env:` at the top.
+2. Jobs: `fmt` (`cargo fmt --all -- --check`), `clippy` (`cargo clippy --workspace --all-targets`, warn-only per step 5 until B-094 flips it), `test` (`cargo test --workspace`, then `cargo test --workspace --features mock`), `doc` (`RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps`), `tauri-check` (`apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev ...` then `cargo check -p daytrader-app`), `frontend` (`npm ci && npm run build` in `daytrader/`), `governance` (`verify_architecture.sh`, `verify_test_quality.sh` until Phase 1 deletes them). `SQLX_OFFLINE=true` in `env:` at the top.
 3. Remove `cargo test --test integration` (the target does not exist). Remove `continue-on-error` everywhere except the optional coverage upload.
 4. Make `verify_agent_work.sh` call the same commands in the same order. Delete the "known failures ≤ N" branch (lines ~112–145) and the `.governance/known_test_issues.txt` file; the 27 `#[ignore]` tests are tracked by B-081 and must either pass or be deleted with a reason in the PR.
 5. Clippy stays warn-only locally **until** B-090–B-094 land, then B-094's last step flips both CI and local to `-D warnings` together.
-**Proof:** a PR touching only a comment gets a full green run; a PR introducing one `unused variable` goes red in `clippy`.
+**Proof:** a PR touching only a comment gets a full green run on every job. (The "one `unused variable` goes red in `clippy`" proof belongs to B-094, which flips clippy to `-D warnings`; a warn-only clippy job cannot pass it.)
 **Exit:** as Proof.
 **Size:** M.
 
@@ -85,7 +85,7 @@ Two R0.5 items are scheduled elsewhere so that no PR goes red on work another ta
 | B-094 | `src/orders/**`, `src/positions/**`, `src/execution/**`, `src/lib.rs`, `src/main.rs`, `daytrader/src-tauri/src/**`, `tests/**`, `benches/**`, `examples/**`; then flip CI + verify script to `-D warnings`. Also the `std::sync` hard zero: `src/utils/holidays.rs`, `daytrader/src-tauri/src/{state,events,main}.rs`, `clippy.toml` (new), `scripts/verify_agent_work.sh`, and delete `.governance/production_safety_baseline.txt` | same, then full. The `std::sync` zero is enforced by clippy, not grep: `clippy.toml` sets `disallowed-types = ["std::sync::Mutex", "std::sync::RwLock"]`, which resolves grouped (`use std::sync::{Arc, RwLock}`) and aliased imports. Prove it by adding one `std::sync::Mutex` locally and seeing `clippy::disallowed_types` fail |
 
 **Rules:** behaviour-preserving only; if a lint reveals a real bug (e.g. an unused `Result`), do not fix the bug here: add a BACKLOG row referencing Phase 2 and apply the minimal `let _ =` with a `// B-1xx` comment. No new `allow` attributes on items without a PR-description justification.
-**Proof:** the group's grep count is 0; `cargo test --workspace` unchanged (same pass count as before the PR).
+**Proof:** the group's grep count is 0; `cargo test --workspace` unchanged (same pass count as before the PR). B-094 additionally proves the `-D warnings` flip it performs (moved here from B-089): a PR introducing one `unused variable` goes red in `clippy`, in CI and in `verify_agent_work.sh`.
 **Size:** M each (split further if a group exceeds 300 lines; `src/risk` probably will: split by file).
 
 ## B-095 Delete dead code and unused dependencies — agent

@@ -156,7 +156,7 @@ Costs are controlled by assigning models based on task complexity:
 |------------|-------|-----------|
 | Orchestrator | opus | High (only for coordination) |
 | Backend / DB agents | sonnet | Medium |
-| Frontend / Test agents | haiku | Low |
+| Frontend / Test agents | sonnet | Medium |
 
 See `.claude/rules/agent-models.md` for full policy. Maximum 4 concurrent agents.
 

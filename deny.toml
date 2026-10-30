@@ -1,0 +1,65 @@
+# cargo-deny configuration (B-089).
+# CI and scripts/verify_agent_work.sh run `cargo deny check` as the
+# advisories/licences gate. Every ignored advisory below names the backlog
+# task whose landing removes it; an ignore with no live task is a bug.
+
+[graph]
+all-features = true
+
+[advisories]
+# Fetch the advisory DB with the git CLI so proxies and credential helpers
+# that git already knows about keep working.
+git-fetch-with-cli = true
+ignore = [
+    # --- Fixed by the B-208 dependency upgrades (reqwest 0.11 -> current,
+    # tokio-tungstenite, config). These chains vanish when B-208 lands.
+    { id = "RUSTSEC-2026-0258", reason = "h2 < 0.4.16; fixed by the B-208 dependency upgrades" },
+    { id = "RUSTSEC-2026-0346", reason = "rustls 0.21/0.22 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0349", reason = "rustls 0.21/0.22 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.101/0.102 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.101/0.102 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101/0.102 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101/0.102 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0382", reason = "rustls-webpki 0.101/0.102 via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2026-0381", reason = "webpki-roots < 1.0.10 via reqwest 0.11/tokio-tungstenite; gone after the B-208 upgrades" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained, via reqwest 0.11; gone after the B-208 reqwest upgrade" },
+    { id = "RUSTSEC-2024-0320", reason = "yaml-rust unmaintained, via config 0.13; B-208 upgrades config" },
+    # --- Removed by the B-095 dependency deletions.
+    { id = "RUSTSEC-2024-0384", reason = "instant unmaintained, wasm-only dependency of parking_lot/fastrand 1.x; B-095 removes parking_lot" },
+    { id = "RUSTSEC-2024-0388", reason = "derivative unmaintained, via keyring (zbus); B-095 removes keyring" },
+    { id = "RUSTSEC-2025-0124", reason = "rand_os unmaintained, via rand 0.6 pulled by statistical; B-095 replaces statistical" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained, via keyring; B-095 removes keyring" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained, via keyring; B-095 removes keyring" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained, via keyring; B-095 removes keyring" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+# fuchsia-cprng (via statistical's rand 0.6) publishes no license field in its
+# manifest, which cargo-deny reports as a non-fatal warning; its LICENSE file
+# is BSD-3-Clause. The chain disappears when B-095 replaces statistical.
+
+[bans]
+# Duplicate-version cleanup belongs to B-208; gating it here would fail on
+# chains this task does not own.
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
