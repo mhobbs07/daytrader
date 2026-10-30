@@ -311,11 +311,7 @@ impl BacktestEngine {
                         .unwrap_or_default();
                     report.signals_generated += signals.len();
 
-                    for mut signal in signals {
-                        // The signal engine does not carry the symbol through
-                        // (known limitation); stamp the replay symbol on it.
-                        signal.symbol = candle.symbol.clone();
-
+                    for signal in signals {
                         // v1 is long-only: a sell with nothing open would be
                         // a short — count it and move on.
                         let has_open = lots.get(&symbol_key).is_some_and(|l| !l.is_empty());
