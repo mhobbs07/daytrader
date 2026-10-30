@@ -16,7 +16,7 @@ Last Updated: 2026-07-07 (backlog-completion sweep finished — see `plans/2026-
 
 | ID | Task | Status | Started | Branch | Notes |
 |----|------|--------|---------|--------|-------|
-| — | (none) | — | — | — | All in-flight work merged as of 2026-07-07 |
+| B-085 | Fix hardcoded "DEFAULT" signal symbol in the live signal path; derive from candle window, reject mixed-symbol windows, drop backtester stamp workaround | Done | 2026-10-30 | fix/signal-symbol-live-path | SignalEngine now tags signals with the candle window's symbol and returns SignalError::MixedSymbols for heterogeneous windows (new SignalError enum wraps PatternError); cache no longer dedups across symbols; backtest post-hoc symbol stamp removed |
 
 ---
 
